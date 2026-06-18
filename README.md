@@ -1,6 +1,6 @@
-# Sistema Samppel
+# Portal Samppel
 
-**Sistema Samppel** é um MVP real de sistema operacional comercial, de produção e expedição de embalagens personalizadas, totalmente estruturado e preparado para integração bidirecional em segundo plano com o **ERP Conta Azul**.
+**Portal Samppel** é um MVP real de sistema operacional comercial, de produção e expedição de embalagens personalizadas, totalmente estruturado e preparado para integração bidirecional em segundo plano com o **ERP Conta Azul**.
 
 O sistema foi arquitetado focando em **segurança de credenciais**, **isolamento de camadas** (UI, negócios, banco e integrações), **multi-empresa (multi-tenant)** e **controle de acesso granular** (Administrador, Comercial, Produção e Financeiro).
 
@@ -99,7 +99,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
 > [!TIP]
-> **Modo Sandbox / Sem Chaves**: Se você executar o projeto sem fornecer as chaves reais ou mantendo os placeholders padrão, o Sistema entrará automaticamente em **Modo Simulação**. Ele funcionará 100% de forma interativa usando dados fictícios locais (CRUD em memória), simulando chamadas da API da Conta Azul e registrando logs fictícios. Perfeito para testes offline rápidos!
+> **Modo Sandbox / Sem Chaves**: Se você executar o projeto sem fornecer as chaves reais ou mantendo os placeholders padrão, o Portal entrará automaticamente em **Modo Simulação**. Ele funcionará 100% de forma interativa usando dados fictícios locais (CRUD em memória), simulando chamadas da API da Conta Azul e registrando logs fictícios. Perfeito para testes offline rápidos!
 
 ### 4. Executar em Desenvolvimento
 ```bash
@@ -111,7 +111,7 @@ Abra o navegador em [http://localhost:3000](http://localhost:3000).
 
 ## 🔄 Fluxo de Sincronização em Segundo Plano (Background)
 
-O Sistema Samppel possui um mecanismo de fila resiliente a falhas temporárias na API da Conta Azul:
+O Portal Samppel possui um mecanismo de fila resiliente a falhas temporárias na API da Conta Azul:
 1. Toda alteração local de dados (criar cliente, atualizar status do pedido, conciliar financeiro) grava automaticamente um item na tabela `sync_queue` com o status `PENDING`.
 2. A rota `/api/sync/cron` atua como o processador da fila. Ela deve ser chamada em segundo plano (ex: a cada 5 ou 10 minutos).
 3. **Resolução de Dependências**: Se a fila tentar sincronizar um Pedido mas o Cliente vinculado ainda não foi sincronizado com o ERP, o processador detectará isso e sincronizará o Cliente primeiro, salvará seu ID da Conta Azul, e então prosseguirá com a sincronização do Pedido.
@@ -142,10 +142,10 @@ Para rodar a sincronização automática em segundo plano na Vercel, adicione um
 ```
 
 ### 3. Transição para o Domínio Próprio da Cliente
-Quando for migrar o sistema para o domínio definitivo da cliente (ex: `sistema.samppel.com.br`):
+Quando for migrar o sistema para o domínio definitivo da cliente (ex: `portal.samppel.com.br`):
 1. **No painel da Vercel**: Adicione o domínio próprio nas configurações de *Domains* e aponte os registros CNAME/ANAME no seu provedor de DNS conforme instruções da Vercel.
 2. **Nas variáveis de ambiente**:
-   - Atualize `NEXT_PUBLIC_APP_URL` para `https://sistema.samppel.com.br`.
-   - Atualize `CONTA_AZUL_REDIRECT_URI` para `https://sistema.samppel.com.br/api/auth/conta-azul/callback`.
+   - Atualize `NEXT_PUBLIC_APP_URL` para `https://portal.samppel.com.br`.
+   - Atualize `CONTA_AZUL_REDIRECT_URI` para `https://portal.samppel.com.br/api/auth/conta-azul/callback`.
 3. **No painel de desenvolvedor do Conta Azul**:
    - Atualize a URL de redirecionamento cadastrada no seu aplicativo para corresponder à nova URL de callback.

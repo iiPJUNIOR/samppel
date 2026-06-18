@@ -62,7 +62,7 @@ export default function LoginPage() {
 
         {/* Brand Name */}
         <h1 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '0.5rem', letterSpacing: '-0.02em' }}>
-          Sistema Samppel
+          Portal Samppel
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '2rem' }}>
           Sistema Comercial & Gestão de Produção de Embalagens Personalizadas
