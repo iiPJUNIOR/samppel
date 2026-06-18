@@ -16,10 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Portal Samppel | Sistema Comercial & Produção",
+  title: "Sistema Samppel | Sistema Comercial & Produção",
   description: "MVP de Sistema Operacional Comercial para Embalagens Personalizadas integrado ao ERP Conta Azul.",
-  keywords: "embalagens, conta azul, erp, portal samppel, vendas, expedição, produção",
-  authors: [{ name: "Portal Samppel Team" }]
+  keywords: "embalagens, conta azul, erp, sistema samppel, vendas, expedição, produção",
+  authors: [{ name: "Sistema Samppel Team" }]
 };
 
 export default function RootLayout({

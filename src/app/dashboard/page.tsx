@@ -192,7 +192,7 @@ export default function DashboardPage() {
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Dashboard</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Visão geral operacional e de faturamento do Portal Samppel.
+            Visão geral operacional e de faturamento do Sistema Samppel.
           </p>
         </div>
         <button onClick={fetchData} className="btn btn-secondary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
