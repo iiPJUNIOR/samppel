@@ -54,14 +54,19 @@
 }
 
 .navLink:hover {
-  background-color: var(--surface);
-  color: var(--sidebar-text);
+  background-color: var(--primary-hover);
+  color: var(--text-inverse) !important;
 }
 
 .active {
   background-color: var(--sidebar-active);
   color: var(--text-inverse) !important;
   box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.3);
+}
+
+.active:hover {
+  background-color: var(--primary-hover) !important;
+  color: var(--text-inverse) !important;
 }
 
 .profileBox {
