@@ -22,9 +22,9 @@
 
 :root, [data-theme="light"] {
   /* Color Tokens - Light Mode */
-  --primary: hsl(220, 95%, 50%);
-  --primary-hover: hsl(220, 95%, 42%);
-  --primary-rgb: 0, 97, 247;
+  --primary: hsl(354, 85%, 44%);
+  --primary-hover: hsl(354, 85%, 36%);
+  --primary-rgb: 208, 17, 32;
   --secondary: hsl(220, 15%, 40%);
   --secondary-hover: hsl(220, 15%, 30%);
   
@@ -32,7 +32,7 @@
   --sidebar-bg: hsl(220, 10%, 93%); /* Cinza claro empresarial */
   --sidebar-text: hsl(222, 47%, 12%);
   --sidebar-text-muted: hsl(220, 15%, 45%);
-  --sidebar-active: hsl(220, 95%, 50%);
+  --sidebar-active: hsl(354, 85%, 44%);
   
   --surface: hsl(0, 0%, 100%);
   --surface-hover: hsl(220, 20%, 98%);
@@ -77,10 +77,14 @@
   
   --border: hsl(222, 47%, 15%);
 
+  --primary: hsl(354, 85%, 52%);
+  --primary-hover: hsl(354, 85%, 44%);
+  --primary-rgb: 231, 34, 51;
+
   --sidebar-bg: hsl(222, 47%, 11%);
   --sidebar-text: hsl(210, 40%, 96%);
   --sidebar-text-muted: hsl(215, 20%, 65%);
-  --sidebar-active: hsl(217, 91%, 60%);
+  --sidebar-active: hsl(354, 85%, 52%);
   
   --success: hsl(142, 76%, 40%);
   --success-bg: rgba(16, 185, 129, 0.1);

@@ -46,12 +46,7 @@ export default function Sidebar() {
       icon: <Users size={18} />,
       allowedRoles: ['Administrador', 'Comercial', 'Financeiro']
     },
-    {
-      label: 'Fornecedores',
-      path: '/fornecedores',
-      icon: <Contact size={18} />,
-      allowedRoles: ['Administrador', 'Comercial']
-    },
+
     {
       label: 'Produtos / Estoque',
       path: '/produtos',
