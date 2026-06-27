@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import Link from 'next/link';
 import { 
   getContaAzulConfig, 
   updateContaAzulConfig, 
@@ -999,10 +1000,16 @@ export default function ConfiguracoesPage() {
 
       {/* DETAILED INTEGRATION LOGS */}
       <div className="card">
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Terminal size={18} style={{ color: 'var(--primary)' }} />
-          Histórico de Logs de Integração
-        </h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+            <Terminal size={18} style={{ color: 'var(--primary)' }} />
+            Histórico de Logs de Integração
+          </h3>
+          <Link href="/configuracoes/logs" className="btn btn-secondary" style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', fontSize: '0.8rem', padding: '0.375rem 0.75rem' }}>
+            <Terminal size={14} />
+            <span>Auditoria Completa & Filtros</span>
+          </Link>
+        </div>
         
         <div className="table-responsive" style={{ maxHeight: '400px' }}>
           <table className="table">

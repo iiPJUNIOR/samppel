@@ -131,7 +131,12 @@ export class ContaAzulService {
     }
 
     const { client_id, client_secret, access_token, refresh_token, expires_at } = config;
-    if (!client_id || !client_secret) {
+    
+    // Fallback para variáveis de ambiente
+    const clientIdVal = client_id || process.env.CONTA_AZUL_CLIENT_ID || '';
+    const clientSecretVal = client_secret || process.env.CONTA_AZUL_CLIENT_SECRET || '';
+    
+    if (!clientIdVal || !clientSecretVal) {
       throw new Error('Client_id e client_secret do Conta Azul sao obrigatorios.');
     }
 
@@ -153,7 +158,7 @@ export class ContaAzulService {
     }
 
     try {
-      const basicAuth = Buffer.from(`${client_id}:${client_secret}`).toString('base64');
+      const basicAuth = Buffer.from(`${clientIdVal}:${clientSecretVal}`).toString('base64');
       const response = await fetch(`${CONTA_AZUL_AUTH_URL}/token`, {
         method: 'POST',
         headers: {
@@ -521,7 +526,7 @@ export class ContaAzulService {
         });
         if (sellersRes.ok) {
           const sellers = await sellersRes.json();
-          const matched = sellers.find((s: any) => s.nome.toLowerCase() === order.seller_name.toLowerCase());
+          const matched = sellers.find((s: any) => s.nome?.toLowerCase() === order.seller_name?.toLowerCase());
           if (matched) {
             vendorId = matched.id;
           }
@@ -552,7 +557,7 @@ export class ContaAzulService {
           }
           apiItems.push({
             id_produto: caProdId || product.conta_azul_id,
-            quantidade: item.print_run,
+            quantidade: item.print_run || 1,
             valor_unitario: item.product?.price || product.price || 0,
             descricao: `Item: ${item.name}. Medidas: ${item.measure || ''}. Caixas: ${item.boxes_count || 0}.`
           });
@@ -560,8 +565,8 @@ export class ContaAzulService {
       } else {
         apiItems.push({
           id_produto: product.conta_azul_id,
-          quantidade: order.print_run,
-          valor_unitario: product.price,
+          quantidade: order.print_run || 1,
+          valor_unitario: product.price || 0,
           descricao: `Medidas: ${order.measure}. Caixas: ${order.boxes_count}.`
         });
       }
@@ -571,8 +576,8 @@ export class ContaAzulService {
         numero: saleNumber,
         data_venda: (order.order_date || new Date().toISOString()).split('T')[0],
         situacao: order.status === 'Pago' ? 'PAGO' : order.status === 'Faturado' ? 'FATURADO' : 'APROVADO',
-        observacoes: order.notes,
-        shipping_cost: order.freight_value,
+        observacoes: order.notes || '',
+        shipping_cost: order.freight_value || 0,
         vendedor: vendorId ? { id: vendorId } : undefined,
         itens: apiItems
       };
@@ -857,6 +862,7 @@ export class ContaAzulService {
 
     try {
       const token = await this.getValidAccessToken();
+      // Usar o endpoint oficial /v1/venda/busca com paginação no padrão da API v2 da Conta Azul
       const response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100`, {
         method: 'GET',
         headers: {
@@ -879,9 +885,10 @@ export class ContaAzulService {
       let updated = 0;
 
       for (const saleSummary of items) {
-        const situacaoNome = (saleSummary.situacao?.nome || '').toUpperCase();
-        if (situacaoNome === 'CANCELADO') continue;
+        const statusStr = (saleSummary.situacao?.nome || '').toUpperCase();
+        if (statusStr === 'CANCELADO') continue;
 
+        // Endpoint oficial /v1/venda/{id} da API v2 da Conta Azul
         const saleRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleSummary.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -891,6 +898,7 @@ export class ContaAzulService {
         }
         const saleDetail = await saleRes.json();
 
+        // Endpoint oficial /v1/venda/{id}/itens da API v2 da Conta Azul
         const itemsRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleSummary.id}/itens`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -904,15 +912,17 @@ export class ContaAzulService {
         if (saleItems.length === 0) continue;
 
         const mainItem = saleItems[0];
+        const mainItemCaId = mainItem.id_item;
 
         const clienteInfo = saleDetail.cliente;
         let customerId = '';
         if (clienteInfo) {
+          const clientUuid = clienteInfo.uuid || clienteInfo.id;
           const { data: existingCust } = await dbClient
             .from('customers')
             .select('id')
             .eq('tenant_id', this.tenantId)
-            .eq('conta_azul_id', clienteInfo.uuid)
+            .eq('conta_azul_id', clientUuid)
             .maybeSingle();
 
           if (existingCust) {
@@ -923,7 +933,7 @@ export class ContaAzulService {
               .insert([{
                 tenant_id: this.tenantId,
                 name: clienteInfo.nome || 'Cliente Importado',
-                conta_azul_id: clienteInfo.uuid,
+                conta_azul_id: clientUuid,
                 document: clienteInfo.documento || '',
                 email: '',
                 phone: '',
@@ -943,63 +953,66 @@ export class ContaAzulService {
         }
 
         let productId = '';
-        const { data: existingProd } = await dbClient
-          .from('products')
-          .select('id')
-          .eq('tenant_id', this.tenantId)
-          .eq('conta_azul_id', mainItem.id_item)
-          .maybeSingle();
-
-        if (existingProd) {
-          productId = existingProd.id;
-        } else {
-          const { data: newProd, error: prodErr } = await dbClient
+        if (mainItemCaId) {
+          const { data: existingProd } = await dbClient
             .from('products')
-            .insert([{
-              tenant_id: this.tenantId,
-              name: mainItem.nome || 'Produto Importado',
-              sku: (mainItem.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
-              description: mainItem.descricao || '',
-              price: mainItem.valor || 0,
-              stock_quantity: 0,
-              conta_azul_id: mainItem.id_item
-            }])
             .select('id')
-            .single();
+            .eq('tenant_id', this.tenantId)
+            .eq('conta_azul_id', mainItemCaId)
+            .maybeSingle();
 
-          if (prodErr || !newProd) {
-            console.error('Erro ao criar produto para pedido:', prodErr);
-            continue;
+          if (existingProd) {
+            productId = existingProd.id;
+          } else {
+            const { data: newProd, error: prodErr } = await dbClient
+              .from('products')
+              .insert([{
+                tenant_id: this.tenantId,
+                name: mainItem.nome || 'Produto Importado',
+                sku: (mainItem.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
+                description: mainItem.descricao || '',
+                price: mainItem.valor || 0,
+                stock_quantity: 0,
+                conta_azul_id: mainItemCaId
+              }])
+              .select('id')
+              .single();
+
+            if (prodErr || !newProd) {
+              console.error('Erro ao criar produto para pedido:', prodErr);
+              continue;
+            }
+            productId = newProd.id;
           }
-          productId = newProd.id;
         }
 
         let localStatus: any = 'A produzir';
-        if (situacaoNome === 'PAGO') {
+        if (statusStr === 'PAGO' || statusStr === 'QUITADO') {
           localStatus = 'Pago';
-        } else if (situacaoNome === 'FATURADO') {
+        } else if (statusStr === 'FATURADO') {
           localStatus = 'Faturado';
         }
 
         const sellerName = saleDetail.vendedor?.nome || 'Vendas Samppel';
 
         const condicao = saleDetail.venda?.condicao_pagamento;
-        const installmentsTotal = condicao?.parcelas?.length || 1;
+        const installments = condicao?.parcelas;
+        const installmentsTotal = installments?.length || 1;
         const installmentsPaid = localStatus === 'Pago' ? installmentsTotal : 0;
-        const firstPaymentDate = localStatus === 'Pago' && condicao?.parcelas?.[0]?.data_vencimento
-          ? condicao.parcelas[0].data_vencimento
+        const firstPaymentDate = localStatus === 'Pago' && installments?.[0]?.data_vencimento
+          ? installments[0].data_vencimento
           : null;
 
         let measure = '15x10x5 cm';
         let boxesCount = 1;
-        const desc = (mainItem.descricao || '').toLowerCase();
+        const mainItemDesc = (mainItem.descricao || '').toLowerCase();
         
-        const measureMatch = desc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
+        const measureMatch = mainItemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
         if (measureMatch && measureMatch[1]) {
           measure = measureMatch[1].trim();
         }
 
-        const boxesMatch = desc.match(/caixas?:\s*(\d+)/i);
+        const boxesMatch = mainItemDesc.match(/caixas?:\s*(\d+)/i);
         if (boxesMatch && boxesMatch[1]) {
           boxesCount = parseInt(boxesMatch[1], 10);
         }
@@ -1010,15 +1023,15 @@ export class ContaAzulService {
         if (resolvedShippingType === 'RETIRADA' || resolvedShippingType === 'LALAMOVE' || resolvedShippingType === 'MOTOBOY') {
           resolvedPackagingType = 'PACOTE';
         }
-        if (desc.includes('pacote')) {
+        if (mainItemDesc.includes('pacote')) {
           resolvedPackagingType = 'PACOTE';
-        } else if (desc.includes('caixa')) {
+        } else if (mainItemDesc.includes('caixa')) {
           resolvedPackagingType = 'CAIXA';
         }
 
         const orderPayload: any = {
           customer_id: customerId,
-          product_id: productId,
+          product_id: productId || null,
           pv_number: `PV-${saleDetail.venda?.numero || saleSummary.numero}`,
           art_name: mainItem.descricao || mainItem.nome || 'Arte Importada',
           seller_name: sellerName,
@@ -1076,17 +1089,33 @@ export class ContaAzulService {
           }
         }
 
-        // DESDOBRAMENTO: Limpar itens de pedido existentes para este pedido e inserir todos os itens da venda
-        await dbClient.from('order_items').delete().eq('order_id', orderId);
+        // DESDOBRAMENTO: Upsert de itens de pedido (por item_index) preservando progresso do Kanban e embalagens
+        const { data: existingLocalItems, error: localItemsError } = await dbClient
+          .from('order_items')
+          .select('id, item_index, status, production_sector, over_short_quantity, notes')
+          .eq('order_id', orderId);
+
+        if (localItemsError) {
+          console.error('Erro ao buscar itens locais do pedido:', localItemsError);
+          continue;
+        }
+
+        const existingItemsMap = new Map(existingLocalItems?.map(i => [i.item_index, i]) || []);
+        const processedIndexes = new Set<number>();
+        let itemIndexCounter = 1;
 
         for (const item of saleItems) {
+          const currentIdx = itemIndexCounter++;
+          processedIndexes.add(currentIdx);
+
           let itemProductId = null;
-          if (item.id_item) {
+          const itemCaId = item.product_id || item.product?.id || item.id_item;
+          if (itemCaId) {
             const { data: existingProd } = await dbClient
               .from('products')
               .select('id')
               .eq('tenant_id', this.tenantId)
-              .eq('conta_azul_id', item.id_item)
+              .eq('conta_azul_id', itemCaId)
               .maybeSingle();
 
             if (existingProd) {
@@ -1096,12 +1125,12 @@ export class ContaAzulService {
                 .from('products')
                 .insert([{
                   tenant_id: this.tenantId,
-                  name: item.nome || 'Produto Importado',
-                  sku: (item.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
-                  description: item.descricao || '',
-                  price: item.valor || 0,
+                  name: item.name || item.nome || 'Produto Importado',
+                  sku: (item.name || item.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
+                  description: item.description || item.descricao || '',
+                  price: item.value || item.valor || 0,
                   stock_quantity: 0,
-                  conta_azul_id: item.id_item
+                  conta_azul_id: itemCaId
                 }])
                 .select('id')
                 .single();
@@ -1114,7 +1143,7 @@ export class ContaAzulService {
 
           let itemMeasure = '15x10x5 cm';
           let itemBoxesCount = 1;
-          const itemDesc = (item.descricao || '').toLowerCase();
+          const itemDesc = (item.description || item.descricao || '').toLowerCase();
           
           const measureMatch = itemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
           if (measureMatch && measureMatch[1]) {
@@ -1127,10 +1156,11 @@ export class ContaAzulService {
           if (boxesMatch && boxesMatch[1]) {
             itemBoxesCount = parseInt(boxesMatch[1], 10);
           } else {
-            itemBoxesCount = item.quantidade && item.quantidade > 1000 ? Math.ceil(item.quantidade / 500) : 1;
+            const qty = item.quantity || item.quantidade || 1000;
+            itemBoxesCount = qty > 1000 ? Math.ceil(qty / 500) : 1;
           }
 
-          const itemType = this.getItemTypeFromName(item.nome || '');
+          const itemType = this.getItemTypeFromName(item.name || item.nome || '');
 
           let itemPackagingType: 'CAIXA' | 'PACOTE' = resolvedPackagingType;
           if (itemDesc.includes('pacote')) {
@@ -1139,25 +1169,60 @@ export class ContaAzulService {
             itemPackagingType = 'CAIXA';
           }
 
+          const localItem = existingItemsMap.get(currentIdx);
+
           const orderItemPayload = {
             tenant_id: this.tenantId,
             order_id: orderId,
             product_id: itemProductId,
             item_type: itemType,
-            name: item.nome || 'Item do Pedido',
+            name: item.name || item.nome || 'Item do Pedido',
             measure: itemMeasure,
-            print_run: item.quantidade || 1000,
+            print_run: item.quantity || item.quantidade || 1000,
             boxes_count: itemBoxesCount,
             packaging_type: itemPackagingType,
-            over_short_quantity: 0,
-            status: localStatus,
-            production_sector: itemType === 'SERVICO' ? 'Corte e Vinco' : 'Impressão',
-            notes: item.descricao || ''
+            notes: item.description || item.descricao || ''
           };
 
-          const { error: itemErr } = await dbClient.from('order_items').insert([orderItemPayload]);
-          if (itemErr) {
-            console.error('Erro ao inserir item de pedido desdobrado:', itemErr);
+          if (localItem) {
+            // Atualiza campos comerciais, preservando status, setor e quantidades locais
+            const { error: itemUpdateErr } = await dbClient
+              .from('order_items')
+              .update(orderItemPayload)
+              .eq('id', localItem.id);
+
+            if (itemUpdateErr) {
+              console.error('Erro ao atualizar item de pedido:', itemUpdateErr);
+            }
+          } else {
+            // Inserir novo item do pedido
+            const { error: itemInsertErr } = await dbClient
+              .from('order_items')
+              .insert([{
+                ...orderItemPayload,
+                over_short_quantity: 0,
+                status: localStatus,
+                production_sector: itemType === 'SERVICO' ? 'Corte e Vinco' : 'Impressão'
+              }]);
+
+            if (itemInsertErr) {
+              console.error('Erro ao inserir item de pedido desdobrado:', itemInsertErr);
+            }
+          }
+        }
+
+        // Deleta itens locais que não existem mais na Conta Azul
+        const itemsToDelete = [...existingItemsMap.keys()].filter(idx => !processedIndexes.has(idx));
+        if (itemsToDelete.length > 0) {
+          const idsToDelete = itemsToDelete.map(idx => existingItemsMap.get(idx)!.id);
+          const { error: deleteItemsErr } = await dbClient
+            .from('order_items')
+            .delete()
+            .eq('order_id', orderId)
+            .in('id', idsToDelete);
+
+          if (deleteItemsErr) {
+            console.error('Erro ao deletar itens de pedido removidos na Conta Azul:', deleteItemsErr);
           }
         }
       }
