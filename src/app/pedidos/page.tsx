@@ -117,6 +117,10 @@ export default function PedidosPage() {
   const [adjustmentAction, setAdjustmentAction] = useState<any>('CREDITO_PROXIMO_PEDIDO');
   const [adjustmentNotes, setAdjustmentNotes] = useState('');
 
+  // Estados do Modal de Detalhes do Card
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState<any>(null);
+
   // Estados dos Campos do Formulário
   const [formCustomer, setFormCustomer] = useState('');
   const [formProduct, setFormProduct] = useState('');
@@ -857,6 +861,12 @@ export default function PedidosPage() {
     setIsModalOpen(true);
   };
 
+  // Abrir modal de Detalhes do Card (read-only, rápido)
+  const handleOpenDetail = (item: any) => {
+    setDetailItem(item);
+    setIsDetailModalOpen(true);
+  };
+
   // Abrir modal para Edição
   const handleOpenEdit = (entity: any) => {
     setModalType('edit');
@@ -1534,13 +1544,19 @@ export default function PedidosPage() {
                           className={recentlyMovedItemId === item.id ? 'pulse-glow' : ''}
                           draggable={true}
                           onDragStart={(e) => handleDragStart(e, item)}
+                          onClick={(e) => {
+                            // Abre detalhes apenas em clique direto (não durante drag)
+                            const target = e.target as HTMLElement;
+                            const isButton = target.closest('button');
+                            if (!isButton) handleOpenDetail(item);
+                          }}
                           style={{
                             backgroundColor: 'var(--surface)',
                             border: '1px solid var(--border)',
                             borderLeft: `3px solid ${stage.color}`,
                             borderRadius: 'var(--radius-sm)',
                             padding: '0.5rem',
-                            cursor: 'grab',
+                            cursor: 'pointer',
                             boxShadow: 'var(--shadow-sm)',
                             display: 'flex',
                             flexDirection: 'column',
@@ -2870,6 +2886,328 @@ export default function PedidosPage() {
           </div>
         </div>
       )}
+
+      {/* ========================================
+          MODAL DE DETALHES DO CARD
+          ======================================== */}
+      {isDetailModalOpen && detailItem && (() => {
+        const order = detailItem.order || {};
+        const customer = order.customer || {};
+        const currentStage = stages.find(s => s.id === detailItem.stage_id);
+        const itemAdjs = adjustments.filter(a => a.order_item_id === detailItem.id);
+        const deadline = parseDeadlineFromNotes(detailItem.notes || order.notes);
+        const isOverdue = deadline ? deadline.getTime() < Date.now() && currentStage?.name !== 'Concluído' : false;
+        const freightStyle = getFreightBadgeStyle(order.shipping_type);
+        const isReleased = !!order.first_payment_date;
+
+        return (
+          <div
+            onClick={(e) => { if (e.target === e.currentTarget) setIsDetailModalOpen(false); }}
+            style={{
+              position: 'fixed', inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex: 1100, padding: '1rem',
+              backdropFilter: 'blur(4px)'
+            }}
+          >
+            <div style={{
+              backgroundColor: 'var(--surface)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-premium)',
+              width: '100%',
+              maxWidth: '600px',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              animation: 'fadeIn 0.2s ease',
+              overflow: 'hidden'
+            }}>
+
+              {/* Header */}
+              <div style={{
+                padding: '1.1rem 1.5rem',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                background: `linear-gradient(135deg, ${currentStage?.color || 'var(--primary)'}18 0%, transparent 100%)`,
+                borderLeft: `4px solid ${currentStage?.color || 'var(--primary)'}`
+              }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)' }}>
+                      {detailItem.friendly_id || '---'}
+                    </span>
+                    {currentStage && (
+                      <span style={{
+                        fontSize: '0.7rem', fontWeight: 700,
+                        backgroundColor: currentStage.color + '22',
+                        color: currentStage.color,
+                        padding: '2px 8px', borderRadius: '99px',
+                        border: `1px solid ${currentStage.color}55`
+                      }}>
+                        {currentStage.name}
+                      </span>
+                    )}
+                    {isOverdue && (
+                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700 }}>⚠️ Atrasado</span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    🎨 {detailItem.name} · {customer.name || 'Cliente'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button
+                    onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                  >
+                    <Edit3 size={12} /> Editar
+                  </button>
+                  <button
+                    onClick={() => setIsDetailModalOpen(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: 'var(--text-muted)', lineHeight: 1 }}
+                  >
+                    &times;
+                  </button>
+                </div>
+              </div>
+
+              {/* Corpo com scroll */}
+              <div style={{ overflowY: 'auto', flex: 1, padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+
+                {/* Seção: Informações do Pedido */}
+                <section>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ width: '3px', height: '12px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
+                    Pedido
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    {[
+                      { label: 'PV', value: order.pv_number || '—' },
+                      { label: 'OP', value: order.op_number || '—' },
+                      { label: 'Arte', value: detailItem.name || '—' },
+                      { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
+                      { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
+                      { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+
+                {/* Seção: Cliente */}
+                <section>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ width: '3px', height: '12px', backgroundColor: '#a855f7', borderRadius: '2px', display: 'inline-block' }} />
+                    Cliente
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    {[
+                      { label: 'Nome', value: customer.name || '—' },
+                      { label: 'CNPJ/CPF', value: customer.cnpj || customer.cpf || '—' },
+                      { label: 'E-mail', value: customer.email || '—' },
+                      { label: 'Telefone', value: customer.phone || '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500, wordBreak: 'break-all' }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+
+                {/* Seção: Produção */}
+                <section>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ width: '3px', height: '12px', backgroundColor: '#3b82f6', borderRadius: '2px', display: 'inline-block' }} />
+                    Produção
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                    {[
+                      { label: 'Tiragem', value: (detailItem.print_run || 0).toLocaleString('pt-BR') + ' un' },
+                      { label: 'Caixas', value: `${detailItem.boxes_count || 0} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` },
+                      { label: 'Medida', value: detailItem.measure || '—' },
+                      { label: 'Setor', value: detailItem.production_sector || '—' },
+                      { label: 'Localização', value: detailItem.physical_location || 'Salão' },
+                      { label: 'Sobra/Falta', value: detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : detailItem.over_short_quantity < 0 ? `${detailItem.over_short_quantity}` : '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+
+                {/* Seção: Financeiro */}
+                <section>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ width: '3px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px', display: 'inline-block' }} />
+                    Financeiro
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                      padding: '0.3rem 0.75rem', borderRadius: '99px',
+                      backgroundColor: isReleased ? 'hsla(142, 76.2%, 36.3%, 0.12)' : 'hsla(0, 84.2%, 60.2%, 0.10)',
+                      border: `1px solid ${isReleased ? 'hsla(142, 76.2%, 36.3%, 0.35)' : 'hsla(0, 84.2%, 60.2%, 0.3)'}`,
+                      color: isReleased ? 'hsl(142, 76.2%, 36.3%)' : 'hsl(0, 84.2%, 50%)',
+                      fontSize: '0.75rem', fontWeight: 700
+                    }}>
+                      {isReleased ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+                      {isReleased ? 'Liberado para Produção' : 'Aguardando Pagamento'}
+                    </div>
+                    {isReleased && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Sinal: {new Date(order.first_payment_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginTop: '0.6rem' }}>
+                    {[
+                      { label: 'Frete', value: freightStyle.label },
+                      { label: 'Parcelas', value: `${order.installments_paid || 0}/${order.installments_total || 1} pagas` },
+                      { label: 'Frete (R$)', value: order.freight_value ? `R$ ${Number(order.freight_value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Seção: Prazo */}
+                {deadline && (
+                  <>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+                    <section>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ width: '3px', height: '12px', backgroundColor: isOverdue ? 'var(--danger)' : '#f97316', borderRadius: '2px', display: 'inline-block' }} />
+                        Prazo
+                      </div>
+                      <div style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                        padding: '0.4rem 0.85rem', borderRadius: 'var(--radius-sm)',
+                        backgroundColor: isOverdue ? 'hsla(0, 84.2%, 60.2%, 0.08)' : 'hsla(38, 92.7%, 50.2%, 0.08)',
+                        border: `1px solid ${isOverdue ? 'hsla(0, 84.2%, 60.2%, 0.3)' : 'hsla(38, 92.7%, 50.2%, 0.3)'}`,
+                        color: isOverdue ? 'var(--danger)' : 'hsl(38, 92.7%, 45%)',
+                        fontSize: '0.82rem', fontWeight: 700
+                      }}>
+                        📅 {deadline.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                        {isOverdue && <span>(ATRASADO)</span>}
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {/* Seção: Observações */}
+                {(detailItem.notes || order.notes || order.internal_notes) && (
+                  <>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+                    <section>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ width: '3px', height: '12px', backgroundColor: '#eab308', borderRadius: '2px', display: 'inline-block' }} />
+                        Observações
+                      </div>
+                      {detailItem.notes && (
+                        <div style={{ marginBottom: '0.4rem' }}>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Item</span>
+                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{detailItem.notes}</p>
+                        </div>
+                      )}
+                      {(order.notes && !detailItem.notes) && (
+                        <div style={{ marginBottom: '0.4rem' }}>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Pedido</span>
+                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.notes}</p>
+                        </div>
+                      )}
+                      {order.internal_notes && (
+                        <div style={{ borderLeft: '3px solid var(--primary)', paddingLeft: '0.6rem', marginTop: '0.4rem' }}>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>🔒 Anotações Internas</span>
+                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.internal_notes}</p>
+                        </div>
+                      )}
+                    </section>
+                  </>
+                )}
+
+                {/* Seção: Conferências (se houver) */}
+                {itemAdjs.length > 0 && (
+                  <>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+                    <section>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ width: '3px', height: '12px', backgroundColor: 'hsl(168, 83.8%, 38.6%)', borderRadius: '2px', display: 'inline-block' }} />
+                        Conferência de Tiragem ({itemAdjs.length})
+                      </div>
+                      {itemAdjs.map((adj: any, i: number) => (
+                        <div key={i} style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)',
+                          backgroundColor: adj.difference_quantity >= 0 ? 'hsla(142, 76.2%, 36.3%, 0.08)' : 'hsla(0, 84.2%, 60.2%, 0.08)',
+                          border: `1px solid ${adj.difference_quantity >= 0 ? 'hsla(142, 76.2%, 36.3%, 0.25)' : 'hsla(0, 84.2%, 60.2%, 0.25)'}`,
+                          marginBottom: '0.35rem',
+                          fontSize: '0.78rem'
+                        }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Pedido: {adj.ordered_quantity?.toLocaleString('pt-BR')} → Produzido: {adj.produced_quantity?.toLocaleString('pt-BR')}</span>
+                          <span style={{ fontWeight: 700, color: adj.difference_quantity >= 0 ? 'hsl(142, 76.2%, 36.3%)' : 'hsl(0, 84.2%, 50%)' }}>
+                            {adj.difference_quantity >= 0 ? '+' : ''}{adj.difference_quantity?.toLocaleString('pt-BR')} un
+                          </span>
+                        </div>
+                      ))}
+                    </section>
+                  </>
+                )}
+
+              </div>
+
+              {/* Footer */}
+              <div style={{
+                padding: '0.85rem 1.5rem',
+                borderTop: '1px solid var(--border)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                backgroundColor: 'var(--background)'
+              }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  ID: {detailItem.id?.substring(0, 8)}… · Tipo: {detailItem.item_type}
+                </span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => setIsDetailModalOpen(false)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.78rem' }}
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                  >
+                    <Edit3 size={13} /> Editar Pedido
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 }
