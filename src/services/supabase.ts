@@ -935,18 +935,32 @@ export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-
     return { data: itemsWithJoins, error: null };
   }
 
-  let query = getDbClient()
-    .from('order_items')
-    .select('*, product:products(*), stage:order_stages(*), machine:production_machines(*), handling_team:handling_teams(*), order:orders(*, customer:customers(*))')
-    .eq('tenant_id', tenantId);
+  // Query base sem tabelas opcionais (production_machines / handling_teams podem não existir ainda)
+  const baseSelect = '*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))';
+  const fullSelect = '*, product:products(*), stage:order_stages(*), machine:production_machines(*), handling_team:handling_teams(*), order:orders(*, customer:customers(*))';
 
-  if (orderId) {
-    query = query.eq('order_id', orderId);
+  const buildQuery = (selectStr: string) => {
+    let q = getDbClient()
+      .from('order_items')
+      .select(selectStr)
+      .eq('tenant_id', tenantId);
+    if (orderId) {
+      q = q.eq('order_id', orderId);
+    }
+    return q.order('created_at', { ascending: false });
+  };
+
+  // Tenta com JOINs completos primeiro; se falhar (tabelas ausentes), tenta sem eles
+  let { data, error } = await buildQuery(fullSelect);
+  if (error && (error.code === 'PGRST200' || error.message?.includes('relationship') || error.message?.includes('schema cache'))) {
+    const fallback = await buildQuery(baseSelect);
+    data = fallback.data;
+    error = fallback.error;
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false });
   return { data, error };
 }
+
 
 export async function createOrderItem(item: Omit<OrderItem, 'id' | 'item_index' | 'friendly_id' | 'created_at' | 'updated_at'>) {
   const tenantId = item.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
@@ -1013,12 +1027,27 @@ export async function updateOrderItem(id: string, updates: Partial<OrderItem>) {
     return { data: updated, error: null };
   }
 
-  const { data, error } = await getDbClient()
+  const fullSelectForUpdate = '*, product:products(*), stage:order_stages(*), machine:production_machines(*), handling_team:handling_teams(*)';
+  const baseSelectForUpdate = '*, product:products(*), stage:order_stages(*)';
+
+  let { data, error } = await getDbClient()
     .from('order_items')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
-    .select('*, product:products(*), stage:order_stages(*), machine:production_machines(*), handling_team:handling_teams(*)')
+    .select(fullSelectForUpdate)
     .single();
+
+  // Fallback se tabelas opcionais não existem ainda
+  if (error && (error.code === 'PGRST200' || error.message?.includes('relationship') || error.message?.includes('schema cache'))) {
+    const fallback = await getDbClient()
+      .from('order_items')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select(baseSelectForUpdate)
+      .single();
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   return { data, error };
 }

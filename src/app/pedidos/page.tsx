@@ -152,7 +152,9 @@ export default function PedidosPage() {
     setLoading(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const [ordersRes, customersRes, productsRes, stagesRes, itemsRes, adjRes, credRes, stockRes, finRes, machRes, teamsRes, pmtRes, settingsRes] = await Promise.all([
+
+      // Chamadas críticas — se qualquer uma falhar, o Kanban não carrega
+      const [ordersRes, customersRes, productsRes, stagesRes, itemsRes, adjRes, credRes, stockRes, finRes] = await Promise.all([
         getOrders(tenantId),
         getCustomers(tenantId),
         getProducts(tenantId),
@@ -162,11 +164,8 @@ export default function PedidosPage() {
         getCustomerStockCredits(undefined, 'ATIVO', tenantId),
         getCustomerProductStock(undefined, undefined, tenantId),
         getFinancialTransactions(tenantId),
-        getProductionMachines(tenantId),
-        getHandlingTeams(tenantId),
-        getPackagingMaterialTypes(tenantId),
-        getPackagingSettings(tenantId)
       ]);
+
       setOrders(ordersRes.data || []);
       setCustomers(customersRes.data || []);
       setProducts(productsRes.data || []);
@@ -176,16 +175,24 @@ export default function PedidosPage() {
       setCustomerCredits(credRes.data || []);
       setCustomerStocks(stockRes.data || []);
       setFinancialTransactions(finRes.data || []);
-      setProductionMachines(machRes.data || []);
-      setHandlingTeams(teamsRes.data || []);
-      setPackagingMaterialTypes(pmtRes.data || []);
-      setPackagingSettings(settingsRes.data || null);
+
+      // Chamadas opcionais — tabelas que podem não existir ainda (migração pendente)
+      const [machResult, teamsResult, pmtResult, settingsResult] = await Promise.allSettled([
+        getProductionMachines(tenantId),
+        getHandlingTeams(tenantId),
+        getPackagingMaterialTypes(tenantId),
+        getPackagingSettings(tenantId)
+      ]);
+
+      if (machResult.status === 'fulfilled') setProductionMachines(machResult.value.data || []);
+      if (teamsResult.status === 'fulfilled') setHandlingTeams(teamsResult.value.data || []);
+      if (pmtResult.status === 'fulfilled') setPackagingMaterialTypes(pmtResult.value.data || []);
+      if (settingsResult.status === 'fulfilled') setPackagingSettings(settingsResult.value.data || null);
 
       // Pré-carregar cache de quais itens já têm embalagem registrada
       const itemIds: string[] = (itemsRes.data || []).map((i: any) => i.id);
       if (itemIds.length > 0) {
         const packaged = new Set<string>();
-        // Para performance, buscamos em paralelo; fallback silencioso em caso de erro
         await Promise.allSettled(itemIds.map(async (id) => {
           const { data } = await getOrderItemPackaging(id);
           if (data && data.length > 0) packaged.add(id);
@@ -198,6 +205,7 @@ export default function PedidosPage() {
       setLoading(false);
     }
   };
+
 
   const fetchUserPermissions = async () => {
     if (!user || !supabase) return;
