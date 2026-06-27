@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { 
   getOrders, 
@@ -120,6 +120,19 @@ export default function PedidosPage() {
   // Estados do Modal de Detalhes do Card
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [detailItem, setDetailItem] = useState<any>(null);
+
+  // Estados do Modal de Autorização de Retrocesso de Etapa
+  const [isRevertAuthModalOpen, setIsRevertAuthModalOpen] = useState(false);
+  const [pendingRevertItem, setPendingRevertItem] = useState<any>(null);
+  const [pendingRevertTargetStageId, setPendingRevertTargetStageId] = useState('');
+  const [revertAuthEmail, setRevertAuthEmail] = useState('');
+  const [revertAuthPassword, setRevertAuthPassword] = useState('');
+  const [revertAuthJustification, setRevertAuthJustification] = useState('');
+  const [revertAuthLoading, setRevertAuthLoading] = useState(false);
+  const [revertAuthError, setRevertAuthError] = useState('');
+
+  // Ref que indica que o próximo move foi aprovado pelo Admin (bypass da verificação)
+  const adminMoveOverride = useRef(false);
 
   // Estados dos Campos do Formulário
   const [formCustomer, setFormCustomer] = useState('');
@@ -315,6 +328,46 @@ export default function PedidosPage() {
     if (!targetStage) return;
 
     const currentStage = stages.find(s => s.id === currentStageId);
+
+    // ---------------------------------------------------------------
+    // REGRA DE RETROCESSO: Janela de 10 minutos + aprovação do Admin
+    // ---------------------------------------------------------------
+    if (!adminMoveOverride.current) {
+      const currentSeq: number = (currentStage as any)?.sequence ?? 999;
+      const targetSeq: number = (targetStage as any)?.sequence ?? 0;
+      const isMovingBackward = targetSeq < currentSeq;
+
+      if (isMovingBackward) {
+        const WINDOW_MS = 10 * 60 * 1000; // 10 minutos
+        let lastMove: any = null;
+        try {
+          const raw = localStorage.getItem(`samppel_mv_${item.id}`);
+          if (raw) lastMove = JSON.parse(raw);
+        } catch {}
+
+        const withinGrace =
+          lastMove &&
+          lastMove.movedByUserId === user?.id &&
+          lastMove.fromStageId === targetStageId &&
+          Date.now() - lastMove.movedAt < WINDOW_MS;
+
+        if (!withinGrace) {
+          // Exige aprovação do Administrador
+          setPendingRevertItem(item);
+          setPendingRevertTargetStageId(targetStageId);
+          setRevertAuthEmail('');
+          setRevertAuthPassword('');
+          setRevertAuthJustification('');
+          setRevertAuthError('');
+          setIsRevertAuthModalOpen(true);
+          return;
+        }
+      }
+    }
+    // Limpar o override após usar
+    adminMoveOverride.current = false;
+    // ---------------------------------------------------------------
+
     const isMovingFromPackagingToExpedition = currentStage?.name === 'Em revisão' && targetStage.name === 'Expedição';
 
     if (isMovingFromPackagingToExpedition) {
@@ -487,6 +540,17 @@ export default function PedidosPage() {
           await logSectorTransition(item.id, targetSector, item.machine_id, tenantId);
         }
         await fetchAllData();
+
+        // Gravar o move no localStorage para a janela de retrocesso de 10 min
+        try {
+          localStorage.setItem(`samppel_mv_${item.id}`, JSON.stringify({
+            fromStageId: currentStageId,
+            toStageId: targetStageId,
+            movedAt: Date.now(),
+            movedByUserId: user?.id
+          }));
+        } catch {}
+
         setRecentlyMovedItemId(item.id);
         setTimeout(() => {
           setRecentlyMovedItemId(null);
@@ -865,6 +929,86 @@ export default function PedidosPage() {
   const handleOpenDetail = (item: any) => {
     setDetailItem(item);
     setIsDetailModalOpen(true);
+  };
+
+  // Submeter aprovacao do Administrador para retrocesso de etapa
+  const handleRevertAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRevertAuthLoading(true);
+    setRevertAuthError('');
+
+    try {
+      if (!revertAuthJustification.trim()) {
+        setRevertAuthError('A justificativa é obrigatória.');
+        return;
+      }
+
+      // Validar credenciais do Admin via cliente Supabase temporário
+      // (sem afetar a sessão atual do usuário logado)
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+      const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      });
+
+      const { data: authData, error: authError } = await tempClient.auth.signInWithPassword({
+        email: revertAuthEmail.trim(),
+        password: revertAuthPassword
+      });
+
+      if (authError || !authData?.user) {
+        setRevertAuthError('Credenciais inválidas. Verifique o e-mail e senha do Administrador.');
+        return;
+      }
+
+      // Verificar se o usuário autenticado é Administrador
+      const { data: adminProfile, error: profileError } = await tempClient
+        .from('profiles')
+        .select('role, full_name')
+        .eq('id', authData.user.id)
+        .single();
+
+      // Encerrar sessão temporária imediatamente após a verificação
+      await tempClient.auth.signOut();
+
+      if (profileError || !adminProfile) {
+        setRevertAuthError('Não foi possível verificar o perfil do Administrador.');
+        return;
+      }
+
+      if (adminProfile.role !== 'Administrador') {
+        setRevertAuthError(`O usuário "${adminProfile.full_name}" não tem perfil de Administrador.`);
+        return;
+      }
+
+      // Aprovado! Ativar override e executar o retrocesso
+      adminMoveOverride.current = true;
+      setIsRevertAuthModalOpen(false);
+
+      // Pequena pausa para o estado fechar o modal antes de iniciar o move
+      await new Promise(r => setTimeout(r, 80));
+
+      if (pendingRevertItem && pendingRevertTargetStageId) {
+        await moveOrderItemToStage(pendingRevertItem, pendingRevertTargetStageId);
+      }
+
+      setPendingRevertItem(null);
+      setPendingRevertTargetStageId('');
+      setRevertAuthEmail('');
+      setRevertAuthPassword('');
+      setRevertAuthJustification('');
+    } catch (err: any) {
+      console.error('Erro ao validar credenciais do Admin:', err);
+      setRevertAuthError('Erro inesperado ao validar credenciais.');
+    } finally {
+      setRevertAuthLoading(false);
+    }
   };
 
   // Abrir modal para Edição
@@ -2886,6 +3030,221 @@ export default function PedidosPage() {
           </div>
         </div>
       )}
+
+      {/* ========================================
+          MODAL DE AUTORIZAÇÃO DE RETROCESSO
+          ======================================== */}
+      {isRevertAuthModalOpen && pendingRevertItem && (() => {
+        const item = pendingRevertItem;
+        const order = item.order || {};
+        const fromStage = stages.find(s => s.id === item.stage_id);
+        const toStage  = stages.find(s => s.id === pendingRevertTargetStageId);
+
+        // Calcular tempo desde o último move
+        let movedAgoText = '';
+        try {
+          const raw = localStorage.getItem(`samppel_mv_${item.id}`);
+          if (raw) {
+            const rec = JSON.parse(raw);
+            const diffMin = Math.floor((Date.now() - rec.movedAt) / 60000);
+            movedAgoText = diffMin < 60
+              ? `${diffMin} minuto${diffMin !== 1 ? 's' : ''} atrás`
+              : `${Math.floor(diffMin / 60)}h ${diffMin % 60}min atrás`;
+          }
+        } catch {}
+
+        return (
+          <div
+            onClick={(e) => { if (e.target === e.currentTarget) setIsRevertAuthModalOpen(false); }}
+            style={{
+              position: 'fixed', inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.65)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex: 1200, padding: '1rem',
+              backdropFilter: 'blur(6px)'
+            }}
+          >
+            <div style={{
+              backgroundColor: 'var(--surface)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid var(--border)',
+              borderTop: '3px solid hsl(38, 92.7%, 50.2%)',
+              boxShadow: 'var(--shadow-premium)',
+              width: '100%',
+              maxWidth: '480px',
+              animation: 'fadeIn 0.2s ease',
+              overflow: 'hidden'
+            }}>
+
+              {/* Header */}
+              <div style={{
+                padding: '1.1rem 1.5rem',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                background: 'hsla(38, 92.7%, 50.2%, 0.06)'
+              }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '1.1rem' }}>🔒</span>
+                    <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text)' }}>
+                      Autorização Necessária
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    A janela de 10 minutos para desfazer este move expirou
+                  </span>
+                </div>
+                <button
+                  onClick={() => setIsRevertAuthModalOpen(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)', marginTop: '-2px' }}
+                >
+                  &times;
+                </button>
+              </div>
+
+              {/* Contexto do movimento */}
+              <div style={{
+                margin: '1.1rem 1.5rem 0',
+                padding: '0.75rem 1rem',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.35rem'
+              }}>
+                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Movimento solicitado
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--text)' }}>
+                    {item.friendly_id || '---'}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>—</span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text)' }}>
+                    🎨 {item.name}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', flexWrap: 'wrap', marginTop: '2px' }}>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: '99px', fontWeight: 700, fontSize: '0.72rem',
+                    backgroundColor: (fromStage?.color || '#888') + '22',
+                    color: fromStage?.color || 'var(--text)',
+                    border: `1px solid ${(fromStage?.color || '#888')}55`
+                  }}>
+                    {fromStage?.name || 'Etapa atual'}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)' }}>→</span>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: '99px', fontWeight: 700, fontSize: '0.72rem',
+                    backgroundColor: (toStage?.color || '#888') + '22',
+                    color: toStage?.color || 'var(--text)',
+                    border: `1px solid ${(toStage?.color || '#888')}55`
+                  }}>
+                    {toStage?.name || 'Etapa destino'}
+                  </span>
+                  {movedAgoText && (
+                    <span style={{ fontSize: '0.68rem', color: 'hsl(38, 92.7%, 45%)', fontWeight: 600 }}>
+                      · Movido {movedAgoText}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Formulário de autorização */}
+              <form onSubmit={handleRevertAuthSubmit} style={{ padding: '1rem 1.5rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+                  Para retroceder um card além da janela de 10 minutos, um <strong>Administrador</strong> precisa confirmar a ação com suas credenciais.
+                </p>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>E-mail do Administrador</label>
+                  <input
+                    className="form-input"
+                    type="email"
+                    placeholder="admin@empresa.com"
+                    value={revertAuthEmail}
+                    onChange={e => setRevertAuthEmail(e.target.value)}
+                    required
+                    autoComplete="off"
+                    style={{ fontSize: '0.85rem' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Senha do Administrador</label>
+                  <input
+                    className="form-input"
+                    type="password"
+                    placeholder="••••••••"
+                    value={revertAuthPassword}
+                    onChange={e => setRevertAuthPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                    style={{ fontSize: '0.85rem' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>
+                    Justificativa <span style={{ color: 'var(--danger)' }}>*</span>
+                  </label>
+                  <textarea
+                    className="form-textarea"
+                    placeholder="Descreva o motivo do retrocesso manual..."
+                    value={revertAuthJustification}
+                    onChange={e => setRevertAuthJustification(e.target.value)}
+                    required
+                    rows={2}
+                    style={{ fontSize: '0.82rem', resize: 'none' }}
+                  />
+                </div>
+
+                {revertAuthError && (
+                  <div style={{
+                    padding: '0.6rem 0.85rem',
+                    backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.08)',
+                    border: '1px solid hsla(0, 84.2%, 60.2%, 0.3)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'hsl(0, 84.2%, 50%)',
+                    fontSize: '0.78rem',
+                    fontWeight: 600
+                  }}>
+                    ⚠ {revertAuthError}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', paddingTop: '0.25rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsRevertAuthModalOpen(false)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem' }}
+                    disabled={revertAuthLoading}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: '130px', justifyContent: 'center' }}
+                    disabled={revertAuthLoading}
+                  >
+                    {revertAuthLoading ? (
+                      <><Loader2 size={13} className="spin" /> Verificando...</>
+                    ) : (
+                      <><CheckCircle2 size={13} /> Aprovar Retrocesso</>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ========================================
           MODAL DE DETALHES DO CARD
