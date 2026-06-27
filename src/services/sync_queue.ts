@@ -1,11 +1,7 @@
 import { supabase, supabaseAdmin, getCustomers, getProducts, getOrders, getSuppliers, getFinancialTransactions, updateCustomer, updateProduct, updateOrder, updateSupplier, reconcileTransaction } from './supabase';
 import { ContaAzulService } from './conta_azul';
 
-const isMockMode = 
-  !process.env.NEXT_PUBLIC_SUPABASE_URL || 
-  process.env.NEXT_PUBLIC_SUPABASE_URL.includes('your-project-id') || 
-  process.env.NEXT_PUBLIC_SUPABASE_URL.includes('d3b07384-d113-4ec8-a5c6-e91bc4ff99e0') ||
-  (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').includes('placeholder');
+const isMockMode = false;
 
 /**
  * Service to process background sync queues for Conta Azul integration.
@@ -29,7 +25,7 @@ export class SyncQueueService {
       // In mock mode, we use supabase.ts local queue helper simulation
       // We will read from our mock queue
       const { data } = await import('./supabase').then(m => m.getSyncQueue(this.tenantId));
-      queueItems = (data || []).filter(item => 
+      queueItems = (data || []).filter((item: any) => 
         (item.status === 'PENDING' || item.status === 'FAILED') && 
         item.retry_count < item.max_retries &&
         new Date(item.next_retry_at).getTime() <= Date.now()
@@ -234,7 +230,7 @@ export class SyncQueueService {
       const mod = await import('./supabase');
       // Simulated write
       const queueList = await mod.getSyncQueue(this.tenantId).then(r => r.data || []);
-      const item = queueList.find(q => q.id === queueId);
+      const item = queueList.find((q: any) => q.id === queueId);
       if (item) {
         Object.assign(item, updates);
       }

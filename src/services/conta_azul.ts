@@ -1,7 +1,7 @@
-import { getContaAzulConfig, updateContaAzulConfig, createIntegrationLog } from './supabase';
+import { getContaAzulConfig, updateContaAzulConfig, createIntegrationLog, supabase, supabaseAdmin } from './supabase';
 
-const CONTA_AZUL_API_URL = 'https://api.contaazul.com';
-const CONTA_AZUL_AUTH_URL = 'https://app.contaazul.com/oauth2';
+const CONTA_AZUL_API_URL = 'https://api-v2.contaazul.com';
+const CONTA_AZUL_AUTH_URL = 'https://auth.contaazul.com/oauth2';
 
 interface ContaAzulTokens {
   access_token: string;
@@ -10,7 +10,8 @@ interface ContaAzulTokens {
 }
 
 /**
- * Service to handle all Conta Azul ERP REST API integration and OAuth 2.0 flows.
+ * Servico para gerenciar a integracao com a API REST do Conta Azul e fluxos de OAuth 2.0.
+ * Utiliza apenas a API v2 da Conta Azul.
  */
 export class ContaAzulService {
   private tenantId: string;
@@ -20,28 +21,27 @@ export class ContaAzulService {
   }
 
   /**
-   * Generates the Conta Azul OAuth 2.0 authorization URL
+   * Gera a URL de autorizacao OAuth 2.0 do Conta Azul
    */
   public async getAuthorizationUrl(clientId: string, redirectUri: string, state: string): Promise<string> {
-    const scope = encodeURIComponent('sales customers products financial contacts');
-    return `${CONTA_AZUL_AUTH_URL}/authorize?redirect_uri=${encodeURIComponent(
+    const scope = encodeURIComponent('openid profile aws.cognito.signin.user.admin');
+    return `https://auth.contaazul.com/login?redirect_uri=${encodeURIComponent(
       redirectUri
     )}&client_id=${clientId}&scope=${scope}&state=${state}&response_type=code`;
   }
 
   /**
-   * Exchanges authorization code for Access and Refresh Tokens
+   * Troca o codigo de autorizacao por Tokens de Acesso e Atualizacao
    */
   public async exchangeCode(code: string, clientId: string, clientSecret: string, redirectUri: string): Promise<ContaAzulTokens> {
-    const isMock = clientId.includes('placeholder') || clientSecret.includes('placeholder');
+    const isMock = false;
     
-    // Create audit log for token exchange
     await createIntegrationLog(
       'OAUTH_CODE_EXCHANGE',
       isMock ? 'SUCCESS' : 'PENDING_RETRY',
       { client_id: clientId, redirect_uri: redirectUri },
       null,
-      isMock ? 'Mock token generated.' : 'Requesting authorization token...',
+      isMock ? 'Token simulado gerado.' : 'Solicitando token de autorizacao...',
       this.tenantId
     );
 
@@ -49,7 +49,7 @@ export class ContaAzulService {
       const tokens: ContaAzulTokens = {
         access_token: `mock_access_${Math.random().toString(36).substring(2)}`,
         refresh_token: `mock_refresh_${Math.random().toString(36).substring(2)}`,
-        expires_at: new Date(Date.now() + 3600 * 1000).toISOString() // 1 hour
+        expires_at: new Date(Date.now() + 3600 * 1000).toISOString()
       };
 
       await updateContaAzulConfig({
@@ -69,18 +69,18 @@ export class ContaAzulService {
         method: 'POST',
         headers: {
           'Authorization': `Basic ${basicAuth}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: JSON.stringify({
+        body: new URLSearchParams({
           grant_type: 'authorization_code',
           redirect_uri: redirectUri,
           code
-        })
+        }).toString()
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Conta Azul exchange error: ${response.status} - ${errorText}`);
+        throw new Error(`Erro na troca de codigo Conta Azul: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
@@ -90,7 +90,6 @@ export class ContaAzulService {
         expires_at: new Date(Date.now() + data.expires_in * 1000).toISOString()
       };
 
-      // Save credentials in database
       await updateContaAzulConfig({
         client_id: clientId,
         client_secret: clientSecret,
@@ -115,7 +114,7 @@ export class ContaAzulService {
         'ERROR',
         { client_id: clientId },
         null,
-        error.message || 'Token exchange failed',
+        error.message || 'Falha na troca de codigo',
         this.tenantId
       );
       throw error;
@@ -123,29 +122,28 @@ export class ContaAzulService {
   }
 
   /**
-   * Gets a valid access token. Refreshes if expired or close to expiration.
+   * Obtem um token de acesso valido. Atualiza se estiver expirado.
    */
   private async getValidAccessToken(): Promise<string> {
     const { data: config, error } = await getContaAzulConfig(this.tenantId);
     if (error || !config) {
-      throw new Error('Conta Azul integration is not configured.');
+      throw new Error('Integracao com Conta Azul nao configurada.');
     }
 
     const { client_id, client_secret, access_token, refresh_token, expires_at } = config;
     if (!client_id || !client_secret) {
-      throw new Error('Conta Azul client_id and client_secret are required.');
+      throw new Error('Client_id e client_secret do Conta Azul sao obrigatorios.');
     }
 
-    const isMock = client_id.includes('placeholder') || client_secret.includes('placeholder');
+    const isMock = false;
     if (isMock) {
       return access_token || 'mock_access_token';
     }
 
     if (!access_token || !refresh_token) {
-      throw new Error('Conta Azul is not authenticated (missing tokens).');
+      throw new Error('Conta Azul nao autenticado (tokens ausentes).');
     }
 
-    // Check if token is expired or expires in next 5 minutes
     const expiresAtMs = expires_at ? new Date(expires_at).getTime() : 0;
     const nowMs = Date.now();
     const isExpired = expiresAtMs - nowMs < 5 * 60 * 1000;
@@ -154,28 +152,27 @@ export class ContaAzulService {
       return access_token;
     }
 
-    // Refresh token
     try {
       const basicAuth = Buffer.from(`${client_id}:${client_secret}`).toString('base64');
       const response = await fetch(`${CONTA_AZUL_AUTH_URL}/token`, {
         method: 'POST',
         headers: {
           'Authorization': `Basic ${basicAuth}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: JSON.stringify({
+        body: new URLSearchParams({
           grant_type: 'refresh_token',
           refresh_token
-        })
+        }).toString()
       });
 
       if (!response.ok) {
-        throw new Error(`Token refresh failed: ${response.statusText}`);
+        throw new Error(`Falha ao atualizar token: ${response.statusText}`);
       }
 
       const data = await response.json();
       const newAccessToken = data.access_token;
-      const newRefreshToken = data.refresh_token || refresh_token; // may return new refresh token
+      const newRefreshToken = data.refresh_token || refresh_token;
       const newExpiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
 
       await updateContaAzulConfig({
@@ -200,7 +197,7 @@ export class ContaAzulService {
         'ERROR',
         null,
         null,
-        err.message || 'Token refresh failed',
+        err.message || 'Falha ao atualizar token',
         this.tenantId
       );
       throw err;
@@ -208,50 +205,49 @@ export class ContaAzulService {
   }
 
   /**
-   * Synchronize Customer to Conta Azul
+   * Sincroniza Cliente para o Conta Azul (v2 /pessoas)
    */
   public async syncCustomer(customer: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = !config || config.client_id.includes('placeholder');
+    const isMock = false;
 
     await createIntegrationLog(
       'SYNC_CUSTOMER',
       isMock ? 'SUCCESS' : 'PENDING_RETRY',
       customer,
       null,
-      isMock ? 'Running sync in mock mode...' : 'Calling Conta Azul customer endpoint...',
+      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de pessoas do Conta Azul...',
       this.tenantId
     );
 
     if (isMock) {
-      // Simulate API latency
       await new Promise(resolve => setTimeout(resolve, 500));
       return customer.conta_azul_id || `ca_cust_${Math.random().toString(36).substring(2, 8)}`;
     }
 
     try {
       const token = await this.getValidAccessToken();
+      const documentClean = customer.document ? customer.document.replace(/\D/g, '') : '';
       const payload = {
-        name: customer.name,
-        company_name: customer.name,
+        nome: customer.name,
         email: customer.email,
-        phone: customer.phone,
-        document: customer.document, // CPF/CNPJ
-        address: customer.address ? {
-          street: customer.address.split(',')[0] || customer.address,
-          number: '',
-          complement: '',
-          neighborhood: '',
-          zip_code: '',
-          city: '',
-          state: ''
+        telefone: customer.phone,
+        documento: documentClean,
+        tipo_pessoa: documentClean.length === 11 ? 'FISICA' : 'JURIDICA',
+        perfis: ['CLIENTE'],
+        endereco: customer.address ? {
+          logradouro: customer.address.split(',')[0] || customer.address,
+          numero: '',
+          complemento: '',
+          bairro: '',
+          cep: '',
+          cidade: null
         } : undefined
       };
 
       let response;
       if (customer.conta_azul_id) {
-        // Update
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/customers/${customer.conta_azul_id}`, {
+        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${customer.conta_azul_id}`, {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -260,8 +256,7 @@ export class ContaAzulService {
           body: JSON.stringify(payload)
         });
       } else {
-        // Create
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/customers`, {
+        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -273,7 +268,7 @@ export class ContaAzulService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Conta Azul API Customer error: ${response.status} - ${errorText}`);
+        throw new Error(`Erro na API Conta Azul de Pessoas (Cliente): ${response.status} - ${errorText}`);
       }
 
       const resData = await response.json();
@@ -295,7 +290,7 @@ export class ContaAzulService {
         'ERROR',
         customer,
         null,
-        err.message || 'Customer sync failed',
+        err.message || 'Falha na sincronizacao do cliente',
         this.tenantId
       );
       throw err;
@@ -303,18 +298,18 @@ export class ContaAzulService {
   }
 
   /**
-   * Synchronize Supplier to Conta Azul (treated as general Contacts in Conta Azul schema)
+   * Sincroniza Fornecedor para o Conta Azul (v2 /pessoas)
    */
   public async syncSupplier(supplier: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = !config || config.client_id.includes('placeholder');
+    const isMock = false;
 
     await createIntegrationLog(
       'SYNC_SUPPLIER',
       isMock ? 'SUCCESS' : 'PENDING_RETRY',
       supplier,
       null,
-      isMock ? 'Running sync in mock mode...' : 'Calling Conta Azul contacts endpoint...',
+      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de pessoas do Conta Azul...',
       this.tenantId
     );
 
@@ -325,18 +320,27 @@ export class ContaAzulService {
 
     try {
       const token = await this.getValidAccessToken();
+      const documentClean = supplier.document ? supplier.document.replace(/\D/g, '') : '';
       const payload = {
-        name: supplier.name,
+        nome: supplier.name,
         email: supplier.email,
-        phone: supplier.phone,
-        document: supplier.document,
-        supplier: true, // Specific flag for supplier
-        address: supplier.address ? { street: supplier.address } : undefined
+        telefone: supplier.phone,
+        documento: documentClean,
+        tipo_pessoa: documentClean.length === 11 ? 'FISICA' : 'JURIDICA',
+        perfis: ['FORNECEDOR'],
+        endereco: supplier.address ? {
+          logradouro: supplier.address.split(',')[0] || supplier.address,
+          numero: '',
+          complemento: '',
+          bairro: '',
+          cep: '',
+          cidade: null
+        } : undefined
       };
 
       let response;
       if (supplier.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/customers/${supplier.conta_azul_id}`, { // Conta Azul handles suppliers under /customers endpoint with supplier=true flag
+        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${supplier.conta_azul_id}`, {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -345,7 +349,7 @@ export class ContaAzulService {
           body: JSON.stringify(payload)
         });
       } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/customers`, {
+        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -356,7 +360,8 @@ export class ContaAzulService {
       }
 
       if (!response.ok) {
-        throw new Error(`Supplier sync API error: ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`Erro na API Conta Azul de Pessoas (Fornecedor): ${response.status} - ${errorText}`);
       }
 
       const resData = await response.json();
@@ -378,7 +383,7 @@ export class ContaAzulService {
         'ERROR',
         supplier,
         null,
-        err.message || 'Supplier sync failed',
+        err.message || 'Falha na sincronizacao do fornecedor',
         this.tenantId
       );
       throw err;
@@ -386,18 +391,18 @@ export class ContaAzulService {
   }
 
   /**
-   * Synchronize Product to Conta Azul
+   * Sincroniza Produto para o Conta Azul
    */
   public async syncProduct(product: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = !config || config.client_id.includes('placeholder');
+    const isMock = false;
 
     await createIntegrationLog(
       'SYNC_PRODUCT',
       isMock ? 'SUCCESS' : 'PENDING_RETRY',
       product,
       null,
-      isMock ? 'Running sync in mock mode...' : 'Calling Conta Azul products endpoint...',
+      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de produtos...',
       this.tenantId
     );
 
@@ -413,8 +418,7 @@ export class ContaAzulService {
         code: product.sku,
         value: product.price,
         description: product.description,
-        cost: product.price * 0.4, // Assume mock cost
-        // stock item fields
+        cost: product.price * 0.4,
         stock_control: true,
         stock_quantity: product.stock_quantity
       };
@@ -441,7 +445,7 @@ export class ContaAzulService {
       }
 
       if (!response.ok) {
-        throw new Error(`Product sync API error: ${response.statusText}`);
+        throw new Error(`Erro na API Conta Azul de Produtos: ${response.statusText}`);
       }
 
       const resData = await response.json();
@@ -463,7 +467,7 @@ export class ContaAzulService {
         'ERROR',
         product,
         null,
-        err.message || 'Product sync failed',
+        err.message || 'Falha na sincronizacao do produto',
         this.tenantId
       );
       throw err;
@@ -471,18 +475,18 @@ export class ContaAzulService {
   }
 
   /**
-   * Synchronize Order/Sale to Conta Azul
+   * Sincroniza Pedido/Venda para o Conta Azul (v2 /venda)
    */
   public async syncOrder(order: any, customer: any, product: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = !config || config.client_id.includes('placeholder');
+    const isMock = false;
 
     await createIntegrationLog(
       'SYNC_ORDER',
       isMock ? 'SUCCESS' : 'PENDING_RETRY',
       { order_id: order.id, customer_id: customer?.id, product_id: product?.id },
       null,
-      isMock ? 'Running sync in mock mode...' : 'Calling Conta Azul sales endpoint...',
+      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de vendas do Conta Azul...',
       this.tenantId
     );
 
@@ -495,13 +499,12 @@ export class ContaAzulService {
       const token = await this.getValidAccessToken();
 
       if (!customer?.conta_azul_id) {
-        throw new Error('Customer must be synced with Conta Azul first.');
+        throw new Error('O cliente precisa estar sincronizado com o Conta Azul antes.');
       }
       if (!product?.conta_azul_id) {
-        throw new Error('Product must be synced with Conta Azul first.');
+        throw new Error('O produto precisa estar sincronizado com o Conta Azul antes.');
       }
 
-      // Format Conta Azul Sale object
       let saleNumber = order.order_number;
       if (order.pv_number) {
         const numericPart = order.pv_number.replace(/\D/g, '');
@@ -510,27 +513,73 @@ export class ContaAzulService {
         }
       }
 
-      const payload = {
-        number: saleNumber,
-        emission_date: order.order_date || new Date().toISOString(),
-        status: order.status === 'Pago' ? 'COMMITTED' : 'APPROVED', // APPROVED, COMMITTED, CANCELLED
-        customer_id: customer.conta_azul_id,
-        seller: order.seller_name,
-        notes: order.notes,
-        shipping_cost: order.freight_value,
-        items: [
-          {
-            product_id: product.conta_azul_id,
-            quantity: order.print_run, // Tiragem as total items
-            value: product.price, // Unit price
-            description: `Medidas: ${order.measure}. Caixas: ${order.boxes_count}.`
+      // Tenta obter o vendedor correspondente no Conta Azul
+      let vendorId = undefined;
+      try {
+        const sellersRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/vendedores`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (sellersRes.ok) {
+          const sellers = await sellersRes.json();
+          const matched = sellers.find((s: any) => s.nome.toLowerCase() === order.seller_name.toLowerCase());
+          if (matched) {
+            vendorId = matched.id;
           }
-        ]
+        }
+      } catch (e) {
+        console.error('Erro ao buscar vendedores:', e);
+      }
+
+      // DESDOBRAMENTO: Consultar os itens de pedido locais no Supabase para compor a payload da Conta Azul
+      const dbClient = supabaseAdmin || supabase;
+      if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
+      
+      const { data: localItems } = await dbClient
+        .from('order_items')
+        .select('*, product:products(conta_azul_id, price)')
+        .eq('order_id', order.id)
+        .order('item_index', { ascending: true });
+
+      const apiItems = [];
+      if (localItems && localItems.length > 0) {
+        for (const item of localItems) {
+          let caProdId = item.product?.conta_azul_id;
+          if (!caProdId && item.product_id) {
+            const { data: prodFull } = await dbClient.from('products').select('*').eq('id', item.product_id).single();
+            if (prodFull) {
+              caProdId = await this.syncProduct(prodFull);
+            }
+          }
+          apiItems.push({
+            id_produto: caProdId || product.conta_azul_id,
+            quantidade: item.print_run,
+            valor_unitario: item.product?.price || product.price || 0,
+            descricao: `Item: ${item.name}. Medidas: ${item.measure || ''}. Caixas: ${item.boxes_count || 0}.`
+          });
+        }
+      } else {
+        apiItems.push({
+          id_produto: product.conta_azul_id,
+          quantidade: order.print_run,
+          valor_unitario: product.price,
+          descricao: `Medidas: ${order.measure}. Caixas: ${order.boxes_count}.`
+        });
+      }
+
+      const payload = {
+        id_cliente: customer.conta_azul_id,
+        numero: saleNumber,
+        data_venda: (order.order_date || new Date().toISOString()).split('T')[0],
+        situacao: order.status === 'Pago' ? 'PAGO' : order.status === 'Faturado' ? 'FATURADO' : 'APROVADO',
+        observacoes: order.notes,
+        shipping_cost: order.freight_value,
+        vendedor: vendorId ? { id: vendorId } : undefined,
+        itens: apiItems
       };
 
       let response;
       if (order.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/sales/${order.conta_azul_id}`, {
+        response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${order.conta_azul_id}`, {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -539,7 +588,7 @@ export class ContaAzulService {
           body: JSON.stringify(payload)
         });
       } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/sales`, {
+        response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -550,7 +599,8 @@ export class ContaAzulService {
       }
 
       if (!response.ok) {
-        throw new Error(`Order sync API error: ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`Erro na API Conta Azul de Vendas: ${response.status} - ${errorText}`);
       }
 
       const resData = await response.json();
@@ -572,7 +622,7 @@ export class ContaAzulService {
         'ERROR',
         order,
         null,
-        err.message || 'Order sync failed',
+        err.message || 'Falha na sincronizacao do pedido',
         this.tenantId
       );
       throw err;
@@ -580,18 +630,18 @@ export class ContaAzulService {
   }
 
   /**
-   * Synchronize Financial Transaction to Conta Azul
+   * Sincroniza Transacao Financeira para o Conta Azul
    */
   public async syncFinancial(financial: any, order: any = null): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = !config || config.client_id.includes('placeholder');
+    const isMock = false;
 
     await createIntegrationLog(
       'SYNC_FINANCIAL',
       isMock ? 'SUCCESS' : 'PENDING_RETRY',
       financial,
       null,
-      isMock ? 'Running sync in mock mode...' : 'Calling Conta Azul financial endpoint...',
+      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint financeiro do Conta Azul...',
       this.tenantId
     );
 
@@ -602,8 +652,6 @@ export class ContaAzulService {
 
     try {
       const token = await this.getValidAccessToken();
-      
-      // Select API path based on income (RECEITA) or expense (DESPESA)
       const isIncome = financial.type === 'RECEITA';
       const endpoint = isIncome ? 'receivables' : 'payables';
 
@@ -611,7 +659,7 @@ export class ContaAzulService {
         due_date: financial.due_date,
         value: financial.amount,
         description: financial.description,
-        category_id: isIncome ? 'receita-venda' : 'despesa-insumo', // Simplified category
+        category_id: isIncome ? 'receita-venda' : 'despesa-insumo',
         payment_date: financial.payment_date,
         received: financial.status === 'CONCILIADO',
         paid: financial.status === 'CONCILIADO',
@@ -640,7 +688,7 @@ export class ContaAzulService {
       }
 
       if (!response.ok) {
-        throw new Error(`Financial sync API error: ${response.statusText}`);
+        throw new Error(`Erro na API Conta Azul Financeira: ${response.statusText}`);
       }
 
       const resData = await response.json();
@@ -662,11 +710,526 @@ export class ContaAzulService {
         'ERROR',
         financial,
         null,
-        err.message || 'Financial sync failed',
+        err.message || 'Falha na sincronizacao financeira',
         this.tenantId
       );
       throw err;
     }
+  }
+
+  /**
+   * Importa clientes do Conta Azul para o banco local (v2 /pessoas)
+   */
+  public async importCustomers(): Promise<{ imported: number; updated: number }> {
+    const { data: config } = await getContaAzulConfig(this.tenantId);
+    const isMock = false;
+
+    if (isMock) {
+      return { imported: 3, updated: 0 };
+    }
+
+    try {
+      const token = await this.getValidAccessToken();
+      const response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas?tamanho_pagina=100`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Erro ao buscar pessoas do Conta Azul: ${response.status} - ${errText}`);
+      }
+
+      const resData = await response.json();
+      const items = resData.items || [];
+      
+      const dbClient = supabaseAdmin || supabase;
+      if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
+
+      let imported = 0;
+      let updated = 0;
+
+      for (const pessoa of items) {
+        const isCliente = (pessoa.perfis || []).includes('Cliente');
+        if (!isCliente) continue;
+
+        const document = pessoa.documento || pessoa.cnpj || pessoa.cpf || '';
+        
+        let query = dbClient
+          .from('customers')
+          .select('id')
+          .eq('tenant_id', this.tenantId);
+        
+        if (pessoa.id && document) {
+          query = query.or(`conta_azul_id.eq.${pessoa.id},document.eq.${document}`);
+        } else if (pessoa.id) {
+          query = query.eq('conta_azul_id', pessoa.id);
+        } else if (document) {
+          query = query.eq('document', document);
+        } else {
+          continue;
+        }
+
+        const { data: existing, error: findError } = await query.maybeSingle();
+        if (findError) console.error('Erro ao buscar cliente existente:', findError);
+
+        let addressStr = '';
+        const addr = pessoa.endereco || pessoa.address;
+        if (addr) {
+          const parts = [
+            addr.logradouro || addr.street,
+            addr.numero || addr.number,
+            addr.complemento || addr.complement,
+            addr.bairro || addr.neighborhood,
+            addr.cidade?.nome || addr.city,
+            addr.cidade?.uf || addr.state
+          ].filter(Boolean);
+          addressStr = parts.join(', ');
+        }
+
+        const payload: any = {
+          name: pessoa.nome || pessoa.razao_social || '',
+          email: pessoa.email || '',
+          phone: pessoa.telefone || pessoa.celular || '',
+          document: document,
+          address: addressStr,
+          conta_azul_id: pessoa.id
+        };
+
+        if (existing) {
+          const { error } = await dbClient
+            .from('customers')
+            .update(payload)
+            .eq('id', existing.id);
+          if (error) {
+            console.error('Erro ao atualizar cliente:', error);
+          } else {
+            updated++;
+          }
+        } else {
+          const { error } = await dbClient
+            .from('customers')
+            .insert([{ tenant_id: this.tenantId, ...payload }]);
+          if (error) {
+            console.error('Erro ao inserir cliente:', error);
+          } else {
+            imported++;
+          }
+        }
+      }
+
+      await createIntegrationLog(
+        'IMPORT_CUSTOMERS',
+        'SUCCESS',
+        { count: items.length },
+        { imported, updated },
+        null,
+        this.tenantId
+      );
+
+      return { imported, updated };
+    } catch (err: any) {
+      console.error('Erro ao importar clientes:', err);
+      await createIntegrationLog(
+        'IMPORT_CUSTOMERS',
+        'ERROR',
+        null,
+        null,
+        err.message || 'Falha ao importar clientes',
+        this.tenantId
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
+   */
+  public async importOrders(): Promise<{ imported: number; updated: number }> {
+    const { data: config } = await getContaAzulConfig(this.tenantId);
+    const isMock = false;
+
+    if (isMock) {
+      return { imported: 2, updated: 0 };
+    }
+
+    try {
+      const token = await this.getValidAccessToken();
+      const response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Erro ao buscar vendas do Conta Azul: ${response.status} - ${errText}`);
+      }
+
+      const resData = await response.json();
+      const items = resData.itens || [];
+
+      const dbClient = supabaseAdmin || supabase;
+      if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
+
+      let imported = 0;
+      let updated = 0;
+
+      for (const saleSummary of items) {
+        const situacaoNome = (saleSummary.situacao?.nome || '').toUpperCase();
+        if (situacaoNome === 'CANCELADO') continue;
+
+        const saleRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleSummary.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!saleRes.ok) {
+          console.error(`Erro ao buscar detalhes da venda ${saleSummary.id}`);
+          continue;
+        }
+        const saleDetail = await saleRes.json();
+
+        const itemsRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleSummary.id}/itens`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!itemsRes.ok) {
+          console.error(`Erro ao buscar itens da venda ${saleSummary.id}`);
+          continue;
+        }
+        const itemsData = await itemsRes.json();
+        const saleItems = itemsData.itens || [];
+
+        if (saleItems.length === 0) continue;
+
+        const mainItem = saleItems[0];
+
+        const clienteInfo = saleDetail.cliente;
+        let customerId = '';
+        if (clienteInfo) {
+          const { data: existingCust } = await dbClient
+            .from('customers')
+            .select('id')
+            .eq('tenant_id', this.tenantId)
+            .eq('conta_azul_id', clienteInfo.uuid)
+            .maybeSingle();
+
+          if (existingCust) {
+            customerId = existingCust.id;
+          } else {
+            const { data: newCust, error: custErr } = await dbClient
+              .from('customers')
+              .insert([{
+                tenant_id: this.tenantId,
+                name: clienteInfo.nome || 'Cliente Importado',
+                conta_azul_id: clienteInfo.uuid,
+                document: clienteInfo.documento || '',
+                email: '',
+                phone: '',
+                address: ''
+              }])
+              .select('id')
+              .single();
+
+            if (custErr || !newCust) {
+              console.error('Erro ao criar cliente para pedido:', custErr);
+              continue;
+            }
+            customerId = newCust.id;
+          }
+        } else {
+          continue;
+        }
+
+        let productId = '';
+        const { data: existingProd } = await dbClient
+          .from('products')
+          .select('id')
+          .eq('tenant_id', this.tenantId)
+          .eq('conta_azul_id', mainItem.id_item)
+          .maybeSingle();
+
+        if (existingProd) {
+          productId = existingProd.id;
+        } else {
+          const { data: newProd, error: prodErr } = await dbClient
+            .from('products')
+            .insert([{
+              tenant_id: this.tenantId,
+              name: mainItem.nome || 'Produto Importado',
+              sku: (mainItem.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
+              description: mainItem.descricao || '',
+              price: mainItem.valor || 0,
+              stock_quantity: 0,
+              conta_azul_id: mainItem.id_item
+            }])
+            .select('id')
+            .single();
+
+          if (prodErr || !newProd) {
+            console.error('Erro ao criar produto para pedido:', prodErr);
+            continue;
+          }
+          productId = newProd.id;
+        }
+
+        let localStatus: any = 'A produzir';
+        if (situacaoNome === 'PAGO') {
+          localStatus = 'Pago';
+        } else if (situacaoNome === 'FATURADO') {
+          localStatus = 'Faturado';
+        }
+
+        const sellerName = saleDetail.vendedor?.nome || 'Vendas Samppel';
+
+        const condicao = saleDetail.venda?.condicao_pagamento;
+        const installmentsTotal = condicao?.parcelas?.length || 1;
+        const installmentsPaid = localStatus === 'Pago' ? installmentsTotal : 0;
+        const firstPaymentDate = localStatus === 'Pago' && condicao?.parcelas?.[0]?.data_vencimento
+          ? condicao.parcelas[0].data_vencimento
+          : null;
+
+        let measure = '15x10x5 cm';
+        let boxesCount = 1;
+        const desc = (mainItem.descricao || '').toLowerCase();
+        
+        const measureMatch = desc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
+        if (measureMatch && measureMatch[1]) {
+          measure = measureMatch[1].trim();
+        }
+
+        const boxesMatch = desc.match(/caixas?:\s*(\d+)/i);
+        if (boxesMatch && boxesMatch[1]) {
+          boxesCount = parseInt(boxesMatch[1], 10);
+        }
+
+        const resolvedShippingType = this.parseShippingType(saleDetail);
+        
+        let resolvedPackagingType: 'CAIXA' | 'PACOTE' = 'CAIXA';
+        if (resolvedShippingType === 'RETIRADA' || resolvedShippingType === 'LALAMOVE' || resolvedShippingType === 'MOTOBOY') {
+          resolvedPackagingType = 'PACOTE';
+        }
+        if (desc.includes('pacote')) {
+          resolvedPackagingType = 'PACOTE';
+        } else if (desc.includes('caixa')) {
+          resolvedPackagingType = 'CAIXA';
+        }
+
+        const orderPayload: any = {
+          customer_id: customerId,
+          product_id: productId,
+          pv_number: `PV-${saleDetail.venda?.numero || saleSummary.numero}`,
+          art_name: mainItem.descricao || mainItem.nome || 'Arte Importada',
+          seller_name: sellerName,
+          measure: measure,
+          print_run: mainItem.quantidade || 1000,
+          boxes_count: boxesCount,
+          packaging_type: resolvedPackagingType,
+          freight_value: saleDetail.venda?.composicao_valor?.frete || 0,
+          shipping_type: resolvedShippingType,
+          installments_total: installmentsTotal,
+          installments_paid: installmentsPaid,
+          first_payment_date: firstPaymentDate,
+          status: localStatus,
+          production_sector: 'Impressão',
+          notes: saleDetail.venda?.observacoes || '',
+          order_date: saleSummary.criado_em || new Date().toISOString(),
+          conta_azul_id: saleSummary.id
+        };
+
+        let orderId = '';
+
+        const { data: existingOrder } = await dbClient
+          .from('orders')
+          .select('id')
+          .eq('tenant_id', this.tenantId)
+          .eq('conta_azul_id', saleSummary.id)
+          .maybeSingle();
+
+        if (existingOrder) {
+          const { error: updateErr } = await dbClient
+            .from('orders')
+            .update(orderPayload)
+            .eq('id', existingOrder.id);
+
+          if (updateErr) {
+            console.error('Erro ao atualizar pedido:', updateErr);
+            continue;
+          } else {
+            updated++;
+            orderId = existingOrder.id;
+          }
+        } else {
+          const { data: newOrder, error: insertErr } = await dbClient
+            .from('orders')
+            .insert([{ tenant_id: this.tenantId, ...orderPayload }])
+            .select('id')
+            .single();
+
+          if (insertErr || !newOrder) {
+            console.error('Erro ao inserir pedido:', insertErr);
+            continue;
+          } else {
+            imported++;
+            orderId = newOrder.id;
+          }
+        }
+
+        // DESDOBRAMENTO: Limpar itens de pedido existentes para este pedido e inserir todos os itens da venda
+        await dbClient.from('order_items').delete().eq('order_id', orderId);
+
+        for (const item of saleItems) {
+          let itemProductId = null;
+          if (item.id_item) {
+            const { data: existingProd } = await dbClient
+              .from('products')
+              .select('id')
+              .eq('tenant_id', this.tenantId)
+              .eq('conta_azul_id', item.id_item)
+              .maybeSingle();
+
+            if (existingProd) {
+              itemProductId = existingProd.id;
+            } else {
+              const { data: newProd, error: prodErr } = await dbClient
+                .from('products')
+                .insert([{
+                  tenant_id: this.tenantId,
+                  name: item.nome || 'Produto Importado',
+                  sku: (item.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
+                  description: item.descricao || '',
+                  price: item.valor || 0,
+                  stock_quantity: 0,
+                  conta_azul_id: item.id_item
+                }])
+                .select('id')
+                .single();
+
+              if (!prodErr && newProd) {
+                itemProductId = newProd.id;
+              }
+            }
+          }
+
+          let itemMeasure = '15x10x5 cm';
+          let itemBoxesCount = 1;
+          const itemDesc = (item.descricao || '').toLowerCase();
+          
+          const measureMatch = itemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
+          if (measureMatch && measureMatch[1]) {
+            itemMeasure = measureMatch[1].trim();
+          } else {
+            itemMeasure = measure; // Fallback para medida do pedido principal
+          }
+
+          const boxesMatch = itemDesc.match(/caixas?:\s*(\d+)/i);
+          if (boxesMatch && boxesMatch[1]) {
+            itemBoxesCount = parseInt(boxesMatch[1], 10);
+          } else {
+            itemBoxesCount = item.quantidade && item.quantidade > 1000 ? Math.ceil(item.quantidade / 500) : 1;
+          }
+
+          const itemType = this.getItemTypeFromName(item.nome || '');
+
+          let itemPackagingType: 'CAIXA' | 'PACOTE' = resolvedPackagingType;
+          if (itemDesc.includes('pacote')) {
+            itemPackagingType = 'PACOTE';
+          } else if (itemDesc.includes('caixa')) {
+            itemPackagingType = 'CAIXA';
+          }
+
+          const orderItemPayload = {
+            tenant_id: this.tenantId,
+            order_id: orderId,
+            product_id: itemProductId,
+            item_type: itemType,
+            name: item.nome || 'Item do Pedido',
+            measure: itemMeasure,
+            print_run: item.quantidade || 1000,
+            boxes_count: itemBoxesCount,
+            packaging_type: itemPackagingType,
+            over_short_quantity: 0,
+            status: localStatus,
+            production_sector: itemType === 'SERVICO' ? 'Corte e Vinco' : 'Impressão',
+            notes: item.descricao || ''
+          };
+
+          const { error: itemErr } = await dbClient.from('order_items').insert([orderItemPayload]);
+          if (itemErr) {
+            console.error('Erro ao inserir item de pedido desdobrado:', itemErr);
+          }
+        }
+      }
+
+      await createIntegrationLog(
+        'IMPORT_ORDERS',
+        'SUCCESS',
+        { count: items.length },
+        { imported, updated },
+        null,
+        this.tenantId
+      );
+
+      return { imported, updated };
+    } catch (err: any) {
+      console.error('Erro ao importar pedidos:', err);
+      await createIntegrationLog(
+        'IMPORT_ORDERS',
+        'ERROR',
+        null,
+        null,
+        err.message || 'Falha ao importar pedidos',
+        this.tenantId
+      );
+      throw err;
+    }
+  }
+
+  private getItemTypeFromName(name: string): 'PRODUTO' | 'SERVICO' {
+    const lower = name.toLowerCase();
+    if (
+      lower.includes('serviço') ||
+      lower.includes('refile') ||
+      lower.includes('guilhotina') ||
+      lower.includes('corte') ||
+      lower.includes('colagem') ||
+      lower.includes('acréscimo') ||
+      lower.includes('taxa') ||
+      lower.includes('frete') ||
+      lower.includes('fundo') ||
+      lower.includes('montagem')
+    ) {
+      return 'SERVICO';
+    }
+    return 'PRODUTO';
+  }
+
+  private parseShippingType(saleDetail: any): 'RETIRADA' | 'ENTREGA_PROPRIA' | 'TRANSPORTADORA' | 'LALAMOVE' | 'MOTOBOY' | 'TRANSPORTADORA_LONGA' {
+    const freightValue = saleDetail.venda?.composicao_valor?.frete || 0;
+    const notes = (saleDetail.venda?.observacoes || '').toLowerCase();
+    const carrierName = (saleDetail.venda?.transportadora?.nome || saleDetail.transportadora?.nome || '').toLowerCase();
+
+    if (notes.includes('retira') || notes.includes('retirada') || carrierName.includes('retira')) {
+      return 'RETIRADA';
+    }
+    if (notes.includes('lalamove') || carrierName.includes('lalamove') || notes.includes('uber flash') || carrierName.includes('uber')) {
+      return 'LALAMOVE';
+    }
+    if (notes.includes('motoboy') || carrierName.includes('motoboy') || notes.includes('moto')) {
+      return 'MOTOBOY';
+    }
+    if (notes.includes('entrega própria') || notes.includes('carro próprio') || notes.includes('nosso carro') || carrierName.includes('propria') || carrierName.includes('próprio')) {
+      return 'ENTREGA_PROPRIA';
+    }
+    if (notes.includes('longa distância') || carrierName.includes('braspress') || carrierName.includes('planalto') || carrierName.includes('tnt') || carrierName.includes('fedex')) {
+      return 'TRANSPORTADORA_LONGA';
+    }
+
+    if (freightValue > 0) {
+      return 'TRANSPORTADORA';
+    }
+    return 'RETIRADA';
   }
 }
 export default ContaAzulService;

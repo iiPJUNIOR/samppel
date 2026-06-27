@@ -7,7 +7,21 @@ import {
   getContaAzulConfig, 
   updateContaAzulConfig, 
   getIntegrationLogs,
-  getSyncQueue 
+  getSyncQueue,
+  getProductionMachines,
+  createProductionMachine,
+  updateProductionMachine,
+  deleteProductionMachine,
+  getHandlingTeams,
+  createHandlingTeam,
+  updateHandlingTeam,
+  deleteHandlingTeam,
+  getPackagingMaterialTypes,
+  createPackagingMaterialType,
+  updatePackagingMaterialType,
+  deletePackagingMaterialType,
+  getPackagingSettings,
+  savePackagingSettings
 } from '@/services/supabase';
 import { 
   ShieldAlert, 
@@ -19,7 +33,13 @@ import {
   Link2, 
   Terminal,
   HelpCircle,
-  Clock
+  Clock,
+  Plus,
+  Trash2,
+  Edit3,
+  Settings,
+  Users,
+  Package
 } from 'lucide-react';
 
 export default function ConfiguracoesPage() {
@@ -34,6 +54,35 @@ export default function ConfiguracoesPage() {
   const [logs, setLogs] = useState<any[]>([]);
   const [queue, setQueue] = useState<any[]>([]);
   
+  // States de Máquinas de Produção
+  const [machines, setMachines] = useState<any[]>([]);
+  const [machineName, setMachineName] = useState('');
+  const [machineSector, setMachineSector] = useState('Impressão');
+  const [machineStatus, setMachineStatus] = useState<'ATIVO' | 'INATIVO' | 'MANUTENCAO'>('ATIVO');
+  const [editingMachine, setEditingMachine] = useState<any | null>(null);
+  const [submittingMachine, setSubmittingMachine] = useState(false);
+  
+  // States de Equipes de Manuseio
+  const [handlingTeams, setHandlingTeams] = useState<any[]>([]);
+  const [teamName, setTeamName] = useState('');
+  const [teamStatus, setTeamStatus] = useState<'ATIVO' | 'INATIVO'>('ATIVO');
+  const [editingTeam, setEditingTeam] = useState<any | null>(null);
+  const [submittingTeam, setSubmittingTeam] = useState(false);
+
+  // States de Tipos de Material de Embalagem
+  const [packagingMaterials, setPackagingMaterials] = useState<any[]>([]);
+  const [pmtName, setPmtName] = useState('');
+  const [pmtCode, setPmtCode] = useState('');
+  const [pmtCategory, setPmtCategory] = useState<'CAIXA' | 'FUNDO' | 'DIVISORIA' | 'SACO' | 'OUTRO'>('CAIXA');
+  const [pmtStatus, setPmtStatus] = useState<'ATIVO' | 'INATIVO'>('ATIVO');
+  const [editingPmt, setEditingPmt] = useState<any | null>(null);
+  const [submittingPmt, setSubmittingPmt] = useState(false);
+  
+  // States de Configurações de Embalagem (Convenções)
+  const [packagingKeywords, setPackagingKeywords] = useState('caixa,fundo,divisoria,saco,embalagem,pacote');
+  const [packagingAssociationRule, setPackagingAssociationRule] = useState<'FIRST_ITEM' | 'LARGEST_QUANTITY' | 'MANUAL'>('FIRST_ITEM');
+  const [savingSettings, setSavingSettings] = useState(false);
+
   // Loading & Action States
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -42,10 +91,15 @@ export default function ConfiguracoesPage() {
   const fetchConfigAndLogs = async () => {
     setLoading(true);
     try {
-      const [configRes, logsRes, queueRes] = await Promise.all([
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes] = await Promise.all([
         getContaAzulConfig(),
         getIntegrationLogs(),
-        getSyncQueue()
+        getSyncQueue(),
+        getProductionMachines(tenantId),
+        getHandlingTeams(tenantId),
+        getPackagingMaterialTypes(tenantId),
+        getPackagingSettings(tenantId)
       ]);
 
       const data = configRes.data;
@@ -58,6 +112,14 @@ export default function ConfiguracoesPage() {
 
       setLogs(logsRes.data || []);
       setQueue(queueRes.data || []);
+      setMachines(machinesRes.data || []);
+      setHandlingTeams(teamsRes.data || []);
+      setPackagingMaterials(pmtRes.data || []);
+      
+      if (settingsRes.data) {
+        setPackagingKeywords(settingsRes.data.keywords || 'caixa,fundo,divisoria,saco,embalagem,pacote');
+        setPackagingAssociationRule(settingsRes.data.association_rule || 'FIRST_ITEM');
+      }
     } catch (e) {
       console.error('Error fetching config/logs:', e);
     } finally {
@@ -109,38 +171,192 @@ export default function ConfiguracoesPage() {
     }
   };
 
-  // Trigger OAuth 2.0 Flow redirect
+  // Aciona o redirecionamento do fluxo do OAuth 2.0
   const handleOAuthConnect = async () => {
     if (!clientId || !clientSecret) {
       alert('Por favor, salve seu Client ID e Client Secret primeiro.');
       return;
     }
     
-    // Generate OAuth Authorization URL
-    // In production this directs to Conta Azul authorize endpoint
-    const redirectUri = process.env.NEXT_PUBLIC_APP_URL 
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/conta-azul/callback`
-      : 'http://localhost:3000/api/auth/conta-azul/callback';
+    // Gera a URL de autorização do OAuth
+    // Em produção, isso direciona para o endpoint de autorização do Conta Azul
+    const redirectUri = `${window.location.origin}/api/auth/conta-azul/callback`;
     
-    const scope = encodeURIComponent('sales customers products financial contacts');
-    const authUrl = `https://app.contaazul.com/oauth2/authorize?redirect_uri=${encodeURIComponent(
+    const scope = encodeURIComponent('openid profile aws.cognito.signin.user.admin');
+    const authUrl = `https://auth.contaazul.com/login?redirect_uri=${encodeURIComponent(
       redirectUri
     )}&client_id=${clientId}&scope=${scope}&state=d3b07384-d113-4ec8-a5c6-e91bc4ff99e0&response_type=code`;
 
-    // In mock mode, we simulate the callback directly by redirecting to our backend callback
-    const isMock = clientId.includes('placeholder') || clientId === '';
+    // Sempre redireciona para a URL de autorização real do Conta Azul
+    const isMock = false;
     if (isMock) {
-      const confirmMock = confirm('Sua credencial é fictícia. Deseja simular a autorização OAuth do Conta Azul?');
-      if (confirmMock) {
-        window.location.href = `/api/auth/conta-azul/callback?code=mock_code_123&state=d3b07384-d113-4ec8-a5c6-e91bc4ff99e0`;
-        return;
-      }
+      // Bloco inacessível
     } else {
       window.location.href = authUrl;
     }
   };
 
-  // Trigger manual background sync queue process
+  const handleSaveMachine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!machineName.trim()) return;
+
+    setSubmittingMachine(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      if (editingMachine) {
+        // Edit mode
+        const { error } = await updateProductionMachine(editingMachine.id, {
+          name: machineName.trim(),
+          sector: machineSector,
+          status: machineStatus
+        });
+        if (error) {
+          alert('Erro ao atualizar máquina: ' + error.message);
+        } else {
+          setEditingMachine(null);
+          setMachineName('');
+          fetchConfigAndLogs();
+        }
+      } else {
+        // Create mode
+        const { error } = await createProductionMachine({
+          tenant_id: tenantId,
+          name: machineName.trim(),
+          sector: machineSector,
+          status: machineStatus
+        });
+        if (error) {
+          alert('Erro ao criar máquina: ' + error.message);
+        } else {
+          setMachineName('');
+          fetchConfigAndLogs();
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao salvar máquina:', err);
+    } finally {
+      setSubmittingMachine(false);
+    }
+  };
+
+  const handleDeleteMachine = async (id: string) => {
+    if (confirm('Deseja realmente excluir esta máquina de produção?')) {
+      const { error } = await deleteProductionMachine(id);
+      if (error) {
+        alert('Erro ao excluir máquina: ' + error.message);
+      } else {
+        fetchConfigAndLogs();
+      }
+    }
+  };
+
+  const handleSaveTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teamName.trim()) return;
+
+    setSubmittingTeam(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      if (editingTeam) {
+        // Edit mode
+        const { error } = await updateHandlingTeam(editingTeam.id, {
+          name: teamName.trim(),
+          status: teamStatus
+        });
+        if (error) {
+          alert('Erro ao atualizar equipe: ' + error.message);
+        } else {
+          setEditingTeam(null);
+          setTeamName('');
+          fetchConfigAndLogs();
+        }
+      } else {
+        // Create mode
+        const { error } = await createHandlingTeam({
+          tenant_id: tenantId,
+          name: teamName.trim(),
+          status: teamStatus
+        });
+        if (error) {
+          alert('Erro ao criar equipe: ' + error.message);
+        } else {
+          setTeamName('');
+          fetchConfigAndLogs();
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao salvar equipe:', err);
+    } finally {
+      setSubmittingTeam(false);
+    }
+  };
+
+  const handleDeleteTeam = async (id: string) => {
+    if (confirm('Deseja realmente excluir esta equipe de manuseio?')) {
+      const { error } = await deleteHandlingTeam(id);
+      if (error) {
+        alert('Erro ao excluir equipe: ' + error.message);
+      } else {
+        fetchConfigAndLogs();
+      }
+    }
+  };
+
+  const handleSavePmt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pmtName.trim()) return;
+    setSubmittingPmt(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      if (editingPmt) {
+        const { error } = await updatePackagingMaterialType(editingPmt.id, {
+          name: pmtName.trim(), code: pmtCode.trim() || null, category: pmtCategory, status: pmtStatus
+        });
+        if (error) { alert('Erro: ' + error.message); }
+        else { setEditingPmt(null); setPmtName(''); setPmtCode(''); fetchConfigAndLogs(); }
+      } else {
+        const { error } = await createPackagingMaterialType({
+          tenant_id: tenantId, name: pmtName.trim(), code: pmtCode.trim() || null, category: pmtCategory, status: pmtStatus
+        });
+        if (error) { alert('Erro: ' + error.message); }
+        else { setPmtName(''); setPmtCode(''); fetchConfigAndLogs(); }
+      }
+    } catch (err) { console.error(err); }
+    finally { setSubmittingPmt(false); }
+  };
+
+  const handleDeletePmt = async (id: string) => {
+    if (confirm('Excluir este tipo de material de embalagem?')) {
+      const { error } = await deletePackagingMaterialType(id);
+      if (error) { alert('Erro: ' + error.message); }
+      else { fetchConfigAndLogs(); }
+    }
+  };
+
+  const handleSavePackagingSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const { error } = await savePackagingSettings({
+        tenant_id: tenantId,
+        keywords: packagingKeywords.trim().toLowerCase(),
+        association_rule: packagingAssociationRule
+      });
+      if (error) {
+        alert('Erro ao salvar configurações de embalagem: ' + error.message);
+      } else {
+        alert('Configurações de embalagem salvas com sucesso!');
+        fetchConfigAndLogs();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  // Aciona o processo manual de sincronização da fila de segundo plano
   const handleTriggerSync = async () => {
     setSyncing(true);
     setSyncResult(null);
@@ -314,6 +530,418 @@ export default function ConfiguracoesPage() {
                 {theme === 'light' ? 'Ativar Modo Escuro' : 'Ativar Modo Claro'}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SEÇÃO DE GERENCIAMENTO DE MÁQUINAS E SETORES */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', marginBottom: '2rem' }}>
+        
+        {/* Formulário de Máquina */}
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Settings size={18} style={{ color: 'var(--primary)' }} />
+            {editingMachine ? 'Editar Máquina de Produção' : 'Nova Máquina de Produção'}
+          </h3>
+          
+          <form onSubmit={handleSaveMachine} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="form-group">
+              <label className="form-label">Nome da Máquina *</label>
+              <input 
+                type="text" 
+                className="form-input"
+                required
+                placeholder="Ex: Guilhotina B, Rotalina 2..."
+                value={machineName}
+                onChange={(e) => setMachineName(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Setor de Atuação *</label>
+              <select 
+                className="form-select"
+                value={machineSector}
+                onChange={(e) => setMachineSector(e.target.value)}
+              >
+                <option value="Impressão">Impressão</option>
+                <option value="Corte e Vinco">Corte e Vinco</option>
+                <option value="Colagem">Colagem</option>
+                <option value="Guilhotina">Guilhotina</option>
+                <option value="Manuseio">Manuseio</option>
+                <option value="Expedição">Expedição</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Status da Máquina *</label>
+              <select 
+                className="form-select"
+                value={machineStatus}
+                onChange={(e) => setMachineStatus(e.target.value as any)}
+              >
+                <option value="ATIVO">🟢 Ativo</option>
+                <option value="INATIVO">🔴 Inativo</option>
+                <option value="MANUTENCAO">🔧 Em Manutenção</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                {submittingMachine ? 'Salvando...' : editingMachine ? 'Salvar Alterações' : 'Cadastrar Máquina'}
+              </button>
+              {editingMachine && (
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setEditingMachine(null);
+                    setMachineName('');
+                    setMachineSector('Impressão');
+                    setMachineStatus('ATIVO');
+                  }} 
+                  className="btn btn-secondary"
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+
+        {/* Tabela de Máquinas cadastradas */}
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Cpu size={18} style={{ color: 'var(--primary)' }} />
+            Máquinas Cadastradas ({machines.length})
+          </h3>
+
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Setor</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {machines.map((m) => (
+                  <tr key={m.id}>
+                    <td style={{ fontWeight: 600 }}>{m.name}</td>
+                    <td>
+                      <span className="badge" style={{ backgroundColor: 'var(--surface-subtle)', border: '1px solid var(--border)' }}>
+                        {m.sector}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${
+                        m.status === 'ATIVO' ? 'badge-success' : 
+                        m.status === 'INATIVO' ? 'badge-danger' : 'badge-warning'
+                      }`}>
+                        {m.status === 'ATIVO' ? 'ATIVO' : m.status === 'INATIVO' ? 'INATIVO' : 'MANUTENÇÃO'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => {
+                            setEditingMachine(m);
+                            setMachineName(m.name);
+                            setMachineSector(m.sector);
+                            setMachineStatus(m.status);
+                          }}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                        >
+                          <Edit3 size={12} />
+                          <span>Editar</span>
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteMachine(m.id)}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--danger)' }}
+                        >
+                          <Trash2 size={12} />
+                          <span>Excluir</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {machines.length === 0 && (
+                  <tr>
+                    <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      Nenhuma máquina de produção cadastrada.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      {/* SEÇÃO DE GERENCIAMENTO DE EQUIPES DE MANUSEIO */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', marginBottom: '2rem' }}>
+        
+        {/* Formulário de Equipe */}
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Settings size={18} style={{ color: 'var(--primary)' }} />
+            {editingTeam ? 'Editar Equipe de Manuseio' : 'Nova Equipe de Manuseio'}
+          </h3>
+          
+          <form onSubmit={handleSaveTeam} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="form-group">
+              <label className="form-label">Nome da Equipe *</label>
+              <input 
+                type="text" 
+                className="form-input"
+                required
+                placeholder="Ex: João, Zé, Equipe Alfa..."
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Status da Equipe *</label>
+              <select 
+                className="form-select"
+                value={teamStatus}
+                onChange={(e) => setTeamStatus(e.target.value as any)}
+              >
+                <option value="ATIVO">🟢 Ativo</option>
+                <option value="INATIVO">🔴 Inativo</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                {submittingTeam ? 'Salvando...' : editingTeam ? 'Salvar Alterações' : 'Cadastrar Equipe'}
+              </button>
+              {editingTeam && (
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setEditingTeam(null);
+                    setTeamName('');
+                    setTeamStatus('ATIVO');
+                  }} 
+                  className="btn btn-secondary"
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+
+        {/* Tabela de Equipes cadastradas */}
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Users size={18} style={{ color: 'var(--primary)' }} />
+            Equipes de Manuseio Ativas ({handlingTeams.length})
+          </h3>
+
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nome da Equipe</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {handlingTeams.map((t) => (
+                  <tr key={t.id}>
+                    <td style={{ fontWeight: 600 }}>{t.name}</td>
+                    <td>
+                      <span className={`badge ${
+                        t.status === 'ATIVO' ? 'badge-success' : 'badge-danger'
+                      }`}>
+                        {t.status === 'ATIVO' ? 'ATIVO' : 'INATIVO'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => {
+                            setEditingTeam(t);
+                            setTeamName(t.name);
+                            setTeamStatus(t.status);
+                          }}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                        >
+                          <Edit3 size={12} />
+                          <span>Editar</span>
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteTeam(t.id)}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--danger)' }}
+                        >
+                          <Trash2 size={12} />
+                          <span>Excluir</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {handlingTeams.length === 0 && (
+                  <tr>
+                    <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      Nenhuma equipe de manuseio cadastrada.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      {/* REGRAS E CONVENÇÕES DE EMBALAGEM */}
+      <div className="card" style={{ marginBottom: '2rem' }}>
+        <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Package size={18} style={{ color: 'var(--primary)' }} />
+          Convenções e Regras de Associação de Embalagem
+        </h3>
+        <form onSubmit={handleSavePackagingSettings} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'end' }}>
+          <div className="form-group">
+            <label className="form-label" style={{ fontWeight: 600 }}>Palavras-chave para identificar itens de Embalagem no PV</label>
+            <input
+              type="text"
+              className="form-input"
+              required
+              placeholder="Ex: caixa, fundo, divisoria, saco, embalagem (separado por vírgulas)"
+              value={packagingKeywords}
+              onChange={(e) => setPackagingKeywords(e.target.value)}
+            />
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+              Utilizado para detectar automaticamente quais itens irmãos no Pedido de Venda representam caixas ou materiais de embalagem.
+            </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" style={{ fontWeight: 600 }}>Regra de Associação Padrão</label>
+            <select
+              className="form-select"
+              value={packagingAssociationRule}
+              onChange={(e) => setPackagingAssociationRule(e.target.value as any)}
+            >
+              <option value="FIRST_ITEM">🥇 Associar caixas ao primeiro item de produto do PV</option>
+              <option value="LARGEST_QUANTITY">📈 Associar caixas ao item de maior tiragem do PV</option>
+              <option value="MANUAL">✏️ Associação manual pelo operador (sem sugestão)</option>
+            </select>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+              Convenção administrativa para associar e carregar automaticamente os insumos de caixa a um dos itens do PV.
+            </span>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="submit" className="btn btn-primary" disabled={savingSettings}>
+              {savingSettings ? 'Salvando...' : 'Salvar Regras de Embalagem'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* TIPOS DE MATERIAL DE EMBALAGEM */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', marginBottom: '2rem' }}>
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Settings size={18} style={{ color: 'var(--primary)' }} />
+            {editingPmt ? 'Editar Material' : 'Novo Material de Embalagem'}
+          </h3>
+          <form onSubmit={handleSavePmt} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="form-group">
+              <label className="form-label">Nome *</label>
+              <input type="text" className="form-input" required placeholder="Ex: Caixa de Papelão Corrugado" value={pmtName} onChange={(e) => setPmtName(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Código de Referência</label>
+              <input type="text" className="form-input" placeholder="Ex: CX-001" value={pmtCode} onChange={(e) => setPmtCode(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Categoria *</label>
+              <select className="form-select" value={pmtCategory} onChange={(e) => setPmtCategory(e.target.value as any)}>
+                <option value="CAIXA">📦 Caixa</option>
+                <option value="FUNDO">🟫 Fundo</option>
+                <option value="DIVISORIA">🔲 Divisória</option>
+                <option value="SACO">🛍️ Saco / Sacola</option>
+                <option value="OUTRO">➕ Outro</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Status *</label>
+              <select className="form-select" value={pmtStatus} onChange={(e) => setPmtStatus(e.target.value as any)}>
+                <option value="ATIVO">🟢 Ativo</option>
+                <option value="INATIVO">🔴 Inativo</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                {submittingPmt ? 'Salvando...' : editingPmt ? 'Salvar' : 'Cadastrar'}
+              </button>
+              {editingPmt && (
+                <button type="button" className="btn btn-secondary" onClick={() => { setEditingPmt(null); setPmtName(''); setPmtCode(''); }}>
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Package size={18} style={{ color: 'var(--primary)' }} />
+            Materiais de Embalagem Cadastrados ({packagingMaterials.length})
+          </h3>
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Código</th>
+                  <th>Categoria</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packagingMaterials.map((m) => (
+                  <tr key={m.id}>
+                    <td style={{ fontWeight: 600 }}>{m.name}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{m.code || '—'}</span></td>
+                    <td>
+                      <span className="badge" style={{ backgroundColor: 'var(--surface-subtle)', border: '1px solid var(--border)', fontSize: '0.7rem' }}>
+                        {m.category === 'CAIXA' ? '📦 Caixa' : m.category === 'FUNDO' ? '🟫 Fundo' : m.category === 'DIVISORIA' ? '🔲 Divisória' : m.category === 'SACO' ? '🛍️ Saco' : '➕ Outro'}
+                      </span>
+                    </td>
+                    <td><span className={`badge ${m.status === 'ATIVO' ? 'badge-success' : 'badge-danger'}`}>{m.status}</span></td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button onClick={() => { setEditingPmt(m); setPmtName(m.name); setPmtCode(m.code || ''); setPmtCategory(m.category); setPmtStatus(m.status); }} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <Edit3 size={12} /><span>Editar</span>
+                        </button>
+                        <button onClick={() => handleDeletePmt(m.id)} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--danger)' }}>
+                          <Trash2 size={12} /><span>Excluir</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {packagingMaterials.length === 0 && (
+                  <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Nenhum material de embalagem cadastrado.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

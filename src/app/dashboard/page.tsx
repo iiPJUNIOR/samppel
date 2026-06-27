@@ -50,9 +50,9 @@ export default function DashboardPage() {
         getProducts()
       ]);
 
-      const fetchedOrders = ordersRes.data || [];
-      const fetchedFinance = financeRes.data || [];
-      const fetchedProducts = productsRes.data || [];
+      const fetchedOrders: any[] = ordersRes.data || [];
+      const fetchedFinance: any[] = financeRes.data || [];
+      const fetchedProducts: any[] = productsRes.data || [];
 
       setOrders(fetchedOrders);
       setFinance(fetchedFinance);

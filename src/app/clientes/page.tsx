@@ -107,6 +107,30 @@ export default function ClientesPage() {
     }
   };
 
+  const [importing, setImporting] = useState(false);
+
+  // Aciona a importacao de clientes do Conta Azul para o banco local
+  const handleImportCustomers = async () => {
+    setImporting(true);
+    try {
+      const res = await fetch('/api/sync/import-customers', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Falha ao importar clientes.');
+      }
+      const data = await res.json();
+      if (data.success) {
+        alert(`Sincronizacao concluida com sucesso! Clientes importados: ${data.imported}, atualizados: ${data.updated}.`);
+        fetchCustomers();
+      } else {
+        alert('Erro ao importar clientes: ' + (data.error || 'Erro desconhecido'));
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao importar clientes.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const filteredCustomers = customers.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) || 
     (c.document && c.document.includes(search))
@@ -122,10 +146,22 @@ export default function ClientesPage() {
           </p>
         </div>
         
-        <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <Plus size={16} />
-          <span>Cadastrar Cliente</span>
-        </button>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <button 
+            onClick={handleImportCustomers} 
+            disabled={importing}
+            className="btn btn-secondary" 
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+          >
+            <RefreshCw size={16} className={importing ? 'spinner' : ''} />
+            <span>{importing ? 'Importando...' : 'Importar do Conta Azul'}</span>
+          </button>
+          
+          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <Plus size={16} />
+            <span>Cadastrar Cliente</span>
+          </button>
+        </div>
       </header>
 
       {/* SEARCH BAR */}

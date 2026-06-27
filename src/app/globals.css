@@ -466,3 +466,44 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Ocultar barra de rolagem mantendo funcionalidade */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 0 0px rgba(var(--primary-rgb), 0.6);
+    transform: scale(0.96);
+  }
+  50% {
+    box-shadow: 0 0 12px 3px rgba(var(--primary-rgb), 0.45);
+    transform: scale(1.03);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(var(--primary-rgb), 0);
+    transform: scale(1);
+  }
+}
+
+.pulse-glow {
+  animation: pulseGlow 0.9s ease-out 1;
+  z-index: 10;
+}
+
+.blinking-dot {
+  animation: blinkAnimation 1.2s infinite ease-in-out;
+  box-shadow: 0 0 6px var(--danger);
+}
+
+@keyframes blinkAnimation {
+  0% { opacity: 0.3; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0.3; transform: scale(0.9); }
+}
+
