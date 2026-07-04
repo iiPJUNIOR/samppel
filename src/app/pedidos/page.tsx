@@ -269,26 +269,62 @@ export default function PedidosPage() {
     return new Date().toISOString().split('T')[0];
   });
 
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncStep, setSyncStep] = useState('');
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncResult, setSyncResult] = useState<{ success: boolean; imported?: number; updated?: number; error?: string } | null>(null);
+
   const handleImportOrders = async () => {
     setImporting(true);
+    setIsSyncModalOpen(true);
+    setSyncStep('Iniciando comunicação com Conta Azul...');
+    setSyncProgress(5);
+    setSyncResult(null);
+
+    let currentProgress = 5;
+    const interval = setInterval(() => {
+      if (currentProgress < 90) {
+        currentProgress += Math.floor(Math.random() * 8) + 2;
+        if (currentProgress > 90) currentProgress = 90;
+        setSyncProgress(currentProgress);
+
+        if (currentProgress < 25) {
+          setSyncStep('Autenticando e verificando tokens...');
+        } else if (currentProgress < 50) {
+          setSyncStep('Buscando pedidos do período selecionado...');
+        } else if (currentProgress < 75) {
+          setSyncStep('Processando clientes, produtos e faturamento...');
+        } else {
+          setSyncStep('Sincronizando registros no banco de dados...');
+        }
+      }
+    }, 400);
+
     try {
       const queryParams = new URLSearchParams();
       if (importStartDate) queryParams.append('startDate', importStartDate);
       if (importEndDate) queryParams.append('endDate', importEndDate);
 
       const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, { method: 'POST' });
+      clearInterval(interval);
+
       if (!res.ok) {
         throw new Error('Falha ao importar pedidos.');
       }
       const data = await res.json();
       if (data.success) {
-        alert(`Sincronização concluída com sucesso! Pedidos importados: ${data.imported}, atualizados: ${data.updated}.`);
+        setSyncProgress(100);
+        setSyncStep('Sincronização concluída com sucesso!');
+        setSyncResult({ success: true, imported: data.imported, updated: data.updated });
         fetchAllData();
       } else {
-        alert('Erro ao importar pedidos: ' + (data.error || 'Erro desconhecido'));
+        throw new Error(data.error || 'Erro desconhecido');
       }
     } catch (err: any) {
-      alert(err.message || 'Erro ao importar pedidos.');
+      clearInterval(interval);
+      setSyncProgress(100);
+      setSyncStep('Falha na sincronização.');
+      setSyncResult({ success: false, error: err.message || 'Erro ao importar pedidos.' });
     } finally {
       setImporting(false);
     }
@@ -2476,6 +2512,103 @@ export default function PedidosPage() {
                 style={{ fontSize: '0.8rem' }}
               >
                 Sim, Enviar para Expedição
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* MODAL DE PROGRESSO DE SINCRONIZAÇÃO */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {isSyncModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '2rem', maxWidth: '420px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', margin: 0 }}>
+              <RefreshCw size={20} className={importing ? 'spinner' : ''} style={{ color: 'var(--primary)', animation: importing ? 'spin 1s linear infinite' : 'none' }} />
+              Sincronização Conta Azul
+            </h2>
+
+            {/* Progresso */}
+            <div style={{ margin: '1.5rem 0' }}>
+              <div style={{
+                height: '8px',
+                width: '100%',
+                backgroundColor: 'var(--border)',
+                borderRadius: '999px',
+                overflow: 'hidden',
+                position: 'relative',
+                marginBottom: '0.75rem'
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${syncProgress}%`,
+                  backgroundColor: syncResult && !syncResult.success ? 'var(--danger)' : 'var(--primary)',
+                  borderRadius: '999px',
+                  transition: 'width 0.3s ease-out'
+                }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                  {syncStep}
+                </span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text)', fontWeight: 700 }}>
+                  {syncProgress}%
+                </span>
+              </div>
+            </div>
+
+            {/* Resultados / Erros */}
+            {syncResult && (
+              <div style={{
+                backgroundColor: syncResult.success ? 'rgba(46, 213, 115, 0.1)' : 'rgba(255, 71, 87, 0.1)',
+                border: `1px solid ${syncResult.success ? '#2ed573' : 'var(--danger)'}`,
+                borderRadius: 'var(--radius-md)',
+                padding: '1rem',
+                marginBottom: '1.5rem',
+                textAlign: 'left'
+              }}>
+                {syncResult.success ? (
+                  <div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: '#2ed573', fontSize: '0.9rem', fontWeight: 700 }}>
+                      ✓ Sincronizado com Sucesso
+                    </h4>
+                    <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <li>Pedidos importados: <strong>{syncResult.imported}</strong></li>
+                      <li>Pedidos atualizados: <strong>{syncResult.updated}</strong></li>
+                    </ul>
+                  </div>
+                ) : (
+                  <div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--danger)', fontSize: '0.9rem', fontWeight: 700 }}>
+                      ✕ Falha na Importação
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                      {syncResult.error}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Botão de Fechar */}
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button
+                onClick={() => setIsSyncModalOpen(false)}
+                disabled={importing}
+                className="btn btn-secondary"
+                style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
+              >
+                {importing ? 'Sincronizando...' : 'Fechar'}
               </button>
             </div>
           </div>
