@@ -158,6 +158,7 @@ export default function ProdutosPage() {
 
   const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial';
   const canEditDetails = user?.role === 'Administrador' || user?.role === 'Comercial';
+  const isAdmin = user?.role === 'Administrador';
 
   return (
     <div className="page-container">
@@ -208,7 +209,7 @@ export default function ProdutosPage() {
                 <th>SKU / Código</th>
                 <th>Nome do Produto</th>
                 <th>Descrição</th>
-                <th>Preço Unitário</th>
+                {isAdmin && <th>Preço Unitário</th>}
                 <th>Estoque Físico</th>
                 <th>Sincronização ERP</th>
                 <th>Ações</th>
@@ -217,11 +218,11 @@ export default function ProdutosPage() {
             <tbody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, idx) => (
-                  <TableRowSkeleton key={idx} cols={7} />
+                  <TableRowSkeleton key={idx} cols={isAdmin ? 7 : 6} />
                 ))
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
                     Nenhum produto cadastrado ou encontrado.
                   </td>
                 </tr>
@@ -233,9 +234,11 @@ export default function ProdutosPage() {
                     <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', maxWidth: '300px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {product.description || '---'}
                     </td>
-                    <td style={{ fontWeight: 500 }}>
-                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price)}
-                    </td>
+                    {isAdmin && (
+                      <td style={{ fontWeight: 500 }}>
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price)}
+                      </td>
+                    )}
                     <td style={{ fontWeight: 600 }}>
                       <span className="badge" style={{ 
                         backgroundColor: product.stock_quantity < 500 ? 'var(--danger-bg)' : 'rgba(var(--primary-rgb), 0.08)',
@@ -368,18 +371,20 @@ export default function ProdutosPage() {
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Preço Unitário Comercial (R$) *</label>
-                <input 
-                  type="number" 
-                  step="0.01"
-                  min="0"
-                  className="form-input" 
-                  required
-                  value={formPrice}
-                  onChange={(e) => setFormPrice(Number(e.target.value))}
-                />
-              </div>
+              {isAdmin && (
+                <div className="form-group">
+                  <label className="form-label">Preço Unitário Comercial (R$) *</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    min="0"
+                    className="form-input" 
+                    required
+                    value={formPrice}
+                    onChange={(e) => setFormPrice(Number(e.target.value))}
+                  />
+                </div>
+              )}
 
               {modalType === 'create' && (
                 <div className="form-group">

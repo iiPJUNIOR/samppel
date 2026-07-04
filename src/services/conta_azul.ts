@@ -214,7 +214,7 @@ export class ContaAzulService {
    */
   public async syncCustomer(customer: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
+    const isMock = true;
 
     await createIntegrationLog(
       'SYNC_CUSTOMER',
@@ -307,7 +307,7 @@ export class ContaAzulService {
    */
   public async syncSupplier(supplier: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
+    const isMock = true;
 
     await createIntegrationLog(
       'SYNC_SUPPLIER',
@@ -400,7 +400,7 @@ export class ContaAzulService {
    */
   public async syncProduct(product: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
+    const isMock = true;
 
     await createIntegrationLog(
       'SYNC_PRODUCT',
@@ -484,7 +484,7 @@ export class ContaAzulService {
    */
   public async syncOrder(order: any, customer: any, product: any): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
+    const isMock = true;
 
     await createIntegrationLog(
       'SYNC_ORDER',
@@ -639,7 +639,7 @@ export class ContaAzulService {
    */
   public async syncFinancial(financial: any, order: any = null): Promise<string> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
+    const isMock = true;
 
     await createIntegrationLog(
       'SYNC_FINANCIAL',
@@ -1086,6 +1086,38 @@ export class ContaAzulService {
           } else {
             imported++;
             orderId = newOrder.id;
+          }
+        }
+
+        // Sincronizar parcelas financeiras para o local
+        if (installments && installments.length > 0) {
+          // Primeiro removemos as parcelas financeiras locais antigas desse pedido
+          await dbClient
+            .from('financial_transactions')
+            .delete()
+            .eq('order_id', orderId);
+
+          // E inserimos as novas parcelas
+          const transactionsPayload = installments.map((inst: any) => {
+            const isInstPaid = localStatus === 'Pago' || (inst.situacao === 'BAIXADO' || inst.situacao === 'CONCILIADO');
+            return {
+              tenant_id: this.tenantId,
+              order_id: orderId,
+              type: 'RECEITA',
+              amount: inst.valor || inst.value || 0,
+              status: isInstPaid ? 'CONCILIADO' : 'PENDENTE',
+              description: `Parcela ${inst.numero || 1}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
+              due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
+              payment_date: isInstPaid ? (inst.data_vencimento || new Date().toISOString().split('T')[0]) : null
+            };
+          });
+
+          const { error: finInsertErr } = await dbClient
+            .from('financial_transactions')
+            .insert(transactionsPayload);
+
+          if (finInsertErr) {
+            console.error('Erro ao inserir transações financeiras:', finInsertErr);
           }
         }
 

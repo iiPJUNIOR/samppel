@@ -40,6 +40,7 @@ import {
   AlertCircle,
   Truck,
   Eye,
+  EyeOff,
   RefreshCw,
   LayoutGrid,
   List,
@@ -48,6 +49,14 @@ import {
   Loader2,
   Scale
 } from 'lucide-react';
+
+// Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
+const getStatusForStageName = (stageName: string): string => {
+  if (stageName === 'Pedidos') return 'A produzir';
+  if (stageName === 'Embalagem') return 'Em revisão';
+  if (stageName === 'Concluído') return 'Entregue';
+  return stageName;
+};
 
 export default function PedidosPage() {
   const { user } = useAuth();
@@ -127,9 +136,15 @@ export default function PedidosPage() {
   const [pendingRevertTargetStageId, setPendingRevertTargetStageId] = useState('');
   const [revertAuthEmail, setRevertAuthEmail] = useState('');
   const [revertAuthPassword, setRevertAuthPassword] = useState('');
+  const [showRevertPassword, setShowRevertPassword] = useState(false);
   const [revertAuthJustification, setRevertAuthJustification] = useState('');
   const [revertAuthLoading, setRevertAuthLoading] = useState(false);
   const [revertAuthError, setRevertAuthError] = useState('');
+
+  // Estados do Modal de Aviso de Itens Vinculados em Expedição
+  const [isLinkedItemsWarningOpen, setIsLinkedItemsWarningOpen] = useState(false);
+  const [linkedItemsWarningData, setLinkedItemsWarningData] = useState<any>(null);
+  const expeditionMoveBypass = useRef(false);
 
   // Ref que indica que o próximo move foi aprovado pelo Admin (bypass da verificação)
   const adminMoveOverride = useRef(false);
@@ -329,11 +344,21 @@ export default function PedidosPage() {
 
     const currentStage = stages.find(s => s.id === currentStageId);
 
+    // Alerta de itens vinculados na expedição
+    if (targetStage.name === 'Expedição' && !expeditionMoveBypass.current) {
+      const siblingItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id);
+      if (siblingItems.length > 0) {
+        setLinkedItemsWarningData({ item, targetStageId, siblings: siblingItems });
+        setIsLinkedItemsWarningOpen(true);
+        return;
+      }
+    }
+
     // ---------------------------------------------------------------
     // REGRA DE RETROCESSO: Janela de 10 minutos + aprovação do Admin
     // ---------------------------------------------------------------
     if (!adminMoveOverride.current) {
-      const currentSeq: number = (currentStage as any)?.sequence ?? 999;
+      const currentSeq: number = currentStage ? ((currentStage as any)?.sequence ?? 999) : 0;
       const targetSeq: number = (targetStage as any)?.sequence ?? 0;
       const isMovingBackward = targetSeq < currentSeq;
 
@@ -355,8 +380,9 @@ export default function PedidosPage() {
           // Exige aprovação do Administrador
           setPendingRevertItem(item);
           setPendingRevertTargetStageId(targetStageId);
-          setRevertAuthEmail('');
+          setRevertAuthEmail(user?.email || '');
           setRevertAuthPassword('');
+          setShowRevertPassword(false);
           setRevertAuthJustification('');
           setRevertAuthError('');
           setIsRevertAuthModalOpen(true);
@@ -524,10 +550,11 @@ export default function PedidosPage() {
         return currentSector;
       };
 
+      const targetStatus = getStatusForStageName(targetStage.name);
       const targetSector = getSectorForStageName(targetStage.name, item.production_sector);
       const updates = {
         stage_id: targetStageId,
-        status: targetStage.name,
+        status: targetStatus,
         production_sector: targetSector
       };
 
@@ -850,9 +877,10 @@ export default function PedidosPage() {
 
       // 2. Mover o card para a etapa correspondente
       const targetStage = stages.find(s => s.id === suggestionTargetStageId);
+      const targetStatus = targetStage ? getStatusForStageName(targetStage.name) : 'Em produção';
       const updates = {
         stage_id: suggestionTargetStageId,
-        status: targetStage?.name || 'Produção',
+        status: targetStatus,
         production_sector: targetStage?.name === 'Estoque' ? 'Estoque' : suggestionItem.production_sector
       };
 
@@ -938,10 +966,6 @@ export default function PedidosPage() {
     setRevertAuthError('');
 
     try {
-      if (!revertAuthJustification.trim()) {
-        setRevertAuthError('A justificativa é obrigatória.');
-        return;
-      }
 
       // Validar credenciais do Admin via cliente Supabase temporário
       // (sem afetar a sessão atual do usuário logado)
@@ -1009,6 +1033,18 @@ export default function PedidosPage() {
     } finally {
       setRevertAuthLoading(false);
     }
+  };
+
+  // Confirmação de movimentação para expedição com múltiplos itens vinculados
+  const handleConfirmExpeditionMove = async () => {
+    if (!linkedItemsWarningData) return;
+    const { item, targetStageId } = linkedItemsWarningData;
+    setIsLinkedItemsWarningOpen(false);
+    setLinkedItemsWarningData(null);
+    
+    expeditionMoveBypass.current = true;
+    await moveOrderItemToStage(item, targetStageId);
+    expeditionMoveBypass.current = false;
   };
 
   // Abrir modal para Edição
@@ -1300,7 +1336,7 @@ export default function PedidosPage() {
 
   const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
   const isVendedor = user?.role === 'Comercial' && !isSupervisor;
-  const hideMonetaryValues = (user?.role === 'Comercial' && !isVendedor) ? false : ((user?.role === 'Comercial' && isVendedor) || ['Produção', 'Estoque', 'Expedição'].includes(user?.role || ''));
+  const hideMonetaryValues = user?.role !== 'Administrador';
 
   // Lógica de Filtros
   const filteredOrders = orders.filter(order => {
@@ -1939,6 +1975,47 @@ export default function PedidosPage() {
                             </button>
                           )}
 
+                          {(() => {
+                            const siblingItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id);
+                            if (siblingItems.length === 0) return null;
+                            const anySiblingInExpedition = siblingItems.some(i => {
+                              const s = stages.find(st => st.id === i.stage_id);
+                              return s?.name === 'Expedição';
+                            });
+                            return (
+                              <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px',
+                                padding: '4px',
+                                borderRadius: 'var(--radius-sm, 4px)',
+                                backgroundColor: anySiblingInExpedition ? 'hsla(38, 92.7%, 50.2%, 0.08)' : 'var(--background)',
+                                border: `1px solid ${anySiblingInExpedition ? 'hsl(38, 92.7%, 50.2%)' : 'var(--border)'}`,
+                                fontSize: '0.625rem',
+                                marginTop: '4px',
+                                boxSizing: 'border-box'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 700, color: anySiblingInExpedition ? 'hsl(38, 92.7%, 45%)' : 'var(--text-muted)' }}>
+                                  <span>🔗</span>
+                                  <span>Pedido Conjunto ({siblingItems.length + 1} itens)</span>
+                                </div>
+                                {siblingItems.map((sib: any) => {
+                                  const sibStage = stages.find(s => s.id === sib.stage_id);
+                                  return (
+                                    <div key={sib.id} style={{ fontSize: '0.58rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '85px' }} title={sib.name}>
+                                        {sib.name}
+                                      </span>
+                                      <span style={{ fontWeight: 600, color: sibStage?.color || 'var(--text-muted)' }}>
+                                        {sibStage?.name || 'A produzir'}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+
                           {/* Ações (Setas de Navegação Manual + Editar) */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1px', paddingTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
                             <div style={{ display: 'flex', gap: '1px' }}>
@@ -2265,6 +2342,96 @@ export default function PedidosPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* MODAL DE AVISO DE ITENS VINCULADOS EM EXPEDIÇÃO */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {isLinkedItemsWarningOpen && linkedItemsWarningData && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '1.5rem', maxWidth: '500px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '1.75rem' }}>⚠️</span>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
+                Pedido Conjunto / Múltiplos Itens
+              </h2>
+            </div>
+            
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+              O item <strong>{linkedItemsWarningData.item.friendly_id}</strong> faz parte do pedido <strong>{linkedItemsWarningData.item.order?.pv_number}</strong>, que contém mais de um item.
+            </p>
+
+            <div style={{
+              backgroundColor: 'var(--background)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.75rem 1rem',
+              marginBottom: '1.25rem'
+            }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.5rem' }}>
+                Outros itens vinculados a este pedido:
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {linkedItemsWarningData.siblings.map((sib: any) => {
+                  const sibStage = stages.find(s => s.id === sib.stage_id);
+                  return (
+                    <div key={sib.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text)', fontWeight: 500 }}>
+                        {sib.friendly_id || '—'} · {sib.name}
+                      </span>
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: '99px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        backgroundColor: (sibStage?.color || '#888') + '22',
+                        color: sibStage?.color || 'var(--text-muted)',
+                        border: `1px solid ${(sibStage?.color || '#888')}55`
+                      }}>
+                        {sibStage?.name || 'A produzir'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text)', margin: '0 0 1.25rem 0', fontWeight: 600 }}>
+              Deseja prosseguir com o envio de <strong>{linkedItemsWarningData.item.friendly_id}</strong> para a Expedição?
+            </p>
+
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setIsLinkedItemsWarningOpen(false);
+                  setLinkedItemsWarningData(null);
+                }} 
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem' }}
+              >
+                Cancelar Movimentação
+              </button>
+              <button 
+                type="button" 
+                onClick={handleConfirmExpeditionMove} 
+                className="btn btn-primary"
+                style={{ fontSize: '0.8rem' }}
+              >
+                Sim, Enviar para Expedição
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3175,28 +3342,46 @@ export default function PedidosPage() {
 
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.75rem' }}>Senha do Administrador</label>
-                  <input
-                    className="form-input"
-                    type="password"
-                    placeholder="••••••••"
-                    value={revertAuthPassword}
-                    onChange={e => setRevertAuthPassword(e.target.value)}
-                    required
-                    autoComplete="new-password"
-                    style={{ fontSize: '0.85rem' }}
-                  />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      className="form-input"
+                      type={showRevertPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      value={revertAuthPassword}
+                      onChange={e => setRevertAuthPassword(e.target.value)}
+                      required
+                      autoComplete="new-password"
+                      style={{ fontSize: '0.85rem', paddingRight: '2.5rem', width: '100%' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRevertPassword(!showRevertPassword)}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        color: 'var(--text-muted, #888)',
+                        padding: '4px'
+                      }}
+                    >
+                      {showRevertPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.75rem' }}>
-                    Justificativa <span style={{ color: 'var(--danger)' }}>*</span>
+                    Justificativa <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 'normal', marginLeft: '4px' }}>(Opcional)</span>
                   </label>
                   <textarea
                     className="form-textarea"
                     placeholder="Descreva o motivo do retrocesso manual..."
                     value={revertAuthJustification}
                     onChange={e => setRevertAuthJustification(e.target.value)}
-                    required
                     rows={2}
                     style={{ fontSize: '0.82rem', resize: 'none' }}
                   />
@@ -3390,7 +3575,7 @@ export default function PedidosPage() {
                 <section>
                   <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <span style={{ width: '3px', height: '12px', backgroundColor: '#3b82f6', borderRadius: '2px', display: 'inline-block' }} />
-                    Produção
+                    Especificações deste Item / Card
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                     {[
@@ -3411,13 +3596,116 @@ export default function PedidosPage() {
 
                 <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
 
+                {/* Seção: Itens / Produtos do Pedido */}
+                <section>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ width: '3px', height: '12px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
+                    Itens / Produtos do Pedido
+                  </div>
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', textAlign: 'left', minWidth: '450px' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
+                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Item</th>
+                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Produto</th>
+                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Qtd</th>
+                          {!hideMonetaryValues && <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor Un.</th>}
+                          {!hideMonetaryValues && <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Subtotal</th>}
+                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Estágio</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderItems.filter(i => i.order_id === order.id).map((i: any) => {
+                          const itemStage = stages.find(s => s.id === i.stage_id);
+                          const unitPrice = i.product?.price || 0;
+                          const subtotal = (i.print_run || 0) * unitPrice;
+                          const isCurrent = i.id === detailItem.id;
+                          return (
+                            <tr key={i.id} style={{ 
+                              borderBottom: '1px solid var(--border)',
+                              backgroundColor: isCurrent ? 'rgba(var(--primary-rgb), 0.04)' : 'transparent',
+                              fontWeight: isCurrent ? 700 : 400
+                            }}>
+                              <td style={{ padding: '0.5rem 0.75rem', color: isCurrent ? 'var(--primary)' : 'var(--text)' }}>
+                                {i.friendly_id || '—'} {isCurrent && '(Este)'}
+                              </td>
+                              <td style={{ padding: '0.5rem 0.75rem' }}>{i.name}</td>
+                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>{(i.print_run || 0).toLocaleString('pt-BR')}</td>
+                              {!hideMonetaryValues && (
+                                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
+                                  R$ {unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              )}
+                              {!hideMonetaryValues && (
+                                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
+                                  R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              )}
+                              <td style={{ padding: '0.5rem 0.75rem' }}>
+                                <span style={{ 
+                                  color: itemStage?.color || 'var(--text-muted)',
+                                  fontWeight: 700,
+                                  fontSize: '0.72rem'
+                                }}>
+                                  {itemStage?.name || 'A produzir'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                {/* Seção: Totais Financeiros do Pedido */}
+                {!hideMonetaryValues && (
+                  <>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+                    <section>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                        {(() => {
+                          const orderItemsList = orderItems.filter(i => i.order_id === order.id);
+                          const totalProducts = orderItemsList.reduce((acc, i) => acc + (i.print_run || 0) * (i.product?.price || 0), 0);
+                          const freight = Number(order.freight_value || 0);
+                          const netTotal = totalProducts + freight;
+                          return (
+                            <>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total Produtos</span>
+                                <span style={{ fontSize: '0.875rem', color: 'var(--text)', fontWeight: 700 }}>
+                                  R$ {totalProducts.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Frete</span>
+                                <span style={{ fontSize: '0.875rem', color: 'var(--text)', fontWeight: 700 }}>
+                                  R$ {freight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total Líquido</span>
+                                <span style={{ fontSize: '0.875rem', color: 'var(--primary)', fontWeight: 800 }}>
+                                  R$ {netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+
                 {/* Seção: Financeiro */}
                 <section>
                   <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <span style={{ width: '3px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px', display: 'inline-block' }} />
-                    Financeiro
+                    Faturamento / Controle de Pagamento
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.6rem' }}>
                     <div style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                       padding: '0.3rem 0.75rem', borderRadius: '99px',
@@ -3435,18 +3723,71 @@ export default function PedidosPage() {
                       </span>
                     )}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginTop: '0.6rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
                     {[
                       { label: 'Frete', value: freightStyle.label },
                       { label: 'Parcelas', value: `${order.installments_paid || 0}/${order.installments_total || 1} pagas` },
-                      { label: 'Frete (R$)', value: order.freight_value ? `R$ ${Number(order.freight_value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '—' },
-                    ].map(({ label, value }) => (
+                      { label: 'Frete (R$)', value: order.freight_value ? `R$ ${Number(order.freight_value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '—', hide: hideMonetaryValues },
+                    ].filter(x => !x.hide).map(({ label, value }) => (
                       <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
                         <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
                         <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
                       </div>
                     ))}
                   </div>
+
+                  {/* Tabela de parcelas a receber */}
+                  {!hideMonetaryValues && (() => {
+                    const orderTransactions = financialTransactions.filter(t => t.order_id === order.id);
+                    if (orderTransactions.length === 0) {
+                      return (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '0.5rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                          Sem parcelas detalhadas sincronizadas. Status resumido: {order.installments_paid} de {order.installments_total} parcelas quitadas.
+                        </div>
+                      );
+                    }
+                    return (
+                      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', marginTop: '0.5rem' }}>
+                        <div style={{ padding: '0.4rem 0.6rem', fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                          Contas a Receber (Conta Azul)
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
+                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Vencimento</th>
+                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Descrição</th>
+                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor</th>
+                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Situação</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {orderTransactions.map((t: any) => {
+                              const isPaid = t.status === 'CONCILIADO';
+                              return (
+                                <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                  <td style={{ padding: '0.4rem 0.6rem' }}>
+                                    {t.due_date ? new Date(t.due_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                                  </td>
+                                  <td style={{ padding: '0.4rem 0.6rem' }}>{t.description || 'Parcela'}</td>
+                                  <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>
+                                    R$ {(t.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </td>
+                                  <td style={{ padding: '0.4rem 0.6rem' }}>
+                                    <span style={{
+                                      color: isPaid ? 'var(--success, #10b981)' : 'var(--warning, #f97316)',
+                                      fontWeight: 700
+                                    }}>
+                                      {isPaid ? 'Recebido' : 'Em aberto'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
                 </section>
 
                 {/* Seção: Prazo */}

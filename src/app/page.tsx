@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
-import { Boxes, ArrowRight, ShieldCheck, Database, Cpu } from 'lucide-react';
+import { Boxes, ArrowRight, ShieldCheck, Database, Cpu, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<UserRole>('Administrador');
   
@@ -229,13 +230,33 @@ export default function LoginPage() {
 
               <div className="form-group">
                 <label className="form-label">Senha *</label>
-                <input 
-                  type="password" 
-                  className="form-input" 
-                  required 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    className="form-input" 
+                    required 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    style={{ paddingRight: '2.5rem', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: 'var(--text-muted, #888)',
+                      padding: '4px'
+                    }}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
 
               {isSignUpMode && (

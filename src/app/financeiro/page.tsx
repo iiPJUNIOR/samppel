@@ -61,14 +61,14 @@ export default function FinanceiroPage() {
   };
 
   useEffect(() => {
-    const allowed = ['Administrador', 'Financeiro'];
+    const allowed = ['Administrador'];
     if (user && allowed.includes(user.role)) {
       fetchFinanceData();
     }
   }, [user]);
 
   // Security guard check
-  const allowed = ['Administrador', 'Financeiro'];
+  const allowed = ['Administrador'];
   if (user && !allowed.includes(user.role)) {
     return (
       <div className="page-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80vh', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
