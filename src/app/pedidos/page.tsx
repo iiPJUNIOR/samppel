@@ -3535,7 +3535,7 @@ export default function PedidosPage() {
                       { label: 'OP', value: order.op_number || '—' },
                       { label: 'Arte', value: detailItem.name || '—' },
                       { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
-                      { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
+                      { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—' },
                       { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
                     ].map(({ label, value }) => (
                       <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
