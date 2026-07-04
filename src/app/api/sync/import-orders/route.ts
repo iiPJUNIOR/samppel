@@ -5,10 +5,12 @@ import { ContaAzulService } from '@/services/conta_azul';
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const tenantId = searchParams.get('tenantId') || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+  const startDate = searchParams.get('startDate') || undefined;
+  const endDate = searchParams.get('endDate') || undefined;
 
   try {
     const service = new ContaAzulService(tenantId);
-    const result = await service.importOrders();
+    const result = await service.importOrders(startDate, endDate);
 
     return NextResponse.json({
       success: true,

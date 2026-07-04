@@ -260,11 +260,23 @@ export default function PedidosPage() {
   };
 
   const [importing, setImporting] = useState(false);
+  const [importStartDate, setImportStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 15);
+    return d.toISOString().split('T')[0];
+  });
+  const [importEndDate, setImportEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
 
   const handleImportOrders = async () => {
     setImporting(true);
     try {
-      const res = await fetch('/api/sync/import-orders', { method: 'POST' });
+      const queryParams = new URLSearchParams();
+      if (importStartDate) queryParams.append('startDate', importStartDate);
+      if (importEndDate) queryParams.append('endDate', importEndDate);
+
+      const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, { method: 'POST' });
       if (!res.ok) {
         throw new Error('Falha ao importar pedidos.');
       }
@@ -1505,15 +1517,49 @@ export default function PedidosPage() {
             </button>
           </div>
 
-          <button 
-            onClick={handleImportOrders} 
-            disabled={importing}
-            className="btn btn-secondary" 
-            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-          >
-            <RefreshCw size={16} className={importing ? 'spinner' : ''} />
-            <span>{importing ? 'Importando...' : 'Importar Conta Azul'}</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: 'var(--surface-hover)', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem' }}>Período:</span>
+            <input 
+              type="date" 
+              value={importStartDate} 
+              onChange={(e) => setImportStartDate(e.target.value)}
+              disabled={importing}
+              style={{
+                padding: '0.3rem 0.5rem',
+                fontSize: '0.8rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text)',
+                outline: 'none'
+              }}
+            />
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
+            <input 
+              type="date" 
+              value={importEndDate} 
+              onChange={(e) => setImportEndDate(e.target.value)}
+              disabled={importing}
+              style={{
+                padding: '0.3rem 0.5rem',
+                fontSize: '0.8rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text)',
+                outline: 'none'
+              }}
+            />
+            <button 
+              onClick={handleImportOrders} 
+              disabled={importing}
+              className="btn btn-secondary" 
+              style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+            >
+              <RefreshCw size={14} className={importing ? 'spinner' : ''} />
+              <span>{importing ? 'Importando...' : 'Importar Conta Azul'}</span>
+            </button>
+          </div>
 
           {canCreate && (
             <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>

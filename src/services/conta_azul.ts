@@ -852,7 +852,7 @@ export class ContaAzulService {
   /**
    * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
    */
-  public async importOrders(): Promise<{ imported: number; updated: number }> {
+  public async importOrders(startDate?: string, endDate?: string): Promise<{ imported: number; updated: number }> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
     const isMock = false;
 
@@ -863,7 +863,14 @@ export class ContaAzulService {
     try {
       const token = await this.getValidAccessToken();
       // Usar o endpoint oficial /v1/venda/busca com paginação no padrão da API v2 da Conta Azul
-      const response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100`, {
+      let url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100`;
+      if (startDate) {
+        url += `&data_inicio=${startDate}`;
+      }
+      if (endDate) {
+        url += `&data_fim=${endDate}`;
+      }
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`
