@@ -359,14 +359,14 @@ export default function ClientesPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>Nome / Razão Social</th>
-                <th>IDs</th>
-                <th>CNPJ / CPF</th>
-                <th>E-mail</th>
-                <th>Telefone</th>
-                <th>Endereço</th>
-                <th>Sincronização Conta Azul</th>
-                <th>Ações</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Nome / Razão Social</th>
+                <th style={{ whiteSpace: 'nowrap' }}>IDs</th>
+                <th style={{ whiteSpace: 'nowrap' }}>CNPJ / CPF</th>
+                <th style={{ whiteSpace: 'nowrap' }}>E-mail</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Telefone</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Endereço</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Sincronização Conta Azul</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -383,32 +383,36 @@ export default function ClientesPage() {
               ) : (
                 groupedCustomers.map((customer) => (
                   <tr key={customer.id}>
-                    <td style={{ fontWeight: 600 }}>{customer.name}</td>
-                    <td><code>{customer.all_ids}</code></td>
-                    <td><code>{formatDocument(customer.document) || '---'}</code></td>
-                    <td style={{ textTransform: 'lowercase' }}>{customer.email || '---'}</td>
-                    <td>{formatPhone(customer.phone) || '---'}</td>
-                    <td style={{ fontSize: '0.8rem', maxWidth: '250px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }} title={customer.name}>
+                      {customer.name}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}><code>{customer.all_ids}</code></td>
+                    <td style={{ whiteSpace: 'nowrap' }}><code>{formatDocument(customer.document) || '---'}</code></td>
+                    <td style={{ textTransform: 'lowercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={customer.email}>
+                      {customer.email || '---'}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatPhone(customer.phone) || '---'}</td>
+                    <td style={{ fontSize: '0.8rem', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={customer.address}>
                       {customer.address || '---'}
                     </td>
-                    <td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
                       {customer.conta_azul_id ? (
-                        <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`}>
+                        <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
                           <CheckCircle2 size={12} />
                           Integrado ({customer.conta_azul_id.substring(0, 8)})
                         </span>
                       ) : (
-                        <span className="badge badge-warning">
+                        <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
                           <HelpCircle size={12} />
                           Pendente
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
                       <button 
                         onClick={() => handleOpenEdit(customer)} 
                         className="btn btn-secondary"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
+                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
                       >
                         <Edit size={12} />
                         <span>Editar</span>
