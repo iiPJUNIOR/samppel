@@ -531,7 +531,7 @@ export default function LoginPage() {
             {showRoleSelector ? (
               /* ── Role Selector ────────────────────────── */
               <>
-                <p className="lp-form-title">Olá, {tempProfile?.full_name?.split(' ')[0]} 👋</p>
+                <p className="lp-form-title">Olá, {tempProfile?.full_name?.split(' ')[0]}</p>
                 <p className="lp-form-sub">Escolha o perfil para acessar o sistema.</p>
 
                 <div className="lp-roles">

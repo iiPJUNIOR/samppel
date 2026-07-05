@@ -173,7 +173,7 @@ export default function DashboardPage() {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>
-            {greet()}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''} 👋
+            {greet()}{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''}
           </h1>
           <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
             {today}
