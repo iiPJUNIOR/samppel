@@ -2598,44 +2598,5 @@ export async function getSectorTransitionReport(
   };
 }
 
-export async function clearAllOrders() {
-  if (isMockMode) {
-    mockOrders = [];
-    mockOrderItems = [];
-    mockOrderItemSectorHistory = [];
-    mockFinancial = mockFinancial.filter(t => t.type !== 'RECEITA');
-    return { data: true, error: null };
-  }
-
-  const db = getDbClient();
-  try {
-    // 1. Delete all order items packaging
-    await db.from('order_item_packaging').delete().gte('created_at', '1970-01-01');
-  } catch (e) {
-    console.warn('Silent warning on order_item_packaging clear:', e);
-  }
-
-  try {
-    // 2. Delete all balance adjustments
-    await db.from('order_balance_adjustments').delete().gte('created_at', '1970-01-01');
-  } catch (e) {
-    console.warn('Silent warning on order_balance_adjustments clear:', e);
-  }
-
-  try {
-    // 3. Delete financial transactions that are RECEITA
-    await db.from('financial_transactions').delete().eq('type', 'RECEITA');
-  } catch (e) {
-    console.warn('Silent warning on financial_transactions clear:', e);
-  }
-
-  // 4. Delete orders (cascades to order_items and others)
-  const { data, error } = await db.from('orders').delete().gte('created_at', '1970-01-01');
-  if (error) {
-    return { data: null, error };
-  }
-  return { data: true, error: null };
-}
-
 
 

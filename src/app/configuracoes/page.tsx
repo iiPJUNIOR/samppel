@@ -22,8 +22,7 @@ import {
   updatePackagingMaterialType,
   deletePackagingMaterialType,
   getPackagingSettings,
-  savePackagingSettings,
-  clearAllOrders
+  savePackagingSettings
 } from '@/services/supabase';
 import { 
   ShieldAlert, 
@@ -89,33 +88,6 @@ export default function ConfiguracoesPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any>(null);
-  const [clearingOrders, setClearingOrders] = useState(false);
-
-  const handleClearOrders = async () => {
-    if (!window.confirm('ATENÇÃO: Você tem certeza que deseja excluir TODOS os pedidos, itens, embalagens e transações financeiras de receita do banco de dados? Esta ação é irreversível.')) {
-      return;
-    }
-    const confirmWord = window.prompt('Para confirmar a exclusão definitiva de todos os pedidos, digite a palavra "CONFIRMAR" abaixo:');
-    if (confirmWord !== 'CONFIRMAR') {
-      alert('Operação cancelada.');
-      return;
-    }
-    setClearingOrders(true);
-    try {
-      const { error } = await clearAllOrders();
-      if (error) {
-        alert('Erro ao excluir pedidos: ' + error.message);
-      } else {
-        alert('Todos os pedidos e transações de receita foram excluídos com sucesso.');
-        fetchConfigAndLogs();
-      }
-    } catch (e: any) {
-      console.error(e);
-      alert('Erro inesperado: ' + e.message);
-    } finally {
-      setClearingOrders(false);
-    }
-  };
 
   const fetchConfigAndLogs = async () => {
     setLoading(true);
@@ -972,40 +944,6 @@ export default function ConfiguracoesPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      {/* ZONA DE PERIGO / LIMPEZA DE DADOS */}
-      <div className="card" style={{ marginBottom: '2rem', border: '1px solid hsla(0, 84.2%, 60.2%, 0.3)', background: 'hsla(0, 84.2%, 60.2%, 0.02)' }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'hsl(0, 84.2%, 50%)' }}>
-          <ShieldAlert size={18} />
-          Zona de Perigo — Limpeza de Dados
-        </h3>
-        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: '1.4' }}>
-          A exclusão de pedidos é uma ação definitiva que removerá permanentemente todos os registros de pedidos, ordens de produção, dados de embalagens e transações financeiras de receitas associadas a vendas do banco de dados. Os logs de sincronização e credenciais do Conta Azul não serão alterados.
-        </p>
-        <div>
-          <button 
-            type="button" 
-            className="btn" 
-            onClick={handleClearOrders}
-            disabled={clearingOrders}
-            style={{ 
-              backgroundColor: 'hsl(0, 84.2%, 60.2%)', 
-              color: '#fff', 
-              fontWeight: 600, 
-              padding: '0.5rem 1rem', 
-              border: 'none', 
-              borderRadius: 'var(--radius-md)', 
-              cursor: 'pointer',
-              fontSize: '0.8rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.35rem'
-            }}
-          >
-            {clearingOrders ? 'Excluindo...' : 'Excluir Todos os Pedidos'}
-          </button>
         </div>
       </div>
 
