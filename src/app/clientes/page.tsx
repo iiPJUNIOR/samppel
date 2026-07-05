@@ -23,6 +23,77 @@ export default function ClientesPage() {
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formAddress, setFormAddress] = useState('');
+  const [searchingContaAzul, setSearchingContaAzul] = useState(false);
+
+  const formatDocument = (val: string) => {
+    const clean = val.replace(/\D/g, '').substring(0, 14);
+    if (clean.length <= 11) {
+      // CPF: 999.999.999-99
+      return clean
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    } else {
+      // CNPJ: 99.999.999/9999-99
+      return clean
+        .replace(/(\d{2})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1/$2')
+        .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+    }
+  };
+
+  const formatPhone = (val: string) => {
+    const clean = val.replace(/\D/g, '').substring(0, 11);
+    if (clean.length <= 10) {
+      // (99) 9999-9999
+      return clean
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{4})(\d{1,4})$/, '$1-$2');
+    } else {
+      // (99) 99999-9999
+      return clean
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{5})(\d{1,4})$/, '$1-$2');
+    }
+  };
+
+  const handlePullFromContaAzul = async () => {
+    const cleanDoc = formDocument.replace(/\D/g, '');
+    if (!cleanDoc && !formName) {
+      alert('Preencha o CNPJ/CPF ou o Nome do cliente para buscar no Conta Azul.');
+      return;
+    }
+
+    setSearchingContaAzul(true);
+    try {
+      const queryParams = new URLSearchParams();
+      if (cleanDoc) queryParams.append('document', cleanDoc);
+      else queryParams.append('name', formName);
+
+      const response = await fetch(`/api/sync/search-customer?${queryParams.toString()}`);
+      if (!response.ok) {
+        throw new Error('Erro na requisição de busca.');
+      }
+      const data = await response.json();
+      if (data.success && data.found && data.customer) {
+        const c = data.customer;
+        setFormName(c.name || formName);
+        if (c.document) setFormDocument(formatDocument(c.document));
+        if (c.email) setFormEmail(c.email.toLowerCase());
+        if (c.phone) setFormPhone(formatPhone(c.phone));
+        if (c.address) setFormAddress(c.address);
+        alert('Dados importados da Conta Azul preenchidos com sucesso!');
+      } else {
+        alert(data.message || 'Nenhum cliente encontrado com essas credenciais na Conta Azul.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao buscar cliente na Conta Azul: ' + err.message);
+    } finally {
+      setSearchingContaAzul(false);
+    }
+  };
 
   const fetchCustomers = async () => {
     setLoading(true);
@@ -311,13 +382,26 @@ export default function ClientesPage() {
 
               <div className="form-group">
                 <label className="form-label">CNPJ / CPF</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Ex: 00.000.000/0001-00"
-                  value={formDocument}
-                  onChange={(e) => setFormDocument(e.target.value)}
-                />
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="Ex: 00.000.000/0001-00"
+                    value={formDocument}
+                    onChange={(e) => setFormDocument(formatDocument(e.target.value))}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handlePullFromContaAzul}
+                    disabled={searchingContaAzul}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', display: 'flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
+                  >
+                    <RefreshCw size={12} className={searchingContaAzul ? 'spinner' : ''} />
+                    {searchingContaAzul ? 'Buscando...' : 'Buscar no Conta Azul'}
+                  </button>
+                </div>
               </div>
 
               <div className="form-group">
@@ -327,7 +411,7 @@ export default function ClientesPage() {
                   className="form-input" 
                   placeholder="Ex: financeiro@empresa.com"
                   value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
+                  onChange={(e) => setFormEmail(e.target.value.toLowerCase().trim())}
                 />
               </div>
 
@@ -338,7 +422,7 @@ export default function ClientesPage() {
                   className="form-input" 
                   placeholder="Ex: (11) 98765-4321"
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
+                  onChange={(e) => setFormPhone(formatPhone(e.target.value))}
                 />
               </div>
 

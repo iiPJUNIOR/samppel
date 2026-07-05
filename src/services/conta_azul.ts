@@ -1829,5 +1829,65 @@ export class ContaAzulService {
 
     return { success: true, orderId };
   }
+
+  async findPessoaOnContaAzul(query: { documento?: string; busca?: string }) {
+    const token = await this.getValidAccessToken();
+    const cleanDoc = (query.documento || '').replace(/\D/g, '');
+    
+    let url = `${CONTA_AZUL_API_URL}/v1/pessoas?tamanho_pagina=5`;
+    if (cleanDoc) {
+      url += `&documento=${cleanDoc}`;
+    } else if (query.busca) {
+      url += `&busca=${encodeURIComponent(query.busca)}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erro ao buscar no Conta Azul: ${await response.text()}`);
+    }
+
+    const resData = await response.json();
+    const items = resData.itens || resData.items || [];
+    if (items.length === 0) {
+      return null;
+    }
+
+    const firstItem = items[0];
+    const detailResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${firstItem.id}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!detailResponse.ok) {
+      return {
+        conta_azul_id: firstItem.id,
+        name: firstItem.nome || firstItem.nome_fantasia || '',
+        document: firstItem.documento || '',
+        email: firstItem.email || '',
+        phone: firstItem.telefone_celular || firstItem.telefone_comercial || firstItem.telefone || '',
+        address: ''
+      };
+    }
+
+    const detail = await detailResponse.json();
+    let addrVal = '';
+    if (detail.enderecos?.[0]) {
+      const addr = detail.enderecos[0];
+      addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
+    }
+
+    return {
+      conta_azul_id: detail.id,
+      name: detail.nome || detail.nome_fantasia || '',
+      document: detail.documento || '',
+      email: detail.email || '',
+      phone: detail.telefone_celular || detail.telefone_comercial || detail.telefone || '',
+      address: addrVal
+    };
+  }
 }
 export default ContaAzulService;
