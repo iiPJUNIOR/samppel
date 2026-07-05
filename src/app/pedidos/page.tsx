@@ -2253,7 +2253,7 @@ export default function PedidosPage() {
               <thead>
                 <tr>
                   <th>PV / OP</th>
-                  <th>Nome Arte (Cliente)</th>
+                  <th>Produto/Serviço (Cliente)</th>
                   <th>Produto / Medida</th>
                   <th>Tiragem (Cortesia/Falta)</th>
                   <th>Embalagem Final</th>
@@ -3113,7 +3113,7 @@ export default function PedidosPage() {
 
                 {/* Nome da Arte */}
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Nome da Arte / Identificação Visual da Embalagem *</label>
+                  <label className="form-label">Produto/Serviço / Identificação Visual da Embalagem *</label>
                   <input 
                     type="text" 
                     className="form-input" 
@@ -3832,7 +3832,7 @@ export default function PedidosPage() {
                     {[
                       { label: 'PV', value: order.pv_number || '—' },
                       { label: 'OP', value: order.op_number || '—' },
-                      { label: 'Arte', value: detailItem.name || '—' },
+                      { label: 'Produto/Serviço', value: detailItem.name || '—' },
                       { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
                       { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—' },
                       { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
