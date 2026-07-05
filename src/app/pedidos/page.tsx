@@ -3796,8 +3796,8 @@ export default function PedidosPage() {
                       <tbody>
                         {orderItems.filter(i => i.order_id === order.id).map((i: any) => {
                           const itemStage = stages.find(s => s.id === i.stage_id);
-                          const unitPrice = i.product?.price || 0;
-                          const subtotal = (i.print_run || 0) * unitPrice;
+                          const unitPrice = i.unit_price !== undefined && i.unit_price !== null ? Number(i.unit_price) : (i.product?.price || 0);
+                          const subtotal = i.total_price !== undefined && i.total_price !== null ? Number(i.total_price) : ((i.print_run || 0) * unitPrice);
                           const isCurrent = i.id === detailItem.id;
                           return (
                             <tr key={i.id} style={{ 
@@ -3845,7 +3845,10 @@ export default function PedidosPage() {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                         {(() => {
                           const orderItemsList = orderItems.filter(i => i.order_id === order.id);
-                          const totalProducts = orderItemsList.reduce((acc, i) => acc + (i.print_run || 0) * (i.product?.price || 0), 0);
+                          const totalProducts = orderItemsList.reduce((acc, i) => {
+                            const itemTotal = i.total_price !== undefined && i.total_price !== null ? Number(i.total_price) : ((i.print_run || 0) * (i.product?.price || 0));
+                            return acc + itemTotal;
+                          }, 0);
                           const freight = Number(order.freight_value || 0);
                           const netTotal = totalProducts + freight;
                           return (

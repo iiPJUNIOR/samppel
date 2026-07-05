@@ -1210,6 +1210,10 @@ export class ContaAzulService {
 
           const localItem = existingItemsMap.get(currentIdx);
 
+          const itemVal = Number(item.value || item.valor || 0);
+          const itemQty = Number(item.quantity || item.quantidade || 0);
+          const itemTotalPrice = itemQty > 0 ? itemQty * itemVal : itemVal;
+
           const orderItemPayload = {
             tenant_id: this.tenantId,
             order_id: orderId,
@@ -1220,7 +1224,9 @@ export class ContaAzulService {
             print_run: item.quantity || item.quantidade || 1000,
             boxes_count: itemBoxesCount,
             packaging_type: itemPackagingType,
-            notes: item.description || item.descricao || ''
+            notes: item.description || item.descricao || '',
+            unit_price: itemVal,
+            total_price: itemTotalPrice
           };
 
           if (localItem) {
