@@ -334,6 +334,15 @@ export default function PedidosPage() {
   const [syncStep, setSyncStep] = useState('');
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncResult, setSyncResult] = useState<{ success: boolean; imported?: number; updated?: number; error?: string } | null>(null);
+  const [activeAbortController, setActiveAbortController] = useState<AbortController | null>(null);
+  const [isCancelled, setIsCancelled] = useState(false);
+
+  const handleCancelSync = () => {
+    if (activeAbortController) {
+      activeAbortController.abort();
+      setIsCancelled(true);
+    }
+  };
 
   const handleImportOrders = async () => {
     setImporting(true);
@@ -341,53 +350,74 @@ export default function PedidosPage() {
     setSyncStep('Iniciando comunicação com Conta Azul...');
     setSyncProgress(5);
     setSyncResult(null);
+    setIsCancelled(false);
 
-    let currentProgress = 5;
-    const interval = setInterval(() => {
-      if (currentProgress < 90) {
-        currentProgress += Math.floor(Math.random() * 8) + 2;
-        if (currentProgress > 90) currentProgress = 90;
-        setSyncProgress(currentProgress);
-
-        if (currentProgress < 25) {
-          setSyncStep('Autenticando e verificando tokens...');
-        } else if (currentProgress < 50) {
-          setSyncStep('Buscando pedidos do período selecionado...');
-        } else if (currentProgress < 75) {
-          setSyncStep('Processando clientes, produtos e faturamento...');
-        } else {
-          setSyncStep('Sincronizando registros no banco de dados...');
-        }
-      }
-    }, 400);
+    const controller = new AbortController();
+    setActiveAbortController(controller);
 
     try {
       const queryParams = new URLSearchParams();
       if (importStartDate) queryParams.append('startDate', importStartDate);
       if (importEndDate) queryParams.append('endDate', importEndDate);
 
-      const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, { method: 'POST' });
-      clearInterval(interval);
+      const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, { 
+        method: 'POST',
+        signal: controller.signal
+      });
 
       if (!res.ok) {
-        throw new Error('Falha ao importar pedidos.');
+        throw new Error('Falha ao conectar com o serviço de importação.');
       }
-      const data = await res.json();
-      if (data.success) {
-        setSyncProgress(100);
-        setSyncStep('Sincronização concluída com sucesso!');
-        setSyncResult({ success: true, imported: data.imported, updated: data.updated });
-        fetchAllData();
-      } else {
-        throw new Error(data.error || 'Erro desconhecido');
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const chunk = JSON.parse(line);
+                if (chunk.step) setSyncStep(chunk.step);
+                if (chunk.progress !== undefined) setSyncProgress(chunk.progress);
+                if (chunk.success !== undefined) {
+                  if (chunk.success) {
+                    setSyncProgress(100);
+                    setSyncStep('Sincronização concluída com sucesso!');
+                    setSyncResult({ success: true, imported: chunk.imported, updated: chunk.updated });
+                    fetchAllData();
+                  } else {
+                    throw new Error(chunk.error || 'Erro desconhecido');
+                  }
+                }
+              } catch (e) {
+                console.error('Erro ao ler linha de progresso:', e);
+              }
+            }
+          }
+        }
       }
     } catch (err: any) {
-      clearInterval(interval);
-      setSyncProgress(100);
-      setSyncStep('Falha na sincronização.');
-      setSyncResult({ success: false, error: err.message || 'Erro ao importar pedidos.' });
+      if (err.name === 'AbortError') {
+        setSyncProgress(90);
+        setSyncStep('Sincronização interrompida pelo usuário.');
+        setSyncResult({ success: false, error: 'A importação local foi cancelada por você.' });
+      } else {
+        setSyncProgress(100);
+        setSyncStep('Falha na sincronização.');
+        setSyncResult({ success: false, error: err.message || 'Erro ao importar pedidos.' });
+      }
     } finally {
       setImporting(false);
+      setActiveAbortController(null);
     }
   };
 
@@ -2610,10 +2640,13 @@ export default function PedidosPage() {
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease', textAlign: 'center'
           }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', margin: 0 }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', margin: 0 }}>
               <RefreshCw size={20} className={importing ? 'spinner' : ''} style={{ color: 'var(--primary)', animation: importing ? 'spin 1s linear infinite' : 'none' }} />
               Sincronização Conta Azul
             </h2>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '1.5rem', fontWeight: 500 }}>
+              Período: {importStartDate ? new Date(importStartDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Início'} a {importEndDate ? new Date(importEndDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Fim'}
+            </div>
 
             {/* Progresso */}
             <div style={{ margin: '1.5rem 0' }}>
@@ -2635,7 +2668,7 @@ export default function PedidosPage() {
                 }} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 500, textAlign: 'left', flex: 1, paddingRight: '0.5rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={syncStep}>
                   {syncStep}
                 </span>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text)', fontWeight: 700 }}>
@@ -2677,16 +2710,30 @@ export default function PedidosPage() {
               </div>
             )}
 
-            {/* Botão de Fechar */}
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <button
-                onClick={() => setIsSyncModalOpen(false)}
-                disabled={importing}
-                className="btn btn-secondary"
-                style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
-              >
-                {importing ? 'Sincronizando...' : 'Fechar'}
-              </button>
+            {/* Botões de Ação */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+              {importing ? (
+                <>
+                  <button
+                    onClick={handleCancelSync}
+                    className="btn btn-danger"
+                    style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
+                  >
+                    Cancelar Sincronização
+                  </button>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', lineHeight: 1.3, textAlign: 'left', width: '100%', display: 'block' }}>
+                    * A escuta local será interrompida e o modal será fechado. As chamadas em andamento no servidor não podem ser desfeitas via API.
+                  </span>
+                </>
+              ) : (
+                <button
+                  onClick={() => setIsSyncModalOpen(false)}
+                  className="btn btn-secondary"
+                  style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
+                >
+                  Fechar
+                </button>
+              )}
             </div>
           </div>
         </div>

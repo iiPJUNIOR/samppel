@@ -852,7 +852,7 @@ export class ContaAzulService {
   /**
    * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
    */
-  public async importOrders(startDate?: string, endDate?: string): Promise<{ imported: number; updated: number }> {
+  public async importOrders(startDate?: string, endDate?: string, onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
     const isMock = false;
 
@@ -861,7 +861,10 @@ export class ContaAzulService {
     }
 
     try {
+      onProgress?.('Autenticando e verificando tokens...', 5);
       const token = await this.getValidAccessToken();
+      
+      onProgress?.('Buscando lista de vendas no Conta Azul...', 10);
       // Usar o endpoint oficial /v1/venda/busca com paginação no padrão da API v2 da Conta Azul
       let url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100`;
       if (startDate) {
@@ -884,6 +887,8 @@ export class ContaAzulService {
 
       const resData = await response.json();
       const items = resData.itens || [];
+      
+      onProgress?.(`Encontrados ${items.length} pedidos. Sincronizando...`, 15);
 
       const dbClient = supabaseAdmin || supabase;
       if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
@@ -891,10 +896,14 @@ export class ContaAzulService {
       let imported = 0;
       let updated = 0;
 
+      let currentIdx = 0;
       for (const saleSummary of items) {
+        currentIdx++;
+        const pct = 15 + Math.floor((currentIdx / items.length) * 80);
         const statusStr = (saleSummary.situacao?.nome || '').toUpperCase();
         if (statusStr === 'CANCELADO') continue;
 
+        onProgress?.(`PV-${saleSummary.numero || currentIdx}: Puxando detalhes do pedido...`, pct);
         // Endpoint oficial /v1/venda/{id} da API v2 da Conta Azul
         const saleRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleSummary.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -905,6 +914,7 @@ export class ContaAzulService {
         }
         const saleDetail = await saleRes.json();
 
+        onProgress?.(`PV-${saleSummary.numero || currentIdx}: Puxando itens do pedido...`, pct);
         // Endpoint oficial /v1/venda/{id}/itens da API v2 da Conta Azul
         const itemsRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleSummary.id}/itens`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -937,6 +947,7 @@ export class ContaAzulService {
 
           if (needsDetails) {
             try {
+              onProgress?.(`PV-${saleSummary.numero || currentIdx}: Buscando cadastro detalhado do cliente...`, pct);
               const custResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${clientUuid}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
               });
@@ -1160,6 +1171,7 @@ export class ContaAzulService {
             
             if (inst.id) {
               try {
+                onProgress?.(`PV-${saleSummary.numero || currentIdx}: Reconciliando parcela ${inst.numero || 1}...`, pct);
                 // Puxamos a situação real da parcela pela API financeira
                 const instRes = await fetch(`${CONTA_AZUL_API_URL}/v1/financeiro/eventos-financeiros/parcelas/${inst.id}`, {
                   headers: { 'Authorization': `Bearer ${token}` }
