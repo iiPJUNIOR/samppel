@@ -36,7 +36,7 @@ const AppInput = (props: InputProps) => {
       <div className="relative w-full">
         <input
           type="text"
-          className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[var(--color-surface)] px-4 font-thin outline-none drop-shadow-sm transition-all duration-200 ease-in-out focus:bg-[var(--color-bg)] placeholder:font-medium text-[var(--color-text-primary)] text-sm"
+          className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[rgba(22,26,29,0.55)] backdrop-blur-md px-4 font-thin outline-none drop-shadow-sm transition-all duration-200 ease-in-out focus:bg-[rgba(16,18,20,0.75)] placeholder:font-medium text-[var(--color-text-primary)] text-sm"
           placeholder={placeholder}
           onMouseMove={handleMouseMove}
           onMouseEnter={() => setIsHovering(true)}
@@ -219,7 +219,7 @@ export default function LoginPage() {
             <div className="form-container h-full z-10 flex flex-col justify-center">
               <form className="text-center py-6 grid gap-4 w-full" onSubmit={handleSubmit}>
                 <div className="grid gap-2 mb-2">
-                  <h1 className="text-2xl md:text-3xl font-extrabold text-[var(--color-heading)]">
+                  <h1 className="text-2xl md:text-3xl font-extrabold text-[#FF4757]">
                     {isSignUpMode ? 'Criar Conta' : 'Entrar no Painel'}
                   </h1>
                   
@@ -229,7 +229,7 @@ export default function LoginPage() {
                       href="https://login.contaazul.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 px-4 py-2.5 border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-muted-surface)] text-xs text-[var(--color-text-primary)] rounded-md transition-all duration-200 cursor-pointer font-medium w-full"
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 border border-[var(--color-border)] bg-transparent hover:bg-white/5 text-xs text-[var(--color-text-primary)] rounded-md transition-all duration-200 cursor-pointer font-medium w-full"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#00A4E4]">
                         <path d="M15 3h6v6" />
@@ -293,7 +293,7 @@ export default function LoginPage() {
                         Cargo / Função *
                       </label>
                       <select 
-                        className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[var(--color-surface)] px-4 font-thin outline-none drop-shadow-sm transition-all focus:bg-[var(--color-bg)] text-[var(--color-text-primary)] text-sm cursor-pointer"
+                        className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[rgba(22,26,29,0.55)] backdrop-blur-md px-4 font-thin outline-none drop-shadow-sm transition-all focus:bg-[rgba(16,18,20,0.75)] text-[var(--color-text-primary)] text-sm cursor-pointer"
                         required 
                         value={role}
                         onChange={(e) => setRole(e.target.value as UserRole)}
@@ -307,21 +307,17 @@ export default function LoginPage() {
                   )}
                 </div>
 
-                <div className="flex gap-4 justify-between items-center mt-2">
-                  <a href="#" className="font-light text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
-                    Esqueceu sua senha?
-                  </a>
-                  
+                <div className="flex flex-col gap-3 mt-4">
                   <button 
                     type="submit"
                     disabled={loading}
-                    className="group/button relative inline-flex justify-center items-center overflow-hidden rounded-md bg-[#2C333A] px-6 py-2 text-xs font-semibold text-white transition-all duration-300 ease-in-out hover:scale-105 hover:shadow-lg hover:shadow-[var(--color-text-primary)] cursor-pointer"
+                    className="w-full py-3 px-6 rounded-md bg-[#FF4757] hover:bg-[#ff5b6b] text-white font-bold text-sm transition-all duration-200 cursor-pointer shadow-md hover:shadow-lg hover:shadow-red-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                   >
-                    <span className="text-sm px-2 py-0.5">{loading ? 'Carregando...' : isSignUpMode ? 'Cadastrar' : 'Entrar'}</span>
-                    <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-13deg)_translateX(-100%)] group-hover/button:duration-1000 group-hover/button:[transform:skew(-13deg)_translateX(100%)]">
-                      <div className="relative h-full w-8 bg-white/20" />
-                    </div>
+                    <span>{loading ? 'Carregando...' : isSignUpMode ? 'Cadastrar' : 'Entrar'}</span>
                   </button>
+                  <a href="#" className="font-light text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-center mt-1">
+                    Esqueceu sua senha?
+                  </a>
                 </div>
 
                 {/* Toggle Mode */}
@@ -344,7 +340,7 @@ export default function LoginPage() {
         </div>
 
         {/* Right Section (Brand Logo Banner) */}
-        <div className="hidden lg:flex w-1/2 right h-full bg-[#161a1d] items-center justify-center border-l border-[var(--color-border)] p-12">
+        <div className="hidden lg:flex w-1/2 right h-full bg-[#2C333A] items-center justify-center border-l border-[var(--color-border)] p-12">
           <Image
             src="/logo.png"
             width={350}
