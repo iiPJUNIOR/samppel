@@ -725,15 +725,17 @@ export class ContaAzulService {
   /**
    * Importa clientes do Conta Azul para o banco local (v2 /pessoas)
    */
-  public async importCustomers(): Promise<{ imported: number; updated: number }> {
+  public async importCustomers(onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
     const isMock = false;
 
     if (isMock) {
+      onProgress?.('Carregando clientes simulados...', 100);
       return { imported: 3, updated: 0 };
     }
 
     try {
+      onProgress?.('Buscando clientes no Conta Azul...', 5);
       const token = await this.getValidAccessToken();
       const response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas?tamanho_pagina=100`, {
         method: 'GET',
@@ -756,10 +758,14 @@ export class ContaAzulService {
       let imported = 0;
       let updated = 0;
 
+      let currentIdx = 0;
       for (const pessoa of items) {
+        currentIdx++;
+        const pct = 10 + Math.floor((currentIdx / items.length) * 85);
         const isCliente = (pessoa.perfis || []).includes('Cliente');
         if (!isCliente) continue;
 
+        onProgress?.(`Processando ${pessoa.nome || 'cliente'}...`, pct);
         const document = pessoa.documento || pessoa.cnpj || pessoa.cpf || '';
         
         let query = dbClient

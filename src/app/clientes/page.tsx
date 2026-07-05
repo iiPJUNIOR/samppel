@@ -25,6 +25,13 @@ export default function ClientesPage() {
   const [formAddress, setFormAddress] = useState('');
   const [searchingContaAzul, setSearchingContaAzul] = useState(false);
 
+  // Sync Modal State (similar to order sync)
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncStep, setSyncStep] = useState('');
+  const [syncResult, setSyncResult] = useState<any>(null);
+  const [activeAbortController, setActiveAbortController] = useState<AbortController | null>(null);
+
   const formatDocument = (val: string) => {
     const clean = val.replace(/\D/g, '').substring(0, 14);
     if (clean.length <= 11) {
@@ -180,25 +187,82 @@ export default function ClientesPage() {
 
   const [importing, setImporting] = useState(false);
 
-  // Aciona a importacao de clientes do Conta Azul para o banco local
+  const handleCancelSync = () => {
+    if (activeAbortController) {
+      activeAbortController.abort();
+    }
+  };
+
+  // Aciona a importacao de clientes do Conta Azul com progresso via ReadableStream
   const handleImportCustomers = async () => {
     setImporting(true);
+    setSyncProgress(0);
+    setSyncStep('Iniciando conexão com a Conta Azul...');
+    setSyncResult(null);
+    setIsSyncModalOpen(true);
+
+    const controller = new AbortController();
+    setActiveAbortController(controller);
+
     try {
-      const res = await fetch('/api/sync/import-customers', { method: 'POST' });
+      const res = await fetch('/api/sync/import-customers', { 
+        method: 'POST',
+        signal: controller.signal
+      });
+
       if (!res.ok) {
-        throw new Error('Falha ao importar clientes.');
+        throw new Error('Falha ao conectar com o serviço de importação.');
       }
-      const data = await res.json();
-      if (data.success) {
-        alert(`Sincronizacao concluida com sucesso! Clientes importados: ${data.imported}, atualizados: ${data.updated}.`);
-        fetchCustomers();
-      } else {
-        alert('Erro ao importar clientes: ' + (data.error || 'Erro desconhecido'));
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const chunk = JSON.parse(line);
+                if (chunk.step) setSyncStep(chunk.step);
+                if (chunk.progress !== undefined) setSyncProgress(chunk.progress);
+                if (chunk.success !== undefined) {
+                  if (chunk.success) {
+                    setSyncProgress(100);
+                    setSyncStep('Sincronização de clientes concluída com sucesso!');
+                    setSyncResult({ success: true, imported: chunk.imported, updated: chunk.updated });
+                    fetchCustomers();
+                  } else {
+                    throw new Error(chunk.error || 'Erro desconhecido');
+                  }
+                }
+              } catch (e) {
+                console.error('Erro ao ler linha de progresso:', e);
+              }
+            }
+          }
+        }
       }
     } catch (err: any) {
-      alert(err.message || 'Erro ao importar clientes.');
+      if (err.name === 'AbortError') {
+        setSyncProgress(90);
+        setSyncStep('Sincronização interrompida pelo usuário.');
+        setSyncResult({ success: false, error: 'A importação local de clientes foi cancelada por você.' });
+      } else {
+        setSyncProgress(100);
+        setSyncStep('Falha na sincronização.');
+        setSyncResult({ success: false, error: err.message || 'Erro ao importar clientes.' });
+      }
     } finally {
       setImporting(false);
+      setActiveAbortController(null);
     }
   };
 
@@ -452,6 +516,117 @@ export default function ClientesPage() {
                 </button>
               </footer>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* MODAL DE PROGRESSO DE SINCRONIZAÇÃO */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {isSyncModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '2rem', maxWidth: '420px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', margin: 0 }}>
+              <RefreshCw size={20} className={importing ? 'spinner' : ''} style={{ color: 'var(--primary)', animation: importing ? 'spin 1s linear infinite' : 'none' }} />
+              Sincronização Conta Azul
+            </h2>
+
+            {/* Progresso */}
+            <div style={{ margin: '1.5rem 0' }}>
+              <div style={{
+                height: '8px',
+                width: '100%',
+                backgroundColor: 'var(--border)',
+                borderRadius: '999px',
+                overflow: 'hidden',
+                position: 'relative',
+                marginBottom: '0.75rem'
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${syncProgress}%`,
+                  backgroundColor: syncResult && !syncResult.success ? 'var(--danger)' : 'var(--primary)',
+                  borderRadius: '999px',
+                  transition: 'width 0.3s ease-out'
+                }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 500, textAlign: 'left', flex: 1, paddingRight: '0.5rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={syncStep}>
+                  {syncStep}
+                </span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text)', fontWeight: 700 }}>
+                  {syncProgress}%
+                </span>
+              </div>
+            </div>
+
+            {/* Resultados / Erros */}
+            {syncResult && (
+              <div style={{
+                backgroundColor: syncResult.success ? 'rgba(46, 213, 115, 0.1)' : 'rgba(255, 71, 87, 0.1)',
+                border: `1px solid ${syncResult.success ? '#2ed573' : 'var(--danger)'}`,
+                borderRadius: 'var(--radius-md)',
+                padding: '1rem',
+                marginBottom: '1.5rem',
+                textAlign: 'left'
+              }}>
+                {syncResult.success ? (
+                  <div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: '#2ed573', fontSize: '0.9rem', fontWeight: 700 }}>
+                      Sincronizado com Sucesso
+                    </h4>
+                    <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <li>Clientes importados: <strong>{syncResult.imported}</strong></li>
+                      <li>Clientes atualizados: <strong>{syncResult.updated}</strong></li>
+                    </ul>
+                  </div>
+                ) : (
+                  <div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--danger)', fontSize: '0.9rem', fontWeight: 700 }}>
+                      Falha na Importação
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                      {syncResult.error}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Botões de Ação */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+              {importing ? (
+                <>
+                  <button
+                    onClick={handleCancelSync}
+                    className="btn btn-danger"
+                    style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
+                  >
+                    Cancelar Sincronização
+                  </button>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', lineHeight: 1.3, textAlign: 'left', width: '100%', display: 'block' }}>
+                    * A escuta local será interrompida e o modal será fechado. As chamadas em andamento no servidor não podem ser desfeitas via API.
+                  </span>
+                </>
+              ) : (
+                <button
+                  onClick={() => setIsSyncModalOpen(false)}
+                  className="btn btn-primary"
+                  style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
+                >
+                  Concluir e Fechar
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
