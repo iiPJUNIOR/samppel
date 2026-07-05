@@ -32,6 +32,64 @@ export default function ClientesPage() {
   const [syncResult, setSyncResult] = useState<any>(null);
   const [activeAbortController, setActiveAbortController] = useState<AbortController | null>(null);
 
+  // Column Resizing States
+  const [columnWidths, setColumnWidths] = useState<{ [key: string]: number }>({
+    name: 200,
+    ids: 90,
+    document: 155,
+    email: 190,
+    phone: 150,
+    address: 220,
+    sync: 160,
+    actions: 100
+  });
+
+  useEffect(() => {
+    const saved = localStorage.getItem('samppel_customer_column_widths');
+    if (saved) {
+      try {
+        setColumnWidths(JSON.parse(saved));
+      } catch (e) {
+        console.error('Error loading column widths:', e);
+      }
+    }
+  }, []);
+
+  const handleMouseDown = (e: React.MouseEvent, colKey: string) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = columnWidths[colKey] || 150;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.max(50, startWidth + deltaX);
+      setColumnWidths(prev => {
+        const next = { ...prev, [colKey]: newWidth };
+        localStorage.setItem('samppel_customer_column_widths', JSON.stringify(next));
+        return next;
+      });
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const getColStyle = (colKey: string): React.CSSProperties => {
+    const width = columnWidths[colKey] || 150;
+    return {
+      width: `${width}px`,
+      minWidth: `${width}px`,
+      maxWidth: `${width}px`,
+      position: 'relative',
+      whiteSpace: 'nowrap'
+    };
+  };
+
   const formatDocument = (val: string) => {
     const clean = val.replace(/\D/g, '').substring(0, 14);
     if (clean.length <= 11) {
@@ -359,14 +417,36 @@ export default function ClientesPage() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ whiteSpace: 'nowrap' }}>Nome / Razão Social</th>
-                <th style={{ whiteSpace: 'nowrap' }}>IDs</th>
-                <th style={{ whiteSpace: 'nowrap' }}>CNPJ / CPF</th>
-                <th style={{ whiteSpace: 'nowrap' }}>E-mail</th>
-                <th style={{ whiteSpace: 'nowrap' }}>Telefone</th>
-                <th style={{ whiteSpace: 'nowrap' }}>Endereço</th>
-                <th style={{ whiteSpace: 'nowrap' }}>Sincronização Conta Azul</th>
-                <th style={{ whiteSpace: 'nowrap' }}>Ações</th>
+                {[
+                  { key: 'name', label: 'Nome / Razão Social' },
+                  { key: 'ids', label: 'IDs' },
+                  { key: 'document', label: 'CNPJ / CPF' },
+                  { key: 'email', label: 'E-mail' },
+                  { key: 'phone', label: 'Telefone' },
+                  { key: 'address', label: 'Endereço' },
+                  { key: 'sync', label: 'Sincronização Conta Azul' },
+                  { key: 'actions', label: 'Ações' }
+                ].map((col) => (
+                  <th key={col.key} style={getColStyle(col.key)}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <span>{col.label}</span>
+                      <div
+                        onMouseDown={(e) => handleMouseDown(e, col.key)}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          right: 0,
+                          bottom: 0,
+                          width: '6px',
+                          cursor: 'col-resize',
+                          zIndex: 10,
+                          borderRight: '1px solid var(--border)'
+                        }}
+                        title="Arraste para redimensionar"
+                      />
+                    </div>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -390,37 +470,54 @@ export default function ClientesPage() {
                   
                   return (
                     <tr key={customer.id}>
-                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }} title={name}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                          <span>{name}</span>
+                      {/* Nome */}
+                      <td style={{ ...getColStyle('name'), fontWeight: 600 }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                          <span 
+                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.name || 200) - 25}px` }} 
+                            title={name}
+                          >
+                            {name}
+                          </span>
                           <button
+                            type="button"
                             onClick={() => navigator.clipboard.writeText(name)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
                             title="Copiar Nome"
                           >
                             <Copy size={11} />
                           </button>
                         </div>
                       </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                          <code>{customer.all_ids}</code>
+
+                      {/* IDs */}
+                      <td style={getColStyle('ids')}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                          <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.ids || 90) - 25}px` }}>
+                            {customer.all_ids}
+                          </code>
                           <button
+                            type="button"
                             onClick={() => navigator.clipboard.writeText(customer.all_ids)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
                             title="Copiar IDs"
                           >
                             <Copy size={11} />
                           </button>
                         </div>
                       </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
+
+                      {/* CNPJ / CPF */}
+                      <td style={getColStyle('document')}>
                         {doc ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <code>{doc}</code>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.document || 155) - 25}px` }}>
+                              {doc}
+                            </code>
                             <button
+                              type="button"
                               onClick={() => navigator.clipboard.writeText(doc)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
                               title="Copiar CNPJ/CPF"
                             >
                               <Copy size={11} />
@@ -428,13 +525,21 @@ export default function ClientesPage() {
                           </div>
                         ) : '---'}
                       </td>
-                      <td style={{ textTransform: 'lowercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={email}>
+
+                      {/* E-mail */}
+                      <td style={getColStyle('email')}>
                         {email ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <span>{email}</span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <span 
+                              style={{ textTransform: 'lowercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.email || 190) - 25}px` }} 
+                              title={email}
+                            >
+                              {email}
+                            </span>
                             <button
+                              type="button"
                               onClick={() => navigator.clipboard.writeText(email)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
                               title="Copiar E-mail"
                             >
                               <Copy size={11} />
@@ -442,13 +547,18 @@ export default function ClientesPage() {
                           </div>
                         ) : '---'}
                       </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
+
+                      {/* Telefone */}
+                      <td style={getColStyle('phone')}>
                         {phone ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <span>{phone}</span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.phone || 150) - 25}px` }}>
+                              {phone}
+                            </span>
                             <button
+                              type="button"
                               onClick={() => navigator.clipboard.writeText(phone)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
                               title="Copiar Telefone"
                             >
                               <Copy size={11} />
@@ -456,13 +566,21 @@ export default function ClientesPage() {
                           </div>
                         ) : '---'}
                       </td>
-                      <td style={{ fontSize: '0.8rem', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={address}>
+
+                      {/* Endereço */}
+                      <td style={{ ...getColStyle('address'), fontSize: '0.8rem' }}>
                         {address ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <span>{address}</span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <span 
+                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.address || 220) - 25}px` }} 
+                              title={address}
+                            >
+                              {address}
+                            </span>
                             <button
+                              type="button"
                               onClick={() => navigator.clipboard.writeText(address)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
                               title="Copiar Endereço"
                             >
                               <Copy size={11} />
@@ -470,7 +588,9 @@ export default function ClientesPage() {
                           </div>
                         ) : '---'}
                       </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
+
+                      {/* Sincronização */}
+                      <td style={getColStyle('sync')}>
                         {customer.conta_azul_id ? (
                           <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
                             <CheckCircle2 size={12} />
@@ -483,8 +603,11 @@ export default function ClientesPage() {
                           </span>
                         )}
                       </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
+
+                      {/* Ações */}
+                      <td style={getColStyle('actions')}>
                         <button 
+                          type="button"
                           onClick={() => handleOpenEdit(customer)} 
                           className="btn btn-secondary"
                           style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
