@@ -2,18 +2,20 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import styles from './Sidebar.module.css';
-import { 
-  LayoutDashboard, 
-  ShoppingBag, 
-  Users, 
-  Contact, 
-  Package, 
-  DollarSign, 
+import {
+  LayoutDashboard,
+  ShoppingBag,
+  Users,
+  Package,
+  DollarSign,
   Settings,
-  Boxes
+  Boxes,
+  ChevronDown,
+  LogOut,
 } from 'lucide-react';
 
 interface NavItem {
@@ -38,52 +40,55 @@ export default function Sidebar() {
     {
       label: 'Dashboard',
       path: '/dashboard',
-      icon: <LayoutDashboard size={18} />,
+      icon: <LayoutDashboard size={17} />,
       allowedRoles: ['Administrador', 'Comercial', 'Produção', 'Financeiro', 'Estoque', 'Expedição']
     },
     {
       label: 'Pedidos',
       path: '/pedidos',
-      icon: <ShoppingBag size={18} />,
+      icon: <ShoppingBag size={17} />,
       allowedRoles: ['Administrador', 'Comercial', 'Produção', 'Financeiro', 'Estoque', 'Expedição']
     },
     {
       label: 'Clientes',
       path: '/clientes',
-      icon: <Users size={18} />,
+      icon: <Users size={17} />,
       allowedRoles: ['Administrador', 'Comercial', 'Financeiro']
     },
-
     {
       label: 'Produtos / Estoque',
       path: '/produtos',
-      icon: <Package size={18} />,
+      icon: <Package size={17} />,
       allowedRoles: ['Administrador', 'Comercial', 'Produção', 'Estoque']
     },
     {
       label: 'Financeiro',
       path: '/financeiro',
-      icon: <DollarSign size={18} />,
+      icon: <DollarSign size={17} />,
       allowedRoles: ['Administrador', 'Financeiro']
     },
     {
       label: 'Relatórios',
       path: '/relatorios',
-      icon: <Boxes size={18} />,
+      icon: <Boxes size={17} />,
       allowedRoles: ['Administrador', 'Comercial', 'Produção']
     },
     {
-      label: 'Configurações / API',
+      label: 'Configurações',
       path: '/configuracoes',
-      icon: <Settings size={18} />,
+      icon: <Settings size={17} />,
       allowedRoles: ['Administrador']
     }
   ];
 
   if (!user) return null;
 
-  // Filtrar links com base no cargo do usuario
   const visibleNavItems = navItems.filter(item => item.allowedRoles.includes(user.role));
+
+  // Generate initials from full name
+  const initials = user.full_name
+    ? user.full_name.split(' ').slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()
+    : user.email?.[0]?.toUpperCase() ?? '?';
 
   const handleLogout = async () => {
     await logout();
@@ -91,14 +96,19 @@ export default function Sidebar() {
 
   return (
     <aside className={styles.sidebar}>
+      {/* ── Brand ────────────────────────────────── */}
       <div className={styles.brand}>
-        <img 
-          src="/logo.png" 
-          alt="Samppel Embalagens Logo" 
-          style={{ width: '100%', maxWidth: '200px', objectFit: 'contain' }}
+        <Image
+          src="/logo.png"
+          alt="Samppel Embalagens"
+          width={160}
+          height={52}
+          style={{ objectFit: 'contain', objectPosition: 'left' }}
+          priority
         />
       </div>
 
+      {/* ── Navigation ───────────────────────────── */}
       <nav className={styles.navSection}>
         {visibleNavItems.map((item) => {
           if (item.path === '/pedidos') {
@@ -106,7 +116,7 @@ export default function Sidebar() {
             const showConfig = user.role === 'Administrador';
             const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
             const showSaldos = user?.role === 'Administrador' || isSupervisor;
-            
+
             return (
               <div key={item.path} className={styles.submenuContainer}>
                 <button
@@ -117,33 +127,34 @@ export default function Sidebar() {
                     {item.icon}
                     <span>{item.label}</span>
                   </div>
-                  <span className={`${styles.chevron} ${isPedidosOpen ? styles.chevronOpen : ''}`}>
-                    ▼
-                  </span>
+                  <ChevronDown
+                    size={14}
+                    className={`${styles.chevron} ${isPedidosOpen ? styles.chevronOpen : ''}`}
+                  />
                 </button>
-                
+
                 {isPedidosOpen && (
                   <div className={styles.submenu}>
-                    <Link 
+                    <Link
                       href="/pedidos"
                       className={`${styles.submenuLink} ${pathname === '/pedidos' ? styles.submenuActive : ''}`}
                     >
-                      <span>Painel Kanban</span>
+                      Painel Kanban
                     </Link>
                     {showSaldos && (
-                      <Link 
+                      <Link
                         href="/pedidos/saldos"
                         className={`${styles.submenuLink} ${pathname === '/pedidos/saldos' ? styles.submenuActive : ''}`}
                       >
-                        <span>Saldos e Créditos</span>
+                        Saldos e Créditos
                       </Link>
                     )}
                     {showConfig && (
-                      <Link 
+                      <Link
                         href="/pedidos/configuracoes"
                         className={`${styles.submenuLink} ${pathname === '/pedidos/configuracoes' ? styles.submenuActive : ''}`}
                       >
-                        <span>Configurações</span>
+                        Configurações
                       </Link>
                     )}
                   </div>
@@ -154,8 +165,8 @@ export default function Sidebar() {
 
           const isActive = pathname === item.path || pathname?.startsWith(item.path + '/');
           return (
-            <Link 
-              key={item.path} 
+            <Link
+              key={item.path}
               href={item.path}
               className={`${styles.navLink} ${isActive ? styles.active : ''}`}
             >
@@ -166,37 +177,41 @@ export default function Sidebar() {
         })}
       </nav>
 
+      {/* ── User Profile Box ─────────────────────── */}
       <div className={styles.profileBox}>
-        <div className={styles.profileInfo}>
-          <span className={styles.profileName}>{user.full_name}</span>
-          <span className={styles.profileEmail}>{user.email}</span>
-          {user.actual_role === 'Administrador' ? (
-            <select
-              value={user.role}
-              onChange={(e) => changeActiveRole(e.target.value as UserRole)}
-              className={styles.roleSelector}
-              style={{ marginTop: '6px' }}
-            >
-              <option value="Administrador">Administrador</option>
-              <option value="Comercial">Comercial</option>
-              <option value="Produção">Produção</option>
-              <option value="Financeiro">Financeiro</option>
-              <option value="Estoque">Estoque</option>
-              <option value="Expedição">Expedição</option>
-            </select>
-          ) : (
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)', marginTop: '2px', display: 'block' }}>
-              {user.role}
-            </span>
-          )}
+        <div className={styles.profileRow}>
+          {/* Avatar with initials */}
+          <div className={styles.avatar}>
+            {initials}
+          </div>
+          <div className={styles.profileInfo}>
+            <span className={styles.profileName}>{user.full_name}</span>
+            <span className={styles.profileEmail}>{user.email}</span>
+          </div>
         </div>
-        
-        <button 
-          onClick={handleLogout}
-          className="btn btn-secondary" 
-          style={{ width: '100%', marginTop: '10px', padding: '0.4rem', fontSize: '0.8rem', display: 'flex', justifyContent: 'center', gap: '0.25rem', alignItems: 'center' }}
-        >
-          <span>Sair da Conta</span>
+
+        {/* Role selector (admin only) or role badge */}
+        {user.actual_role === 'Administrador' ? (
+          <select
+            value={user.role}
+            onChange={(e) => changeActiveRole(e.target.value as UserRole)}
+            className={styles.roleSelector}
+          >
+            <option value="Administrador">Administrador</option>
+            <option value="Comercial">Comercial</option>
+            <option value="Produção">Produção</option>
+            <option value="Financeiro">Financeiro</option>
+            <option value="Estoque">Estoque</option>
+            <option value="Expedição">Expedição</option>
+          </select>
+        ) : (
+          <span className={styles.roleBadge}>{user.role}</span>
+        )}
+
+        {/* Logout */}
+        <button onClick={handleLogout} className={styles.logoutBtn}>
+          <LogOut size={14} />
+          <span>Sair da conta</span>
         </button>
       </div>
     </aside>

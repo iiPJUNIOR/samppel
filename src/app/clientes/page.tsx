@@ -392,80 +392,72 @@ export default function ClientesPage() {
 
   return (
     <div className="page-container">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Cadastro de Clientes</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Gerenciamento de clientes da Samppel Embalagens e integração com Conta Azul.
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Cadastro de Clientes</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+            {groupedCustomers.length} cliente{groupedCustomers.length !== 1 ? 's' : ''} cadastrado{groupedCustomers.length !== 1 ? 's' : ''}
           </p>
         </div>
-        
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button 
-            onClick={handleImportCustomers} 
+
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <button
+            onClick={handleImportCustomers}
             disabled={importing}
-            className="btn btn-secondary" 
-            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+            className="btn btn-secondary"
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
           >
-            <RefreshCw size={16} className={importing ? 'spinner' : ''} />
+            <RefreshCw size={14} className={importing ? 'spinner' : ''} />
             <span>{importing ? 'Importando...' : 'Importar do Conta Azul'}</span>
           </button>
-          
-          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <Plus size={16} />
-            <span>Cadastrar Cliente</span>
+
+          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
+            <Plus size={14} />
+            <span>Novo Cliente</span>
           </button>
         </div>
       </header>
 
-      {/* SEARCH BAR */}
-      <div className="filter-bar" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
-        <div className="form-group" style={{ flex: 1, minWidth: '300px', margin: 0 }}>
-          <label className="form-label">Buscar Cliente</label>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Search size={18} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
-            <input 
-              type="text" 
-              className="form-input" 
-              style={{ paddingLeft: '38px' }} 
-              placeholder="Digite o nome ou CNPJ/CPF do cliente..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+      {/* FILTER BAR */}
+      <div className="filter-bar" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '280px' }}>
+          <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+          <input
+            type="text"
+            className="form-input"
+            style={{ paddingLeft: '36px' }}
+            placeholder="Buscar por nome ou CNPJ/CPF..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
-        {/* Dropdown de Colunas Aparentes */}
+        {/* Columns dropdown */}
         <div style={{ position: 'relative' }} onMouseLeave={() => setIsColumnsDropdownOpen(false)}>
-          <button 
+          <button
             type="button"
-            onClick={() => setIsColumnsDropdownOpen(!isColumnsDropdownOpen)} 
-            className="btn btn-secondary" 
-            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', height: '42px' }}
+            onClick={() => setIsColumnsDropdownOpen(!isColumnsDropdownOpen)}
+            className="btn btn-secondary"
+            title="Gerenciar colunas visíveis"
+            style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', fontSize: '0.8125rem' }}
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/>
+            </svg>
             <span>Colunas</span>
-            <span style={{
-              display: 'inline-block',
-              width: '0', height: '0',
-              marginLeft: '2px',
-              verticalAlign: 'middle',
-              borderTop: '4px solid',
-              borderRight: '4px solid transparent',
-              borderLeft: '4px solid transparent'
-            }} />
           </button>
-          
+
           {isColumnsDropdownOpen && (
             <div style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: '8px',
+              position: 'absolute', top: 'calc(100% + 6px)', right: 0,
               backgroundColor: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-premium)',
-              padding: '0.85rem', zIndex: 100, display: 'flex', flexDirection: 'column',
-              gap: '0.65rem', minWidth: '200px', textAlign: 'left',
-              animation: 'fadeIn 0.15s ease'
+              borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)',
+              padding: '0.75rem', zIndex: 100,
+              display: 'flex', flexDirection: 'column', gap: '0.5rem',
+              minWidth: '190px', animation: 'fadeIn 0.15s ease'
             }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.25rem' }}>
-                Colunas Visíveis
+              <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.125rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.375rem' }}>
+                Colunas visíveis
               </div>
               {[
                 { key: 'name', label: 'Nome / Razão Social' },
@@ -477,12 +469,12 @@ export default function ClientesPage() {
                 { key: 'sync', label: 'Sincronização' },
                 { key: 'actions', label: 'Ações' }
               ].map(col => (
-                <label key={col.key} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer', userSelect: 'none', margin: 0 }}>
-                  <input 
-                    type="checkbox" 
-                    checked={visibleColumns[col.key] !== false} 
+                <label key={col.key} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', fontSize: '0.8125rem', cursor: 'pointer', userSelect: 'none', margin: 0, color: 'var(--text)' }}>
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns[col.key] !== false}
                     onChange={() => toggleColumnVisibility(col.key)}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'pointer', accentColor: 'var(--primary)' }}
                   />
                   <span>{col.label}</span>
                 </label>
@@ -493,8 +485,8 @@ export default function ClientesPage() {
       </div>
 
       {/* CUSTOMERS LIST */}
-      <div className="card">
-        <div className="table-responsive">
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-responsive" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
           <table className="table">
             <thead>
               <tr>
@@ -702,11 +694,19 @@ export default function ClientesPage() {
                       {/* Ações */}
                       {visibleColumns.actions !== false && (
                         <td style={getColStyle('actions')}>
-                          <button 
+                          <button
                             type="button"
-                            onClick={() => handleOpenEdit(customer)} 
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
+                            onClick={() => handleOpenEdit(customer)}
+                            title="Editar cliente"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                              padding: '0.375rem 0.75rem', background: 'transparent',
+                              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                              cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                           >
                             <Edit size={12} />
                             <span>Editar</span>

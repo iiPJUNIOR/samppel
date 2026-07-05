@@ -142,77 +142,75 @@ export default function FinanceiroPage() {
 
   return (
     <div className="page-container">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Conciliação Financeira</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Acompanhe contas a pagar e receber, concilie boletos e sincronize com a Conta Azul.
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Conciliação Financeira</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+            {filteredTransactions.length} título{filteredTransactions.length !== 1 ? 's' : ''} exibido{filteredTransactions.length !== 1 ? 's' : ''}
           </p>
         </div>
-        
-        <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <Plus size={16} />
+
+        <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
+          <Plus size={14} />
           <span>Lançar Título</span>
         </button>
       </header>
 
       {/* BALANCE PANELS */}
       <div className="dashboard-grid">
-        <div className="card metric-card">
-          <div className="metric-info">
-            <span className="metric-label">Total de Receitas Liquidadas</span>
-            <span className="metric-value" style={{ color: 'var(--success)' }}>
-              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalReceivables)}
-            </span>
+        <div className="card" style={{ padding: '1.25rem 1.375rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-muted)' }}>Receitas Liquidadas</span>
+            <div style={{ width: '36px', height: '36px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(22, 163, 74, 0.1)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <TrendingUp size={20} />
+            </div>
           </div>
-          <div className="metric-icon" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)' }}>
-            <TrendingUp size={24} />
-          </div>
-        </div>
-
-        <div className="card metric-card">
-          <div className="metric-info">
-            <span className="metric-label">Total de Despesas Pagas</span>
-            <span className="metric-value" style={{ color: 'var(--danger)' }}>
-              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalPayables)}
-            </span>
-          </div>
-          <div className="metric-icon" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)' }}>
-            <TrendingDown size={24} />
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalReceivables)}
           </div>
         </div>
 
-        <div className="card metric-card">
-          <div className="metric-info">
-            <span className="metric-label">Saldo em Caixa Real</span>
-            <span className="metric-value" style={{ color: netBalance >= 0 ? 'var(--primary)' : 'var(--danger)' }}>
-              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(netBalance)}
-            </span>
+        <div className="card" style={{ padding: '1.25rem 1.375rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-muted)' }}>Despesas Pagas</span>
+            <div style={{ width: '36px', height: '36px', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(220, 38, 38, 0.1)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <TrendingDown size={20} />
+            </div>
           </div>
-          <div className="metric-icon" style={{ backgroundColor: netBalance >= 0 ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(239, 68, 68, 0.1)', color: netBalance >= 0 ? 'var(--primary)' : 'var(--danger)' }}>
-            <DollarSign size={24} />
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--danger)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalPayables)}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '1.25rem 1.375rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-muted)' }}>Saldo em Caixa Real</span>
+            <div style={{ width: '36px', height: '36px', borderRadius: 'var(--radius-sm)', backgroundColor: netBalance >= 0 ? 'rgba(var(--primary-rgb), 0.1)' : 'rgba(220, 38, 38, 0.1)', color: netBalance >= 0 ? 'var(--primary)' : 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <DollarSign size={20} />
+            </div>
+          </div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: netBalance >= 0 ? 'var(--primary)' : 'var(--danger)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(netBalance)}
           </div>
         </div>
       </div>
 
       {/* FILTER BAR */}
-      <div className="filter-bar">
-        <div className="form-group">
-          <label className="form-label">Tipo de Título</label>
-          <select 
+      <div className="filter-bar" style={{ alignItems: 'center', gap: '0.75rem' }}>
+        <div className="form-group" style={{ margin: 0, minWidth: '160px' }}>
+          <select
             className="form-select"
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
           >
             <option value="">Todos os Tipos</option>
-            <option value="RECEITA">Receitas (Inflow)</option>
-            <option value="DESPESA">Despesas (Outflow)</option>
+            <option value="RECEITA">Receitas</option>
+            <option value="DESPESA">Despesas</option>
           </select>
         </div>
 
-        <div className="form-group">
-          <label className="form-label">Status da Conciliação</label>
-          <select 
+        <div className="form-group" style={{ margin: 0, minWidth: '180px' }}>
+          <select
             className="form-select"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
@@ -223,16 +221,11 @@ export default function FinanceiroPage() {
             <option value="CANCELADO">Cancelado</option>
           </select>
         </div>
-
-        <button onClick={fetchFinanceData} className="btn btn-secondary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <RefreshCw size={16} />
-          <span>Recarregar</span>
-        </button>
       </div>
 
       {/* TRANSACTIONS TABLE LIST */}
-      <div className="card">
-        <div className="table-responsive">
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-responsive" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
           <table className="table">
             <thead>
               <tr>
@@ -275,7 +268,7 @@ export default function FinanceiroPage() {
                           {isIncome ? 'Receita' : 'Despesa'}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 600, color: isIncome ? 'var(--success)' : 'var(--danger)' }}>
+                      <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: isIncome ? 'var(--success)' : 'var(--danger)' }}>
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(t.amount)}
                       </td>
                       <td>{new Date(t.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
@@ -307,10 +300,18 @@ export default function FinanceiroPage() {
                       </td>
                       <td>
                         {t.status === 'PENDENTE' && (
-                          <button 
-                            onClick={() => handleReconcile(t.id)} 
-                            className="btn btn-primary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}
+                          <button
+                            onClick={() => handleReconcile(t.id)}
+                            title="Conciliar título"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                              padding: '0.375rem 0.75rem', background: 'transparent',
+                              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                              cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--success)'; e.currentTarget.style.color = 'var(--success)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                           >
                             <CheckCircle2 size={12} />
                             <span>Conciliar</span>

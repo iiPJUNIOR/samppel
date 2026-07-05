@@ -162,47 +162,40 @@ export default function ProdutosPage() {
 
   return (
     <div className="page-container">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Produtos & Estoque</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Gerencie o catálogo de especificações de embalagens, preços comerciais e contagem de estoque.
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Produtos &amp; Estoque</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+            {filteredProducts.length} produto{filteredProducts.length !== 1 ? 's' : ''} encontrado{filteredProducts.length !== 1 ? 's' : ''}
           </p>
         </div>
-        
+
         {canCreate && (
-          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <Plus size={16} />
+          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
+            <Plus size={14} />
             <span>Novo Produto</span>
           </button>
         )}
       </header>
 
       {/* FILTERS */}
-      <div className="filter-bar">
-        <div className="form-group" style={{ flex: 1, minWidth: '300px' }}>
-          <label className="form-label">Buscar Produto</label>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Search size={18} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
-            <input 
-              type="text" 
-              className="form-input" 
-              style={{ paddingLeft: '38px' }} 
-              placeholder="Buscar por nome do produto ou SKU..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+      <div className="filter-bar" style={{ alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '280px' }}>
+          <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+          <input
+            type="text"
+            className="form-input"
+            style={{ paddingLeft: '36px' }}
+            placeholder="Buscar por nome ou SKU..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
-        <button onClick={fetchProducts} className="btn btn-secondary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <RefreshCw size={16} />
-          <span>Recarregar</span>
-        </button>
       </div>
 
       {/* PRODUCTS TABLE */}
-      <div className="card">
-        <div className="table-responsive">
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-responsive" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
           <table className="table">
             <thead>
               <tr>
@@ -235,7 +228,7 @@ export default function ProdutosPage() {
                       {product.description || '---'}
                     </td>
                     {isAdmin && (
-                      <td style={{ fontWeight: 500 }}>
+                      <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price)}
                       </td>
                     )}
@@ -265,20 +258,36 @@ export default function ProdutosPage() {
                       )}
                     </td>
                     <td style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button 
-                        onClick={() => handleOpenStock(product)} 
-                        className="btn btn-secondary"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
+                      <button
+                        onClick={() => handleOpenStock(product)}
+                        title="Ajustar estoque"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                          padding: '0.375rem 0.75rem', background: 'transparent',
+                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                          fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                          cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                       >
                         <Warehouse size={12} />
-                        <span>Ajustar Estoque</span>
+                        <span>Estoque</span>
                       </button>
 
                       {canEditDetails && (
-                        <button 
-                          onClick={() => handleOpenEdit(product)} 
-                          className="btn btn-secondary"
-                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
+                        <button
+                          onClick={() => handleOpenEdit(product)}
+                          title="Editar produto"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                            padding: '0.375rem 0.75rem', background: 'transparent',
+                            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                            fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                            cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                         >
                           <Edit size={12} />
                           <span>Editar</span>
