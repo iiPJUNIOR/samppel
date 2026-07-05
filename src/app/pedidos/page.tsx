@@ -1527,15 +1527,15 @@ export default function PedidosPage() {
     switch (shippingType) {
       case 'LALAMOVE':
       case 'MOTOBOY':
-        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: '⚡ Lalamove/Moto' };
+        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: 'Lalamove/Moto' };
       case 'ENTREGA_PROPRIA':
-        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: '🚗 Carro Próprio' };
+        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: 'Carro Próprio' };
       case 'TRANSPORTADORA':
       case 'TRANSPORTADORA_LONGA':
-        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: '🚛 Transportadora' };
+        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: 'Transportadora' };
       case 'RETIRADA':
       default:
-        return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: '🏪 Retirada' };
+        return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: 'Retirada' };
     }
   };
 
@@ -1703,7 +1703,7 @@ export default function PedidosPage() {
       <div className="filter-bar">
         <div className="form-group">
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            🔍 Pesquisar Pedido (PV/OP)
+            Pesquisar Pedido (PV/OP)
           </label>
           <input 
             type="text" 
@@ -1783,7 +1783,7 @@ export default function PedidosPage() {
         {(user?.role === 'Produção' || user?.role === 'Administrador' || user?.role === 'Comercial') && handlingTeams.length > 0 && (
           <div className="form-group" style={{ background: 'hsla(271, 91.2%, 65.1%, 0.06)', border: '1px solid hsla(271, 91.2%, 65.1%, 0.2)', borderRadius: 'var(--radius-md)', padding: '0.5rem 0.75rem' }}>
             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              👥 Filtrar por Equipe de Manuseio
+            Filtrar por Equipe de Manuseio
             </label>
             <select 
               className="form-select"
@@ -1983,7 +1983,7 @@ export default function PedidosPage() {
                           {/* Arte & Cliente */}
                           <div>
                             <div style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem', lineHeight: '1.1', wordBreak: 'break-all' }}>
-                              🎨 {item.name || 'Arte'}
+                              {item.name || 'Arte'}
                             </div>
                             <div 
                               style={{ 
@@ -2024,7 +2024,7 @@ export default function PedidosPage() {
                               }} 
                               title={item.physical_location || 'Salão'}
                             >
-                              📍 {item.physical_location || 'Salão'}
+                              {item.physical_location || 'Salão'}
                             </span>
                           </div>
 
@@ -2094,8 +2094,8 @@ export default function PedidosPage() {
                                 color: isOverdue ? 'var(--danger)' : 'var(--text-muted)',
                                 fontWeight: isOverdue ? 700 : 400
                               }}>
-                                📅 Prazo: {deadline.toLocaleDateString('pt-BR')}
-                                {isOverdue && <span style={{ fontSize: '0.6rem' }}>⚠️ (Atrasado)</span>}
+                                Prazo: {deadline.toLocaleDateString('pt-BR')}
+                                {isOverdue && <span style={{ fontSize: '0.6rem', color: 'var(--danger)' }}>(Atrasado)</span>}
                               </div>
                             );
                           })()}
@@ -2120,7 +2120,6 @@ export default function PedidosPage() {
                                 : 'hsla(0, 84.2%, 60.2%, 0.08)',
                               border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`,
                             }}>
-                              <span style={{ fontSize: '0.6rem' }}>👥</span>
                               <span style={{ 
                                 fontSize: '0.6rem', 
                                 fontWeight: 700,
@@ -2153,7 +2152,6 @@ export default function PedidosPage() {
                                 justifyContent: 'center',
                               }}
                             >
-                              <span style={{ fontSize: '0.65rem' }}>{itemsWithPackaging.has(item.id) ? '✅' : '📦'}</span>
                               <span style={{
                                 fontSize: '0.62rem',
                                 fontWeight: 700,
@@ -2185,7 +2183,6 @@ export default function PedidosPage() {
                                 boxSizing: 'border-box'
                               }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 700, color: anySiblingInExpedition ? 'hsl(38, 92.7%, 45%)' : 'var(--text-muted)' }}>
-                                  <span>🔗</span>
                                   <span>Pedido Conjunto ({siblingItems.length + 1} itens)</span>
                                 </div>
                                 {siblingItems.map((sib: any) => {
@@ -2293,7 +2290,7 @@ export default function PedidosPage() {
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.95rem' }}>
-                            🎨 {order.art_name || 'Arte Genérica'}
+                            {order.art_name || 'Arte Genérica'}
                           </div>
                           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                             {order.customer?.name}
@@ -2332,7 +2329,7 @@ export default function PedidosPage() {
                             {order.production_sector}
                           </span>
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>
-                            📍 {order.physical_location || 'Salão'}
+                            {order.physical_location || 'Salão'}
                           </span>
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
@@ -2433,7 +2430,7 @@ export default function PedidosPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                💡 Alerta: Crédito ou Estoque de Personalizados
+                Alerta: Crédito ou Estoque de Personalizados
               </h3>
               <button 
                 onClick={() => setIsSuggestionModalOpen(false)} 
@@ -2551,7 +2548,7 @@ export default function PedidosPage() {
             animation: 'fadeIn 0.2s ease'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '1.75rem' }}>⚠️</span>
+              <AlertCircle size={24} style={{ color: '#eab308' }} />
               <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
                 Pedido Conjunto / Múltiplos Itens
               </h2>
@@ -2690,7 +2687,7 @@ export default function PedidosPage() {
                 {syncResult.success ? (
                   <div>
                     <h4 style={{ margin: '0 0 0.5rem 0', color: '#2ed573', fontSize: '0.9rem', fontWeight: 700 }}>
-                      ✓ Sincronizado com Sucesso
+                      Sincronizado com Sucesso
                     </h4>
                     <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       <li>Pedidos importados: <strong>{syncResult.imported}</strong></li>
@@ -2700,7 +2697,7 @@ export default function PedidosPage() {
                 ) : (
                   <div>
                     <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--danger)', fontSize: '0.9rem', fontWeight: 700 }}>
-                      ✕ Falha na Importação
+                      Falha na Importação
                     </h4>
                     <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                       {syncResult.error}
@@ -2758,13 +2755,13 @@ export default function PedidosPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
               <div>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  📦 Registro de Embalagem
+                  Registro de Embalagem
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>
                   {packagingModalItem.friendly_id} — {packagingModalItem.name}
                   {packagingModalTargetStageId && (
                     <span style={{ marginLeft: '0.5rem', color: 'hsl(38, 92.7%, 45%)', fontWeight: 600 }}>
-                      ⚠️ Preenchimento obrigatório para avançar para Expedição
+                      Preenchimento obrigatório para avançar para Expedição
                     </span>
                   )}
                 </p>
@@ -2789,12 +2786,12 @@ export default function PedidosPage() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)' }}>
-                      📦 Volume {idx + 1}
+                      Volume {idx + 1}
                     </h4>
                     {packagingVolumes.length > 1 && (
                       <button type="button" onClick={() => handleRemovePackagingVolume(idx)}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                        🗑 Remover
+                        Remover
                       </button>
                     )}
                   </div>
@@ -2833,7 +2830,7 @@ export default function PedidosPage() {
                         <option value="">— Nenhum —</option>
                         {packagingMaterialTypes.filter(t => t.status === 'ATIVO').map((t: any) => (
                           <option key={t.id} value={t.id}>
-                            {t.category === 'CAIXA' ? '📦' : t.category === 'FUNDO' ? '🟫' : t.category === 'DIVISORIA' ? '🔲' : t.category === 'SACO' ? '🛍️' : '➕'} {t.name}{t.code ? ` (${t.code})` : ''}
+                            {t.name}{t.code ? ` (${t.code})` : ''}
                           </option>
                         ))}
                       </select>
@@ -2860,8 +2857,8 @@ export default function PedidosPage() {
                   {/* Cubo dimensional calculado */}
                   {vol.length_cm && vol.width_cm && vol.height_cm && (
                     <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.75rem', background: 'hsla(221.2, 83.2%, 53.3%, 0.08)', border: '1px solid hsla(221.2, 83.2%, 53.3%, 0.2)', borderRadius: 'var(--radius-sm)', fontSize: '0.72rem', color: 'hsl(221.2, 83.2%, 53.3%)' }}>
-                      📐 Volume unitário: <strong>{(Number(vol.length_cm) * Number(vol.width_cm) * Number(vol.height_cm) / 1000000).toFixed(4)} m³</strong>
-                      {vol.weight_kg && (<span style={{ marginLeft: '1rem' }}>⚖️ Peso total: <strong>{(Number(vol.weight_kg) * Number(vol.box_count)).toFixed(3)} kg</strong></span>)}
+                      Volume unitário: <strong>{(Number(vol.length_cm) * Number(vol.width_cm) * Number(vol.height_cm) / 1000000).toFixed(4)} m³</strong>
+                      {vol.weight_kg && (<span style={{ marginLeft: '1rem' }}>Peso total: <strong>{(Number(vol.weight_kg) * Number(vol.box_count)).toFixed(3)} kg</strong></span>)}
                     </div>
                   )}
                 </div>
@@ -2870,7 +2867,7 @@ export default function PedidosPage() {
               {/* Botão adicionar volume */}
               <button type="button" onClick={handleAddPackagingVolume}
                 style={{ width: '100%', padding: '0.5rem', border: '1px dashed var(--border)', background: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
-                ➕ Adicionar Volume
+                Adicionar Volume
               </button>
 
               {/* Rodapé do modal */}
@@ -2879,7 +2876,7 @@ export default function PedidosPage() {
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={savingPackaging}>
-                  {savingPackaging ? 'Salvando...' : packagingModalTargetStageId ? '✅ Salvar e Avançar para Expedição' : '💾 Salvar Embalagem'}
+                  {savingPackaging ? 'Salvando...' : packagingModalTargetStageId ? 'Salvar e Avançar para Expedição' : 'Salvar Embalagem'}
                 </button>
               </div>
             </form>
@@ -2917,7 +2914,7 @@ export default function PedidosPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)' }}>
-                ⚖️ Conferência de Sobras & Faltas
+                Conferência de Sobras & Faltas
               </h3>
               <button 
                 onClick={() => setIsAdjustmentModalOpen(false)} 
@@ -3279,7 +3276,7 @@ export default function PedidosPage() {
 
                 {/* Localização Física */}
                 <div className="form-group">
-                  <label className="form-label">📍 Localização Física na Fábrica</label>
+                  <label className="form-label">Localização Física na Fábrica</label>
                   <input 
                     type="text" 
                     className="form-input" 
@@ -3432,7 +3429,7 @@ export default function PedidosPage() {
                 {formSector === 'Manuseio' && (
                   <div className="form-group" style={{ gridColumn: '1 / -1', background: 'hsla(271, 91.2%, 65.1%, 0.08)', border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem' }}>
                     <label className="form-label" style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      👥 Equipe de Manuseio Responsável
+                      Equipe de Manuseio Responsável
                     </label>
                     <select 
                       className="form-select"
@@ -3449,7 +3446,7 @@ export default function PedidosPage() {
                     </select>
                     {!formHandlingTeamId && (
                       <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                        ⚠️ Indique com qual equipe este material está sendo trabalhado.
+                        Indique com qual equipe este material está sendo trabalhado.
                       </p>
                     )}
                   </div>
@@ -3557,7 +3554,6 @@ export default function PedidosPage() {
               }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '1.1rem' }}>🔒</span>
                     <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text)' }}>
                       Autorização Necessária
                     </span>
@@ -3594,7 +3590,7 @@ export default function PedidosPage() {
                   </span>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>—</span>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text)' }}>
-                    🎨 {item.name}
+                    {item.name}
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', flexWrap: 'wrap', marginTop: '2px' }}>
@@ -3700,7 +3696,7 @@ export default function PedidosPage() {
                     fontSize: '0.78rem',
                     fontWeight: 600
                   }}>
-                    ⚠ {revertAuthError}
+                    {revertAuthError}
                   </div>
                 )}
 
@@ -3799,11 +3795,11 @@ export default function PedidosPage() {
                       </span>
                     )}
                     {isOverdue && (
-                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700 }}>⚠️ Atrasado</span>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700 }}>Atrasado</span>
                     )}
                   </div>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    🎨 {detailItem.name} · {customer.name || 'Cliente'}
+                    {detailItem.name} · {customer.name || 'Cliente'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -4121,7 +4117,7 @@ export default function PedidosPage() {
                         color: isOverdue ? 'var(--danger)' : 'hsl(38, 92.7%, 45%)',
                         fontSize: '0.82rem', fontWeight: 700
                       }}>
-                        📅 {deadline.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                        {deadline.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
                         {isOverdue && <span>(ATRASADO)</span>}
                       </div>
                     </section>
@@ -4151,7 +4147,7 @@ export default function PedidosPage() {
                       )}
                       {order.internal_notes && (
                         <div style={{ borderLeft: '3px solid var(--primary)', paddingLeft: '0.6rem', marginTop: '0.4rem' }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>🔒 Anotações Internas</span>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Anotações Internas</span>
                           <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.internal_notes}</p>
                         </div>
                       )}

@@ -236,14 +236,14 @@ export default function RelatoriosPage() {
           className={`btn ${activeTab === 'efficiency' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'efficiency' ? '2px solid var(--primary)' : 'none' }}
         >
-          ⏱️ Eficiência Operacional
+          Eficiência Operacional
         </button>
         <button 
           onClick={() => setActiveTab('credits')}
           className={`btn ${activeTab === 'credits' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'credits' ? '2px solid var(--primary)' : 'none' }}
         >
-          📦 Sobras, Faltas e Créditos
+          Sobras, Faltas e Créditos
         </button>
       </div>
 
@@ -745,10 +745,10 @@ export default function RelatoriosPage() {
                           border: '1px solid var(--border)',
                           fontSize: '0.7rem'
                         }}>
-                          {h.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' ? '📥 Armazenado' : 
-                           h.action_taken === 'CREDITO_PROXIMO_PEDIDO' ? '🪙 Crédito Gerado' : 
-                           h.action_taken === 'CANCELADO_DESCONTO' ? '💸 Desconto Aplicado' : 
-                           h.action_taken === 'COBRADO_ADICIONAL' ? '💳 Cobrança Extra' : h.action_taken}
+                          {h.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' ? 'Armazenado' : 
+                           h.action_taken === 'CREDITO_PROXIMO_PEDIDO' ? 'Crédito Gerado' : 
+                           h.action_taken === 'CANCELADO_DESCONTO' ? 'Desconto Aplicado' : 
+                           h.action_taken === 'COBRADO_ADICIONAL' ? 'Cobrança Extra' : h.action_taken}
                         </span>
                       </td>
                       <td>

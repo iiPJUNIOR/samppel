@@ -472,7 +472,7 @@ export default function DashboardPage() {
                     )}
                   </td>
                   <td>
-                    <div style={{ fontWeight: 700, color: 'var(--primary)' }}>🎨 {order.art_name || 'Arte Genérica'}</div>
+                    <div style={{ fontWeight: 700, color: 'var(--primary)' }}>{order.art_name || 'Arte Genérica'}</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{order.customer?.name}</div>
                   </td>
                   <td>
@@ -484,7 +484,7 @@ export default function DashboardPage() {
                   <td>{order.print_run?.toLocaleString('pt-BR')} un</td>
                   <td>
                     <div>{order.production_sector}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>📍 {order.physical_location || 'Salão'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{order.physical_location || 'Salão'}</div>
                   </td>
                   <td>
                     <span className="badge" style={{ backgroundColor: statusColors[order.status] + '15', color: statusColors[order.status] }}>

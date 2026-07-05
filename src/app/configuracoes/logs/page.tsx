@@ -193,9 +193,9 @@ export default function LogsIntegracaoPage() {
               onChange={(e) => setFilterStatus(e.target.value)}
             >
               <option value="">Todos os Status</option>
-              <option value="SUCCESS">🟢 SUCESSO</option>
-              <option value="ERROR">🔴 ERRO</option>
-              <option value="PENDING_RETRY">🟡 RE-TENTATIVA</option>
+              <option value="SUCCESS">SUCESSO</option>
+              <option value="ERROR">ERRO</option>
+              <option value="PENDING_RETRY">RE-TENTATIVA</option>
             </select>
           </div>
 

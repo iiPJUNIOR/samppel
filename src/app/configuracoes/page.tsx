@@ -581,9 +581,9 @@ export default function ConfiguracoesPage() {
                 value={machineStatus}
                 onChange={(e) => setMachineStatus(e.target.value as any)}
               >
-                <option value="ATIVO">🟢 Ativo</option>
-                <option value="INATIVO">🔴 Inativo</option>
-                <option value="MANUTENCAO">🔧 Em Manutenção</option>
+                <option value="ATIVO">Ativo</option>
+                <option value="INATIVO">Inativo</option>
+                <option value="MANUTENCAO">Em Manutenção</option>
               </select>
             </div>
 
@@ -714,8 +714,8 @@ export default function ConfiguracoesPage() {
                 value={teamStatus}
                 onChange={(e) => setTeamStatus(e.target.value as any)}
               >
-                <option value="ATIVO">🟢 Ativo</option>
-                <option value="INATIVO">🔴 Inativo</option>
+                <option value="ATIVO">Ativo</option>
+                <option value="INATIVO">Inativo</option>
               </select>
             </div>
 
@@ -836,9 +836,9 @@ export default function ConfiguracoesPage() {
               value={packagingAssociationRule}
               onChange={(e) => setPackagingAssociationRule(e.target.value as any)}
             >
-              <option value="FIRST_ITEM">🥇 Associar caixas ao primeiro item de produto do PV</option>
-              <option value="LARGEST_QUANTITY">📈 Associar caixas ao item de maior tiragem do PV</option>
-              <option value="MANUAL">✏️ Associação manual pelo operador (sem sugestão)</option>
+              <option value="FIRST_ITEM">Associar caixas ao primeiro item de produto do PV</option>
+              <option value="LARGEST_QUANTITY">Associar caixas ao item de maior tiragem do PV</option>
+              <option value="MANUAL">Associação manual pelo operador (sem sugestão)</option>
             </select>
             <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
               Convenção administrativa para associar e carregar automaticamente os insumos de caixa a um dos itens do PV.
@@ -872,18 +872,18 @@ export default function ConfiguracoesPage() {
             <div className="form-group">
               <label className="form-label">Categoria *</label>
               <select className="form-select" value={pmtCategory} onChange={(e) => setPmtCategory(e.target.value as any)}>
-                <option value="CAIXA">📦 Caixa</option>
-                <option value="FUNDO">🟫 Fundo</option>
-                <option value="DIVISORIA">🔲 Divisória</option>
-                <option value="SACO">🛍️ Saco / Sacola</option>
-                <option value="OUTRO">➕ Outro</option>
+                <option value="CAIXA">Caixa</option>
+                <option value="FUNDO">Fundo</option>
+                <option value="DIVISORIA">Divisória</option>
+                <option value="SACO">Saco / Sacola</option>
+                <option value="OUTRO">Outro</option>
               </select>
             </div>
             <div className="form-group">
               <label className="form-label">Status *</label>
               <select className="form-select" value={pmtStatus} onChange={(e) => setPmtStatus(e.target.value as any)}>
-                <option value="ATIVO">🟢 Ativo</option>
-                <option value="INATIVO">🔴 Inativo</option>
+                <option value="ATIVO">Ativo</option>
+                <option value="INATIVO">Inativo</option>
               </select>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -922,7 +922,7 @@ export default function ConfiguracoesPage() {
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{m.code || '—'}</span></td>
                     <td>
                       <span className="badge" style={{ backgroundColor: 'var(--surface-subtle)', border: '1px solid var(--border)', fontSize: '0.7rem' }}>
-                        {m.category === 'CAIXA' ? '📦 Caixa' : m.category === 'FUNDO' ? '🟫 Fundo' : m.category === 'DIVISORIA' ? '🔲 Divisória' : m.category === 'SACO' ? '🛍️ Saco' : '➕ Outro'}
+                        {m.category === 'CAIXA' ? 'Caixa' : m.category === 'FUNDO' ? 'Fundo' : m.category === 'DIVISORIA' ? 'Divisória' : m.category === 'SACO' ? 'Saco' : 'Outro'}
                       </span>
                     </td>
                     <td><span className={`badge ${m.status === 'ATIVO' ? 'badge-success' : 'badge-danger'}`}>{m.status}</span></td>
