@@ -1005,9 +1005,15 @@ export class ContaAzulService {
         const condicao = saleDetail.venda?.condicao_pagamento;
         const installments = condicao?.parcelas;
         const installmentsTotal = installments?.length || 1;
-        const installmentsPaid = localStatus === 'Pago' ? installmentsTotal : 0;
-        const firstPaymentDate = localStatus === 'Pago' && installments?.[0]?.data_vencimento
-          ? installments[0].data_vencimento
+        
+        // Pix e vendas À vista são liquidadas imediatamente
+        const isPaidAVista = condicao?.pagamento_a_vista === true || 
+                             condicao?.opcao_condicao_pagamento === 'À vista' || 
+                             condicao?.tipo_pagamento === 'PIX_PAGAMENTO_INSTANTANEO';
+        
+        const installmentsPaid = (localStatus === 'Pago' || isPaidAVista) ? installmentsTotal : 0;
+        const firstPaymentDate = (localStatus === 'Pago' || isPaidAVista)
+          ? (installments?.[0]?.data_vencimento || saleSummary.data || new Date().toISOString().split('T')[0])
           : null;
 
         let measure = '15x10x5 cm';
@@ -1106,7 +1112,7 @@ export class ContaAzulService {
 
           // E inserimos as novas parcelas
           const transactionsPayload = installments.map((inst: any) => {
-            const isInstPaid = localStatus === 'Pago' || (inst.situacao === 'BAIXADO' || inst.situacao === 'CONCILIADO');
+            const isInstPaid = localStatus === 'Pago' || isPaidAVista || (inst.situacao === 'BAIXADO' || inst.situacao === 'CONCILIADO');
             return {
               tenant_id: this.tenantId,
               order_id: orderId,
