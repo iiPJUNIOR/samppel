@@ -148,6 +148,9 @@ export default function PedidosPage() {
   const [filterSearchOrder, setFilterSearchOrder] = useState('');
   const [filterContaAzulStatus, setFilterContaAzulStatus] = useState('');
 
+  // Sort direction per kanban column: 'asc' | 'desc'
+  const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
+
   const getContaAzulStatusStyle = (status: string) => {
     const norm = (status || '').toLowerCase().trim();
     if (norm.includes('aprovado')) {
@@ -1505,20 +1508,17 @@ export default function PedidosPage() {
       const sellerNameLower = (order.seller_name || '').toLowerCase();
       if (!sellerNameLower.includes(userFirstName)) return false;
     }
-    const matchCustomer = filterCustomer ? order.customer_id === filterCustomer : true;
+    const matchCustomer = filterCustomer ? (order.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? order.seller_name.toLowerCase().includes(filterSeller.toLowerCase()) : true;
-    const matchStatus = filterStatus ? order.status === filterStatus : true;
-    const matchSector = filterSector ? order.production_sector === filterSector : true;
-    const matchDate = filterDate ? new Date(order.order_date).toLocaleDateString('pt-BR') === new Date(filterDate + 'T12:00:00').toLocaleDateString('pt-BR') : true;
     const matchSearchOrder = filterSearchOrder ? order.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(order.order_number).includes(filterSearchOrder) : true;
     const matchContaAzulStatus = filterContaAzulStatus ? order.conta_azul_status === filterContaAzulStatus : true;
-    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchSearchOrder && matchContaAzulStatus;
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
 
   // Lógica de Filtros para Itens no Kanban
   const filteredOrderItems = orderItems.filter(item => {
     const parentOrder = item.order || {};
-    
+
     if (isVendedor && user) {
       const userFirstName = user.full_name.split(' ')[0].toLowerCase();
       const sellerNameLower = (parentOrder.seller_name || '').toLowerCase();
@@ -1535,15 +1535,11 @@ export default function PedidosPage() {
       if (!stage || !['Em revisão', 'Expedição', 'Concluído', 'Atrasado'].includes(stage.name)) return false;
     }
 
-    const matchCustomer = filterCustomer ? parentOrder.customer_id === filterCustomer : true;
+    const matchCustomer = filterCustomer ? (parentOrder.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? parentOrder.seller_name?.toLowerCase().includes(filterSeller.toLowerCase()) : true;
-    const matchStatus = filterStatus ? item.status === filterStatus : true;
-    const matchSector = filterSector ? item.production_sector === filterSector : true;
-    const matchDate = filterDate ? new Date(parentOrder.order_date).toLocaleDateString('pt-BR') === new Date(filterDate + 'T12:00:00').toLocaleDateString('pt-BR') : true;
-    const matchHandlingTeam = filterHandlingTeam ? item.handling_team_id === filterHandlingTeam : true;
     const matchSearchOrder = filterSearchOrder ? parentOrder?.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(parentOrder?.order_number).includes(filterSearchOrder) || item.friendly_id?.toLowerCase().includes(filterSearchOrder.toLowerCase()) : true;
     const matchContaAzulStatus = filterContaAzulStatus ? parentOrder.conta_azul_status === filterContaAzulStatus : true;
-    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchHandlingTeam && matchSearchOrder && matchContaAzulStatus;
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
 
   const getFreightBadgeStyle = (shippingType: string) => {
@@ -1721,9 +1717,9 @@ export default function PedidosPage() {
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             Pesquisar Pedido (PV/OP)
           </label>
-          <input 
-            type="text" 
-            className="form-input" 
+          <input
+            type="text"
+            className="form-input"
             placeholder="Nº do pedido ou PV..."
             value={filterSearchOrder}
             onChange={(e) => setFilterSearchOrder(e.target.value)}
@@ -1732,23 +1728,20 @@ export default function PedidosPage() {
 
         <div className="form-group">
           <label className="form-label">Filtrar por Cliente</label>
-          <select 
-            className="form-select" 
-            value={filterCustomer} 
+          <input
+            type="text"
+            className="form-input"
+            placeholder="Nome do cliente..."
+            value={filterCustomer}
             onChange={(e) => setFilterCustomer(e.target.value)}
-          >
-            <option value="">Todos os Clientes</option>
-            {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          />
         </div>
 
         <div className="form-group">
           <label className="form-label">Filtrar por Vendedora</label>
-          <input 
-            type="text" 
-            className="form-input" 
+          <input
+            type="text"
+            className="form-input"
             placeholder="Nome da vendedora"
             value={filterSeller}
             onChange={(e) => setFilterSeller(e.target.value)}
@@ -1756,48 +1749,8 @@ export default function PedidosPage() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Filtrar por Status</label>
-          <select 
-            className="form-select"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-          >
-            <option value="">Todos os Status</option>
-            {stages.map(s => (
-              <option key={s.id} value={s.name}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Setor de Produção</label>
-          <select 
-            className="form-select"
-            value={filterSector}
-            onChange={(e) => setFilterSector(e.target.value)}
-          >
-            <option value="">Todos os Setores</option>
-            <option value="Impressão">Impressão</option>
-            <option value="Corte e Vinco">Corte e Vinco</option>
-            <option value="Colagem">Colagem</option>
-            <option value="Expedição">Expedição</option>
-            <option value="Concluído">Concluído</option>
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Filtrar por Data</label>
-          <input 
-            type="date" 
-            className="form-input"
-            value={filterDate}
-            onChange={(e) => setFilterDate(e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
           <label className="form-label">Situação Conta Azul</label>
-          <select 
+          <select
             className="form-select"
             value={filterContaAzulStatus}
             onChange={(e) => setFilterContaAzulStatus(e.target.value)}
@@ -1811,37 +1764,11 @@ export default function PedidosPage() {
           </select>
         </div>
 
-        {/* Filtro exclusivo para o setor de manuseio */}
-        {(user?.role === 'Produção' || user?.role === 'Administrador' || user?.role === 'Comercial') && handlingTeams.length > 0 && (
-          <div className="form-group" style={{ background: 'hsla(271, 91.2%, 65.1%, 0.06)', border: '1px solid hsla(271, 91.2%, 65.1%, 0.2)', borderRadius: 'var(--radius-md)', padding: '0.5rem 0.75rem' }}>
-            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            Filtrar por Equipe de Manuseio
-            </label>
-            <select 
-              className="form-select"
-              value={filterHandlingTeam}
-              onChange={(e) => setFilterHandlingTeam(e.target.value)}
-            >
-              <option value="">Todas as Equipes</option>
-              {handlingTeams
-                .filter(t => t.status === 'ATIVO')
-                .map((team) => (
-                  <option key={team.id} value={team.id}>{team.name}</option>
-                ))
-              }
-            </select>
-          </div>
-        )}
-
-        <button 
-          className="btn btn-secondary" 
+        <button
+          className="btn btn-secondary"
           onClick={() => {
             setFilterCustomer('');
             setFilterSeller('');
-            setFilterStatus('');
-            setFilterSector('');
-            setFilterDate('');
-            setFilterHandlingTeam('');
             setFilterSearchOrder('');
             setFilterContaAzulStatus('');
           }}
@@ -1869,13 +1796,31 @@ export default function PedidosPage() {
         >
           {visibleStages.map((stage) => {
             const originalIdx = stages.findIndex(s => s.id === stage.id);
-            const stageItems = filteredOrderItems.filter(item => 
+            const stageItemsRaw = filteredOrderItems.filter(item =>
               item.stage_id === stage.id || (!item.stage_id && originalIdx === 0)
             );
 
+            const sortDir = columnSortDirs[stage.id] || 'asc';
+            const isFirstColumn = originalIdx === 0;
+
+            const stageItems = [...stageItemsRaw].sort((a, b) => {
+              const aDate = new Date(a.order?.order_date || 0).getTime();
+              const bDate = new Date(b.order?.order_date || 0).getTime();
+              const aAprovado = (a.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
+              const bAprovado = (b.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
+
+              // First column (Pedidos): Aprovado always comes first regardless of sort dir
+              if (isFirstColumn) {
+                if (aAprovado && !bAprovado) return -1;
+                if (!aAprovado && bAprovado) return 1;
+              }
+
+              return sortDir === 'asc' ? aDate - bDate : bDate - aDate;
+            });
+
             return (
-              <div 
-                key={stage.id} 
+              <div
+                key={stage.id}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => handleDrop(e, stage.id)}
                 style={{
@@ -1896,24 +1841,49 @@ export default function PedidosPage() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', overflow: 'hidden' }}>
                       <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: stage.color, flexShrink: 0 }} />
-                      <span 
-                        style={{ 
-                          fontWeight: 700, 
-                          fontSize: '0.75rem', 
-                          color: 'var(--text)', 
-                          whiteSpace: 'nowrap', 
-                          overflow: 'hidden', 
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          fontSize: '0.75rem',
+                          color: 'var(--text)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           maxWidth: '90px'
-                        }} 
+                        }}
                         title={stage.name}
                       >
                         {stage.name}
                       </span>
                     </div>
-                    <span className="badge badge-secondary" style={{ fontSize: '0.65rem', padding: '1px 5px', fontWeight: 600 }}>
-                      {stageItems.length}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <span className="badge badge-secondary" style={{ fontSize: '0.65rem', padding: '1px 5px', fontWeight: 600 }}>
+                        {stageItems.length}
+                      </span>
+                      {/* Sort toggle button */}
+                      <button
+                        title={columnSortDirs[stage.id] === 'desc' ? 'Mais novos primeiro' : 'Mais antigos primeiro'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setColumnSortDirs(prev => ({
+                            ...prev,
+                            [stage.id]: prev[stage.id] === 'desc' ? 'asc' : 'desc'
+                          }));
+                        }}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: 'var(--text-muted)', padding: '1px 3px',
+                          display: 'flex', alignItems: 'center',
+                          borderRadius: '3px',
+                          transition: 'color 0.15s ease',
+                          fontSize: '0.65rem', lineHeight: 1
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+                        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                      >
+                        {columnSortDirs[stage.id] === 'desc' ? '↓' : '↑'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
