@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getCustomers, createCustomer, updateCustomer } from '@/services/supabase';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, RefreshCw } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, RefreshCw, Copy } from 'lucide-react';
 
 export default function ClientesPage() {
   const { user } = useAuth();
@@ -381,45 +381,121 @@ export default function ClientesPage() {
                   </td>
                 </tr>
               ) : (
-                groupedCustomers.map((customer) => (
-                  <tr key={customer.id}>
-                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }} title={customer.name}>
-                      {customer.name}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}><code>{customer.all_ids}</code></td>
-                    <td style={{ whiteSpace: 'nowrap' }}><code>{formatDocument(customer.document) || '---'}</code></td>
-                    <td style={{ textTransform: 'lowercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={customer.email}>
-                      {customer.email || '---'}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{formatPhone(customer.phone) || '---'}</td>
-                    <td style={{ fontSize: '0.8rem', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={customer.address}>
-                      {customer.address || '---'}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {customer.conta_azul_id ? (
-                        <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
-                          <CheckCircle2 size={12} />
-                          Integrado ({customer.conta_azul_id.substring(0, 8)})
-                        </span>
-                      ) : (
-                        <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
-                          <HelpCircle size={12} />
-                          Pendente
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <button 
-                        onClick={() => handleOpenEdit(customer)} 
-                        className="btn btn-secondary"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
-                      >
-                        <Edit size={12} />
-                        <span>Editar</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                groupedCustomers.map((customer) => {
+                  const doc = formatDocument(customer.document) || '';
+                  const phone = formatPhone(customer.phone) || '';
+                  const email = customer.email || '';
+                  const name = customer.name || '';
+                  const address = customer.address || '';
+                  
+                  return (
+                    <tr key={customer.id}>
+                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }} title={name}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <span>{name}</span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(name)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                            title="Copiar Nome"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <code>{customer.all_ids}</code>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(customer.all_ids)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                            title="Copiar IDs"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {doc ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <code>{doc}</code>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(doc)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              title="Copiar CNPJ/CPF"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                        ) : '---'}
+                      </td>
+                      <td style={{ textTransform: 'lowercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={email}>
+                        {email ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span>{email}</span>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(email)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              title="Copiar E-mail"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                        ) : '---'}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {phone ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span>{phone}</span>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(phone)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              title="Copiar Telefone"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                        ) : '---'}
+                      </td>
+                      <td style={{ fontSize: '0.8rem', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={address}>
+                        {address ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span>{address}</span>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(address)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
+                              title="Copiar Endereço"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                        ) : '---'}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {customer.conta_azul_id ? (
+                          <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                            <CheckCircle2 size={12} />
+                            Integrado ({customer.conta_azul_id.substring(0, 8)})
+                          </span>
+                        ) : (
+                          <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                            <HelpCircle size={12} />
+                            Pendente
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button 
+                          onClick={() => handleOpenEdit(customer)} 
+                          className="btn btn-secondary"
+                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
+                        >
+                          <Edit size={12} />
+                          <span>Editar</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
