@@ -1474,5 +1474,360 @@ export class ContaAzulService {
     }
     return 'RETIRADA';
   }
+
+  async importSingleOrder(saleId: string) {
+    const token = await this.getValidAccessToken();
+    const dbClient = supabaseAdmin || supabase;
+    if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
+
+    // 1. Fetch sale details
+    const saleRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!saleRes.ok) {
+      throw new Error(`Erro ao buscar detalhes da venda: ${await saleRes.text()}`);
+    }
+    const saleDetail = await saleRes.json();
+    const saleSummary = {
+      id: saleId,
+      numero: saleDetail.venda?.numero,
+      criado_em: saleDetail.venda?.data_compromisso,
+      situacao: saleDetail.venda?.situacao
+    };
+
+    // 2. Fetch items
+    const itemsRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleId}/itens`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!itemsRes.ok) {
+      throw new Error(`Erro ao buscar itens da venda: ${await itemsRes.text()}`);
+    }
+    const itemsData = await itemsRes.json();
+    const saleItems = itemsData.itens || [];
+    if (saleItems.length === 0) {
+      return { success: false, message: 'Venda sem itens' };
+    }
+
+    const mainItem = saleItems[0];
+    const mainItemCaId = mainItem.id_item;
+    const clienteInfo = saleDetail.cliente;
+    const clientUuid = clienteInfo?.uuid;
+
+    let customerId = '';
+    if (clientUuid) {
+      const { data: existingCust } = await dbClient
+        .from('customers')
+        .select('id, document, email, phone')
+        .eq('tenant_id', this.tenantId)
+        .eq('conta_azul_id', clientUuid)
+        .maybeSingle();
+
+      let custDetails: any = null;
+      const needsDetails = !existingCust || !existingCust.document || !existingCust.email || !existingCust.phone;
+      if (needsDetails) {
+        try {
+          const custResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${clientUuid}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (custResponse.ok) {
+            custDetails = await custResponse.json();
+          }
+        } catch (err) {
+          console.error('Erro ao buscar detalhes da pessoa no Conta Azul:', err);
+        }
+      }
+
+      const nameVal = custDetails?.nome || clienteInfo.nome || 'Cliente Importado';
+      const docVal = custDetails?.documento || clienteInfo.documento || '';
+      const emailVal = custDetails?.email || '';
+      const phoneVal = custDetails?.telefone_celular || custDetails?.telefone_comercial || '';
+      let addrVal = '';
+      if (custDetails?.enderecos?.[0]) {
+        const addr = custDetails.enderecos[0];
+        addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
+      }
+
+      if (existingCust) {
+        customerId = existingCust.id;
+        if (needsDetails && custDetails) {
+          await dbClient
+            .from('customers')
+            .update({
+              name: nameVal,
+              document: docVal,
+              email: emailVal,
+              phone: phoneVal,
+              address: addrVal
+            })
+            .eq('id', customerId);
+        }
+      } else {
+        const { data: newCust } = await dbClient
+          .from('customers')
+          .insert([{
+            tenant_id: this.tenantId,
+            name: nameVal,
+            conta_azul_id: clientUuid,
+            document: docVal,
+            email: emailVal,
+            phone: phoneVal,
+            address: addrVal
+          }])
+          .select('id')
+          .single();
+        if (newCust) customerId = newCust.id;
+      }
+    }
+
+    // 3. Resolve Product
+    let productId = '';
+    if (mainItemCaId) {
+      const { data: existingProd } = await dbClient
+        .from('products')
+        .select('id')
+        .eq('tenant_id', this.tenantId)
+        .eq('sku', mainItem.codigo || '')
+        .maybeSingle();
+
+      if (existingProd) {
+        productId = existingProd.id;
+      } else {
+        const { data: newProd } = await dbClient
+          .from('products')
+          .insert([{
+            tenant_id: this.tenantId,
+            name: mainItem.descricao || mainItem.nome || 'Produto Importado',
+            sku: mainItem.codigo || `SKU-${mainItemCaId.substring(0, 8)}`,
+            description: mainItem.descricao || '',
+            price: mainItem.valor_unitario || 0,
+            stock_quantity: 0
+          }])
+          .select('id')
+          .single();
+        if (newProd) productId = newProd.id;
+      }
+    }
+
+    // 4. Resolve Seller, Installments, Payments
+    const sellerName = saleDetail.vendedor?.nome || 'Vendedor Samppel';
+    const localStatus = 'A produzir';
+
+    let installments = saleDetail.venda?.condicao_pagamento?.parcelas || [];
+    if (installments.length === 0 && saleDetail.venda?.condicao_pagamento?.pagamento_a_vista) {
+      installments = [{
+        valor: saleDetail.venda?.composicao_valor?.valor_liquido || 0,
+        data_vencimento: saleDetail.venda?.data_compromisso || new Date().toISOString().split('T')[0],
+        forma_pagamento: saleDetail.venda?.condicao_pagamento?.tipo_pagamento || 'Pix',
+        numero: 1
+      }];
+    }
+
+    const installmentsTotal = installments.length || 1;
+    let installmentsPaid = 0;
+    let paymentReleasedDate: string | null = null;
+    let firstPaymentDate: string | null = null;
+
+    let measure = '—';
+    let boxesCount = 0;
+    const mainItemDesc = (mainItem.descricao || '').toLowerCase();
+    const measureMatch = mainItemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
+    if (measureMatch && measureMatch[1]) {
+      measure = measureMatch[1].trim();
+    }
+    const boxesMatch = mainItemDesc.match(/caixas?:\s*(\d+)/i);
+    if (boxesMatch && boxesMatch[1]) {
+      boxesCount = parseInt(boxesMatch[1], 10);
+    }
+
+    const resolvedShippingType = this.parseShippingType(saleDetail);
+    let resolvedPackagingType: 'CAIXA' | 'PACOTE' = 'CAIXA';
+    if (resolvedShippingType === 'RETIRADA' || resolvedShippingType === 'LALAMOVE' || resolvedShippingType === 'MOTOBOY') {
+      resolvedPackagingType = 'PACOTE';
+    }
+    if (mainItemDesc.includes('pacote')) {
+      resolvedPackagingType = 'PACOTE';
+    } else if (mainItemDesc.includes('caixa')) {
+      resolvedPackagingType = 'CAIXA';
+    }
+
+    const getSituacaoDesc = (situacao: any) => {
+      if (!situacao) return 'Aprovado';
+      if (situacao.descricao) return situacao.descricao;
+      const nome = situacao.nome || '';
+      if (nome === 'APROVADO') return 'Aprovado';
+      if (nome === 'CANCELADO') return 'Cancelado';
+      if (nome === 'EM_ANDAMENTO') return 'Em andamento';
+      if (nome === 'FATURADO') return 'Faturado';
+      if (nome === 'RECUSADO') return 'Recusado';
+      return nome;
+    };
+    const contaAzulStatus = getSituacaoDesc(saleDetail.venda?.situacao || saleSummary.situacao);
+
+    const orderPayload: any = {
+      customer_id: customerId,
+      product_id: productId || null,
+      pv_number: `PV-${saleDetail.venda?.numero || saleSummary.numero}`,
+      art_name: mainItem.descricao || mainItem.nome || 'Arte Importada',
+      seller_name: sellerName,
+      measure: measure,
+      print_run: mainItem.quantidade || 1000,
+      boxes_count: boxesCount,
+      packaging_type: resolvedPackagingType,
+      freight_value: saleDetail.venda?.composicao_valor?.frete || 0,
+      shipping_type: resolvedShippingType,
+      installments_total: installmentsTotal,
+      installments_paid: installmentsPaid,
+      first_payment_date: firstPaymentDate,
+      status: localStatus,
+      production_sector: 'Impressão',
+      notes: [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n'),
+      order_date: saleSummary.criado_em || new Date().toISOString(),
+      conta_azul_status: contaAzulStatus,
+      conta_azul_id: saleSummary.id
+    };
+
+    let orderId = '';
+    const { data: existingOrder } = await dbClient
+      .from('orders')
+      .select('id')
+      .eq('tenant_id', this.tenantId)
+      .eq('conta_azul_id', saleSummary.id)
+      .maybeSingle();
+
+    if (existingOrder) {
+      orderId = existingOrder.id;
+      await dbClient
+        .from('orders')
+        .update(orderPayload)
+        .eq('id', orderId);
+    } else {
+      const { data: newOrder } = await dbClient
+        .from('orders')
+        .insert([orderPayload])
+        .select('id')
+        .single();
+      if (newOrder) orderId = newOrder.id;
+    }
+
+    // Resolve order items mapping
+    if (orderId) {
+      const { data: existingItems } = await dbClient
+        .from('order_items')
+        .select('id, name')
+        .eq('order_id', orderId);
+
+      for (let i = 0; i < saleItems.length; i++) {
+        const item = saleItems[i];
+        let itemProdId = '';
+        if (item.id_item) {
+          const { data: itemP } = await dbClient
+            .from('products')
+            .select('id')
+            .eq('tenant_id', this.tenantId)
+            .eq('sku', item.codigo || '')
+            .maybeSingle();
+          if (itemP) itemProdId = itemP.id;
+        }
+
+        const itemPayload = {
+          order_id: orderId,
+          tenant_id: this.tenantId,
+          item_index: i + 1,
+          name: item.descricao || item.nome || `Item ${i+1}`,
+          product_id: itemProdId || null,
+          print_run: item.quantidade || 1000,
+          boxes_count: 0,
+          packaging_type: 'CAIXA' as const,
+          notes: item.description || item.descricao || '',
+          friendly_id: `PV-${saleDetail.venda?.numero || saleSummary.numero}/${i + 1}`
+        };
+
+        const existingItem = existingItems?.find((ei: any) => ei.name === itemPayload.name);
+        if (existingItem) {
+          await dbClient.from('order_items').update(itemPayload).eq('id', existingItem.id);
+        } else {
+          await dbClient.from('order_items').insert([itemPayload]);
+        }
+      }
+
+      // Reconcile financial transactions
+      await dbClient.from('financial_transactions').delete().eq('order_id', orderId);
+      
+      const transactionsPayload = [];
+      let totalPaidInstallments = 0;
+
+      for (const inst of installments) {
+        let isInstPaid = false;
+        let paymentDateStr: string | null = null;
+        let instNotes: string | null = null;
+
+        if (inst.id) {
+          try {
+            const instRes = await fetch(`${CONTA_AZUL_API_URL}/v1/financeiro/eventos-financeiros/parcelas/${inst.id}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (instRes.ok) {
+              const instDetail = await instRes.json();
+              isInstPaid = instDetail.status === 'QUITADO' || instDetail.status === 'BAIXADO' || instDetail.status === 'CONCILIADO';
+              if (isInstPaid) {
+                totalPaidInstallments++;
+                paymentDateStr = instDetail.baixas?.[0]?.data_pagamento || instDetail.data_vencimento || null;
+                if (!paymentReleasedDate || (paymentDateStr && paymentDateStr < paymentReleasedDate)) {
+                  paymentReleasedDate = paymentDateStr;
+                }
+              }
+              if (instDetail.baixas && instDetail.baixas.length > 0) {
+                instNotes = instDetail.baixas
+                  .map((b: any) => b.observacao?.trim())
+                  .filter(Boolean)
+                  .join('; ');
+              }
+            }
+          } catch (err) {
+            console.error(`Erro ao buscar detalhes da parcela:`, err);
+          }
+        }
+
+        if (!isInstPaid) {
+          isInstPaid = (inst.situacao === 'BAIXADO' || inst.situacao === 'CONCILIADO');
+          if (isInstPaid) {
+            totalPaidInstallments++;
+            paymentDateStr = inst.data_vencimento || null;
+            if (!paymentReleasedDate) {
+              paymentReleasedDate = paymentDateStr;
+            }
+          }
+        }
+
+        transactionsPayload.push({
+          tenant_id: this.tenantId,
+          order_id: orderId,
+          type: 'RECEITA',
+          amount: inst.valor || inst.value || 0,
+          status: isInstPaid ? 'CONCILIADO' : 'PENDENTE',
+          description: `Parcela ${inst.numero || 1}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
+          due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
+          payment_date: isInstPaid ? (paymentDateStr || inst.data_vencimento || new Date().toISOString().split('T')[0]) : null,
+          notes: instNotes
+        });
+      }
+
+      if (transactionsPayload.length > 0) {
+        await dbClient.from('financial_transactions').insert(transactionsPayload);
+      }
+
+      if (totalPaidInstallments > 0) {
+        await dbClient
+          .from('orders')
+          .update({
+            installments_paid: totalPaidInstallments,
+            first_payment_date: paymentReleasedDate || installments[0].data_vencimento
+          })
+          .eq('id', orderId);
+      }
+    }
+
+    return { success: true, orderId };
+  }
 }
 export default ContaAzulService;
