@@ -12,12 +12,12 @@ async function handleSync(request: NextRequest) {
     const queueService = new SyncQueueService(tenantId);
     const queueResult = await queueService.processQueue();
 
-    // 2. Fetch new orders from Conta Azul (last 48 hours for speed and safety)
+    // 2. Fetch new orders from Conta Azul (last 12 hours for speed and safety)
     let importResult: any = null;
     try {
       const caService = new ContaAzulService(tenantId);
       const today = new Date();
-      const yesterday = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      const yesterday = new Date(Date.now() - 12 * 60 * 60 * 1000);
       
       const startDateStr = yesterday.toISOString().split('T')[0];
       const endDateStr = today.toISOString().split('T')[0];
