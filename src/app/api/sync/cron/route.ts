@@ -19,8 +19,8 @@ async function handleSync(request: NextRequest) {
       const today = new Date();
       const yesterday = new Date(Date.now() - 12 * 60 * 60 * 1000);
       
-      const startDateStr = yesterday.toISOString().split('T')[0];
-      const endDateStr = today.toISOString().split('T')[0];
+      const startDateStr = searchParams.get('startDate') || yesterday.toISOString().split('T')[0];
+      const endDateStr = searchParams.get('endDate') || today.toISOString().split('T')[0];
       
       importResult = await caService.importOrders(startDateStr, endDateStr);
     } catch (importErr: any) {
