@@ -147,6 +147,26 @@ export default function PedidosPage() {
   const [filterHandlingTeam, setFilterHandlingTeam] = useState('');
   const [filterSearchOrder, setFilterSearchOrder] = useState('');
 
+  const getContaAzulStatusStyle = (status: string) => {
+    const norm = (status || '').toLowerCase().trim();
+    if (norm.includes('aprovado')) {
+      return { backgroundColor: 'hsla(168, 83.8%, 38.6%, 0.1)', color: 'hsl(168, 83.8%, 35%)' };
+    }
+    if (norm.includes('cancelado')) {
+      return { backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.1)', color: 'hsl(0, 84.2%, 50%)' };
+    }
+    if (norm.includes('andamento')) {
+      return { backgroundColor: 'hsla(38, 92.7%, 50.2%, 0.1)', color: 'hsl(38, 92.7%, 45%)' };
+    }
+    if (norm.includes('faturado')) {
+      return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.1)', color: 'hsl(221.2, 83.2%, 48%)' };
+    }
+    if (norm.includes('recusado')) {
+      return { backgroundColor: 'hsla(0, 0%, 20%, 0.1)', color: 'hsl(0, 0%, 15%)' };
+    }
+    return { backgroundColor: 'var(--surface-subtle)', color: 'var(--text-muted)' };
+  };
+
   // Estados do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'create' | 'edit'>('create');
@@ -1943,10 +1963,29 @@ export default function PedidosPage() {
                         >
                           {/* PV e OP */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '2px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
                               <span style={{ fontWeight: 700, fontSize: '0.725rem', color: 'var(--text)' }}>
                                 {item.friendly_id || '---'}
                               </span>
+                              {parentOrder.conta_azul_status && (() => {
+                                const badgeStyle = getContaAzulStatusStyle(parentOrder.conta_azul_status);
+                                return (
+                                  <span style={{
+                                    fontSize: '0.55rem',
+                                    fontWeight: 700,
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    backgroundColor: badgeStyle.backgroundColor,
+                                    color: badgeStyle.color,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.01em',
+                                    display: 'inline-block',
+                                    lineHeight: '1'
+                                  }}>
+                                    {parentOrder.conta_azul_status}
+                                  </span>
+                                );
+                              })()}
                               {hasOverdueInstallments(item.order_id) && (
                                 <span 
                                   className="blinking-dot" 
@@ -2279,7 +2318,28 @@ export default function PedidosPage() {
                     return (
                       <tr key={order.id}>
                         <td style={{ verticalAlign: 'top' }}>
-                          <div style={{ fontWeight: 600, color: 'var(--text)' }}>{order.pv_number || '---'}</div>
+                          <div style={{ fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
+                            <span>{order.pv_number || '---'}</span>
+                            {order.conta_azul_status && (() => {
+                              const badgeStyle = getContaAzulStatusStyle(order.conta_azul_status);
+                              return (
+                                <span style={{
+                                  fontSize: '0.55rem',
+                                  fontWeight: 700,
+                                  padding: '1px 4px',
+                                  borderRadius: '3px',
+                                  backgroundColor: badgeStyle.backgroundColor,
+                                  color: badgeStyle.color,
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.01em',
+                                  display: 'inline-block',
+                                  lineHeight: '1'
+                                }}>
+                                  {order.conta_azul_status}
+                                </span>
+                              );
+                            })()}
+                          </div>
                           {order.op_number ? (
                             <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 500 }}>
                               {order.op_number}

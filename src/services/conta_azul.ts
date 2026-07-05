@@ -1091,6 +1091,19 @@ export class ContaAzulService {
           resolvedPackagingType = 'CAIXA';
         }
 
+        const getSituacaoDesc = (situacao: any) => {
+          if (!situacao) return 'Aprovado';
+          if (situacao.descricao) return situacao.descricao;
+          const nome = situacao.nome || '';
+          if (nome === 'APROVADO') return 'Aprovado';
+          if (nome === 'CANCELADO') return 'Cancelado';
+          if (nome === 'EM_ANDAMENTO') return 'Em andamento';
+          if (nome === 'FATURADO') return 'Faturado';
+          if (nome === 'RECUSADO') return 'Recusado';
+          return nome;
+        };
+        const contaAzulStatus = getSituacaoDesc(saleDetail.venda?.situacao || saleSummary.situacao);
+
         const orderPayload: any = {
           customer_id: customerId,
           product_id: productId || null,
@@ -1110,6 +1123,7 @@ export class ContaAzulService {
           production_sector: 'Impressão',
           notes: [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n'),
           order_date: saleSummary.criado_em || new Date().toISOString(),
+          conta_azul_status: contaAzulStatus,
           conta_azul_id: saleSummary.id
         };
 

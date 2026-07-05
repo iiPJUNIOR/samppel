@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS orders (
     internal_notes TEXT, -- Anotações internas
     order_date TIMESTAMPTZ NOT NULL DEFAULT now(),
     
+    conta_azul_status VARCHAR(100), -- Situação da venda na Conta Azul
     conta_azul_id VARCHAR(100), -- Integration ID
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
