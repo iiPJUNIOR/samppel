@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
     description TEXT,
     due_date DATE NOT NULL,
     payment_date DATE,
+    notes TEXT, -- Observações do pagamento/baixa vindas do Conta Azul
     conta_azul_id VARCHAR(100), -- Integration ID
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );

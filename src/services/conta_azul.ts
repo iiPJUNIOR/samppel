@@ -1168,6 +1168,7 @@ export class ContaAzulService {
           for (const inst of installments) {
             let isInstPaid = false;
             let paymentDateStr: string | null = null;
+            let instNotes: string | null = null;
             
             if (inst.id) {
               try {
@@ -1186,6 +1187,14 @@ export class ContaAzulService {
                     if (!paymentReleasedDate || (paymentDateStr && paymentDateStr < paymentReleasedDate)) {
                       paymentReleasedDate = paymentDateStr;
                     }
+                  }
+                  
+                  // Extrair observação da baixa
+                  if (instDetail.baixas && instDetail.baixas.length > 0) {
+                    instNotes = instDetail.baixas
+                      .map((b: any) => b.observacao?.trim())
+                      .filter(Boolean)
+                      .join('; ');
                   }
                 }
               } catch (err) {
@@ -1213,7 +1222,8 @@ export class ContaAzulService {
               status: isInstPaid ? 'CONCILIADO' : 'PENDENTE',
               description: `Parcela ${inst.numero || 1}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
               due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
-              payment_date: isInstPaid ? (paymentDateStr || inst.data_vencimento || new Date().toISOString().split('T')[0]) : null
+              payment_date: isInstPaid ? (paymentDateStr || inst.data_vencimento || new Date().toISOString().split('T')[0]) : null,
+              notes: instNotes
             });
           }
 

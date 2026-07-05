@@ -4068,6 +4068,7 @@ export default function PedidosPage() {
                               <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Descrição</th>
                               <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor</th>
                               <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Situação</th>
+                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Observações</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -4089,6 +4090,9 @@ export default function PedidosPage() {
                                     }}>
                                       {isPaid ? 'Recebido' : 'Em aberto'}
                                     </span>
+                                  </td>
+                                  <td style={{ padding: '0.4rem 0.6rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                    {t.notes || '—'}
                                   </td>
                                 </tr>
                               );
