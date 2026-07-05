@@ -201,6 +201,7 @@ export default function LoginPage() {
           letter-spacing: -2px;
           margin-left: -4px;
           margin-top: 0;
+          color: #FF4757;
         }
 
         /* Form Elements */
