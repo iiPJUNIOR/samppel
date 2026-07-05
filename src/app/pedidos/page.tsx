@@ -4143,9 +4143,9 @@ export default function PedidosPage() {
                           <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{detailItem.notes}</p>
                         </div>
                       )}
-                      {(order.notes && !detailItem.notes) && (
+                      {order.notes && (
                         <div style={{ marginBottom: '0.4rem' }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Pedido</span>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Pedido / Pagamento</span>
                           <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.notes}</p>
                         </div>
                       )}

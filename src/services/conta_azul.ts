@@ -1108,7 +1108,7 @@ export class ContaAzulService {
           first_payment_date: firstPaymentDate,
           status: localStatus,
           production_sector: 'Impressão',
-          notes: saleDetail.venda?.observacoes || '',
+          notes: [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n'),
           order_date: saleSummary.criado_em || new Date().toISOString(),
           conta_azul_id: saleSummary.id
         };
