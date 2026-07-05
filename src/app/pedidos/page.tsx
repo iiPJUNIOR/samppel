@@ -1582,20 +1582,13 @@ export default function PedidosPage() {
     if (modalType === 'create') return false;
     if (user?.role === 'Administrador' || user?.role === 'Comercial') return false;
     
-    if (user?.role === 'Produção') {
-      return !['status', 'sector', 'physicalLocation', 'overShortQuantity', 'internalNotes'].includes(field);
+    // Produção, Estoque e Expedição não possuem permissão de edição em nenhum campo do pedido
+    if (user?.role === 'Produção' || user?.role === 'Estoque' || user?.role === 'Expedição') {
+      return true;
     }
     
     if (user?.role === 'Financeiro') {
       return !['status', 'firstPaymentDate', 'installmentsPaid', 'installmentsTotal', 'productionStartDate', 'internalNotes'].includes(field);
-    }
-
-    if (user?.role === 'Expedição') {
-      return !['status', 'packaging_type', 'boxes', 'overShortQuantity', 'physicalLocation', 'internalNotes'].includes(field);
-    }
-
-    if (user?.role === 'Estoque') {
-      return !['status', 'physicalLocation', 'internalNotes'].includes(field);
     }
     
     return true;
@@ -3552,6 +3545,7 @@ export default function PedidosPage() {
                   className="form-textarea" 
                   placeholder="Detalhamento operacional interno, histórico de pagamentos, logs da fábrica, etc..."
                   value={formInternalNotes}
+                  disabled={isReadOnlyForForm('internalNotes')}
                   onChange={(e) => setFormInternalNotes(e.target.value)}
                 />
               </div>
