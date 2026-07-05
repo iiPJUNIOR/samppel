@@ -78,13 +78,13 @@ export default function PedidosPage() {
   // Modo de visualização: Kanban (padrão) ou Lista
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
 
-  // Estados dos Filtros
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterSeller, setFilterSeller] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSector, setFilterSector] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [filterHandlingTeam, setFilterHandlingTeam] = useState('');
+  const [filterSearchOrder, setFilterSearchOrder] = useState('');
 
   // Estados do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1398,7 +1398,8 @@ export default function PedidosPage() {
     const matchStatus = filterStatus ? order.status === filterStatus : true;
     const matchSector = filterSector ? order.production_sector === filterSector : true;
     const matchDate = filterDate ? new Date(order.order_date).toLocaleDateString('pt-BR') === new Date(filterDate + 'T12:00:00').toLocaleDateString('pt-BR') : true;
-    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate;
+    const matchSearchOrder = filterSearchOrder ? order.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(order.order_number).includes(filterSearchOrder) : true;
+    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchSearchOrder;
   });
 
   // Lógica de Filtros para Itens no Kanban
@@ -1427,7 +1428,8 @@ export default function PedidosPage() {
     const matchSector = filterSector ? item.production_sector === filterSector : true;
     const matchDate = filterDate ? new Date(parentOrder.order_date).toLocaleDateString('pt-BR') === new Date(filterDate + 'T12:00:00').toLocaleDateString('pt-BR') : true;
     const matchHandlingTeam = filterHandlingTeam ? item.handling_team_id === filterHandlingTeam : true;
-    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchHandlingTeam;
+    const matchSearchOrder = filterSearchOrder ? parentOrder?.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(parentOrder?.order_number).includes(filterSearchOrder) || item.friendly_id?.toLowerCase().includes(filterSearchOrder.toLowerCase()) : true;
+    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchHandlingTeam && matchSearchOrder;
   });
 
   const getFreightBadgeStyle = (shippingType: string) => {
@@ -1609,6 +1611,19 @@ export default function PedidosPage() {
       {/* BARRA DE FILTROS */}
       <div className="filter-bar">
         <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            🔍 Pesquisar Pedido (PV/OP)
+          </label>
+          <input 
+            type="text" 
+            className="form-input" 
+            placeholder="Nº do pedido ou PV..."
+            value={filterSearchOrder}
+            onChange={(e) => setFilterSearchOrder(e.target.value)}
+          />
+        </div>
+
+        <div className="form-group">
           <label className="form-label">Filtrar por Cliente</label>
           <select 
             className="form-select" 
@@ -1704,6 +1719,7 @@ export default function PedidosPage() {
             setFilterSector('');
             setFilterDate('');
             setFilterHandlingTeam('');
+            setFilterSearchOrder('');
           }}
         >
           Limpar Filtros
