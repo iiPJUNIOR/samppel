@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import Image from 'next/image';
-import { ArrowRight, Eye, EyeOff, Loader2, AlertCircle, Building2 } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Loader2, AlertCircle, ChevronRight } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,7 +23,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Redirect if user is already logged in
   useEffect(() => {
     if (user && !showRoleSelector) {
       router.push('/dashboard');
@@ -34,29 +33,22 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
     try {
       if (isSignUpMode) {
-        if (!fullName.trim() || !email.trim() || !password) {
-          throw new Error('Todos os campos são obrigatórios para o cadastro.');
-        }
-        const { data, error: signUpErr } = await signUp(email, password, fullName, role);
-        if (signUpErr) throw signUpErr;
-
+        if (!fullName.trim() || !email.trim() || !password) throw new Error('Todos os campos são obrigatórios.');
+        const { data, error: err } = await signUp(email, password, fullName, role);
+        if (err) throw err;
         if (data && !data.session) {
-          alert('Cadastro realizado com sucesso! Um e-mail de confirmação foi enviado. Por favor, acesse sua caixa de entrada e confirme sua conta clicando no link do e-mail antes de fazer login.');
+          alert('Cadastro realizado! Verifique seu e-mail para confirmar a conta.');
         } else {
-          alert('Cadastro realizado com sucesso! Você já pode fazer login.');
+          alert('Cadastro realizado! Você já pode fazer login.');
         }
         setIsSignUpMode(false);
         setPassword('');
       } else {
-        if (!email.trim() || !password) {
-          throw new Error('E-mail e senha são obrigatórios.');
-        }
-        const { data, error: signInErr } = await signIn(email, password);
-        if (signInErr) throw signInErr;
-
+        if (!email.trim() || !password) throw new Error('E-mail e senha são obrigatórios.');
+        const { data, error: err } = await signIn(email, password);
+        if (err) throw err;
         if (data?.profile && data.profile.role === 'Administrador') {
           setTempProfile(data.profile);
           setShowRoleSelector(true);
@@ -65,7 +57,6 @@ export default function LoginPage() {
         }
       }
     } catch (err: any) {
-      console.error(err);
       setError(err.message || 'Falha na autenticação.');
     } finally {
       setLoading(false);
@@ -79,204 +70,284 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="login-page">
+    <>
       <style>{`
-        .login-page {
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        .lp-root {
           display: flex;
           min-height: 100vh;
           width: 100vw;
-          background: var(--background);
-          font-family: var(--font-sans);
+          font-family: 'Inter', var(--font-sans), sans-serif;
+          background: #0A0D14;
         }
 
-        /* ── Left Panel — Branding ──────────────────────────── */
-        .login-brand {
-          flex: 0 0 45%;
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           LEFT PANEL — Branding escuro premium
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .lp-left {
+          flex: 0 0 48%;
           display: flex;
           flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 2rem;
-          background: linear-gradient(135deg, #1E40AF 0%, #2563EB 40%, #3B82F6 100%);
-          color: #FFFFFF;
-          padding: 3rem;
+          justify-content: space-between;
+          padding: 3.5rem;
+          background: #0A0D14;
           position: relative;
           overflow: hidden;
         }
 
-        /* Subtle decorative pattern */
-        .login-brand::before {
+        /* Grade de fundo sutil */
+        .lp-left::before {
           content: '';
           position: absolute;
           inset: 0;
-          background:
-            radial-gradient(circle at 20% 80%, rgba(255,255,255,0.06) 0%, transparent 50%),
-            radial-gradient(circle at 80% 20%, rgba(255,255,255,0.04) 0%, transparent 50%);
+          background-image:
+            linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+          background-size: 48px 48px;
           pointer-events: none;
         }
 
-        .brand-logo-container {
-          width: 80px;
-          height: 80px;
-          background: rgba(255,255,255,0.15);
-          border-radius: var(--radius-lg);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255,255,255,0.2);
+        /* Brilho sutil no canto superior esquerdo */
+        .lp-left::after {
+          content: '';
+          position: absolute;
+          top: -120px;
+          left: -120px;
+          width: 500px;
+          height: 500px;
+          background: radial-gradient(circle, rgba(37, 99, 235, 0.12) 0%, transparent 65%);
+          pointer-events: none;
+        }
+
+        .lp-left-top {
           position: relative;
           z-index: 1;
         }
 
-        .brand-text {
-          text-align: center;
+        .lp-logo {
+          display: block;
+          width: 210px;
+          height: auto;
+        }
+
+        .lp-left-center {
           position: relative;
           z-index: 1;
-        }
-
-        .brand-text h1 {
-          font-size: 1.75rem;
-          font-weight: 700;
-          letter-spacing: 0.05em;
-          color: #FFFFFF;
-          margin-bottom: 0.5rem;
-        }
-
-        .brand-text p {
-          font-size: 0.9375rem;
-          color: rgba(255,255,255,0.7);
-          line-height: 1.5;
-          max-width: 280px;
-        }
-
-        /* ── Right Panel — Form ─────────────────────────────── */
-        .login-form-panel {
           flex: 1;
           display: flex;
           flex-direction: column;
+          justify-content: center;
+          padding: 2rem 0;
+        }
+
+        .lp-tagline-label {
+          display: inline-block;
+          font-size: 0.6875rem;
+          font-weight: 600;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: #3B82F6;
+          margin-bottom: 1.25rem;
+          padding: 0.3rem 0.75rem;
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 2rem;
+          background: rgba(59, 130, 246, 0.08);
+        }
+
+        .lp-headline {
+          font-size: 2.75rem;
+          font-weight: 700;
+          line-height: 1.1;
+          color: #F8FAFC;
+          letter-spacing: -0.02em;
+          margin-bottom: 1.25rem;
+        }
+
+        .lp-headline span {
+          color: #3B82F6;
+        }
+
+        .lp-subtitle {
+          font-size: 0.9375rem;
+          line-height: 1.65;
+          color: #64748B;
+          max-width: 380px;
+        }
+
+        /* Métricas decorativas */
+        .lp-metrics {
+          display: flex;
+          gap: 2rem;
+          margin-top: 3rem;
+          padding-top: 2rem;
+          border-top: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .lp-metric {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .lp-metric-value {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #F1F5F9;
+          letter-spacing: -0.02em;
+        }
+
+        .lp-metric-label {
+          font-size: 0.75rem;
+          color: #475569;
+        }
+
+        .lp-left-bottom {
+          position: relative;
+          z-index: 1;
+          font-size: 0.75rem;
+          color: #334155;
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           RIGHT PANEL — Formulário
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .lp-right {
+          flex: 1;
+          display: flex;
           align-items: center;
           justify-content: center;
-          padding: 3rem;
-          background: var(--surface);
+          background: #F8FAFC;
+          padding: 3rem 2rem;
         }
 
-        .login-form-container {
+        .lp-form-box {
           width: 100%;
           max-width: 400px;
-          animation: fadeIn 0.4s ease;
+          animation: lp-fadein 0.45s ease;
         }
 
-        .login-form-header {
+        @keyframes lp-fadein {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .lp-form-title {
+          font-size: 1.375rem;
+          font-weight: 700;
+          color: #0F172A;
+          margin-bottom: 0.375rem;
+          letter-spacing: -0.01em;
+        }
+
+        .lp-form-sub {
+          font-size: 0.875rem;
+          color: #64748B;
           margin-bottom: 2rem;
         }
 
-        .login-form-header h2 {
-          font-size: 1.5rem;
-          font-weight: 700;
-          color: var(--text);
-          margin-bottom: 0.375rem;
-        }
-
-        .login-form-header p {
-          font-size: 0.875rem;
-          color: var(--text-muted);
-        }
-
-        /* ── Error Alert ────────────────────────────────────── */
-        .login-error {
+        /* ── Error ── */
+        .lp-error {
           display: flex;
           align-items: flex-start;
           gap: 0.625rem;
           padding: 0.75rem 1rem;
-          background: var(--danger-bg);
+          background: #FEF2F2;
           border: 1px solid rgba(220, 38, 38, 0.2);
-          border-radius: var(--radius-sm);
+          border-radius: 8px;
           margin-bottom: 1.5rem;
           font-size: 0.8125rem;
-          color: var(--danger);
+          color: #DC2626;
           line-height: 1.4;
         }
 
-        .login-error svg {
-          flex-shrink: 0;
-          margin-top: 1px;
+        .lp-error svg { flex-shrink: 0; margin-top: 1px; }
+
+        /* ── Fields ── */
+        .lp-field {
+          margin-bottom: 1.125rem;
         }
 
-        /* ── Form Fields ────────────────────────────────────── */
-        .field {
-          margin-bottom: 1.25rem;
-        }
-
-        .field label {
+        .lp-field label {
           display: block;
           font-size: 0.8125rem;
           font-weight: 500;
-          color: var(--text-muted);
-          margin-bottom: 0.375rem;
+          color: #374151;
+          margin-bottom: 0.4rem;
         }
 
-        .field-input-wrap {
+        .lp-input-wrap {
           position: relative;
         }
 
-        .field input,
-        .field select {
+        .lp-input {
           width: 100%;
-          padding: 0.6875rem 0.875rem;
-          background: var(--background);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-sm);
-          font-size: 0.875rem;
-          color: var(--text);
+          padding: 0.71875rem 0.9375rem;
+          background: #FFFFFF;
+          border: 1px solid #D1D5DB;
+          border-radius: 8px;
+          font-size: 0.9375rem;
+          color: #0F172A;
           outline: none;
           transition: border-color 0.15s ease, box-shadow 0.15s ease;
+          -webkit-appearance: none;
         }
 
-        .field input:focus,
-        .field select:focus {
-          border-color: var(--primary);
-          box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.12);
+        .lp-input::placeholder { color: #9CA3AF; }
+
+        .lp-input:focus {
+          border-color: #2563EB;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
 
-        .field input::placeholder {
-          color: var(--text-muted);
-          opacity: 0.6;
+        .lp-input-with-icon {
+          padding-right: 2.75rem;
         }
 
-        .field select option {
-          background: var(--surface);
-          color: var(--text);
-        }
-
-        .eye-toggle {
+        .lp-eye {
           position: absolute;
-          right: 0.75rem;
+          right: 0.875rem;
           top: 50%;
           transform: translateY(-50%);
           background: none;
           border: none;
           cursor: pointer;
-          color: var(--text-muted);
-          padding: 2px;
+          color: #9CA3AF;
           display: flex;
           align-items: center;
-          justify-content: center;
-          transition: color 0.15s ease;
+          transition: color 0.15s;
+          padding: 0;
         }
 
-        .eye-toggle:hover {
-          color: var(--text);
-        }
+        .lp-eye:hover { color: #374151; }
 
-        /* ── Submit Button ──────────────────────────────────── */
-        .login-submit {
+        .lp-select {
           width: 100%;
-          padding: 0.75rem 1.5rem;
-          background: var(--primary);
+          padding: 0.71875rem 0.9375rem;
+          background: #FFFFFF;
+          border: 1px solid #D1D5DB;
+          border-radius: 8px;
+          font-size: 0.9375rem;
+          color: #0F172A;
+          outline: none;
+          cursor: pointer;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+          -webkit-appearance: none;
+        }
+
+        .lp-select:focus {
+          border-color: #2563EB;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        /* ── Primary CTA ── */
+        .lp-btn {
+          width: 100%;
+          padding: 0.8125rem 1.5rem;
+          background: #2563EB;
           color: #FFFFFF;
           border: none;
-          border-radius: var(--radius-sm);
+          border-radius: 8px;
           font-size: 0.9375rem;
           font-weight: 600;
           cursor: pointer;
@@ -284,359 +355,391 @@ export default function LoginPage() {
           align-items: center;
           justify-content: center;
           gap: 0.5rem;
-          transition: background-color 0.15s ease, transform 0.1s ease;
-          margin-top: 0.5rem;
+          margin-top: 0.75rem;
+          transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+          letter-spacing: 0.01em;
         }
 
-        .login-submit:hover:not(:disabled) {
-          background: var(--primary-hover);
+        .lp-btn:hover:not(:disabled) {
+          background: #1D4ED8;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+          transform: translateY(-1px);
         }
 
-        .login-submit:active:not(:disabled) {
-          transform: scale(0.98);
+        .lp-btn:active:not(:disabled) {
+          transform: scale(0.98) translateY(0);
+          box-shadow: none;
         }
 
-        .login-submit:disabled {
-          opacity: 0.7;
-          cursor: not-allowed;
-        }
+        .lp-btn:disabled { opacity: 0.65; cursor: not-allowed; }
 
-        /* ── Footer Links ───────────────────────────────────── */
-        .login-footer {
+        /* ── Footer links ── */
+        .lp-footer {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-top: 1.5rem;
-          font-size: 0.8125rem;
+          margin-top: 1.375rem;
         }
 
-        .login-footer a,
-        .login-footer button {
-          color: var(--text-muted);
-          transition: color 0.15s ease;
+        .lp-link {
+          font-size: 0.8125rem;
+          color: #64748B;
           background: none;
           border: none;
           cursor: pointer;
-          font-size: 0.8125rem;
-          font-family: var(--font-sans);
+          font-family: inherit;
           padding: 0;
+          transition: color 0.15s;
+          text-decoration: none;
         }
 
-        .login-footer a:hover,
-        .login-footer button:hover {
-          color: var(--primary);
-        }
+        .lp-link:hover { color: #2563EB; }
 
-        .login-divider {
+        /* ── Divider ── */
+        .lp-divider {
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          margin: 1.5rem 0;
-          color: var(--text-muted);
+          margin: 1.375rem 0;
           font-size: 0.75rem;
+          color: #9CA3AF;
         }
 
-        .login-divider::before,
-        .login-divider::after {
+        .lp-divider::before,
+        .lp-divider::after {
           content: '';
           flex: 1;
           height: 1px;
-          background: var(--border);
+          background: #E5E7EB;
         }
 
-        .conta-azul-link {
+        /* ── Conta Azul ── */
+        .lp-ca-link {
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 0.5rem;
           width: 100%;
-          padding: 0.625rem 1rem;
+          padding: 0.6875rem 1rem;
           background: transparent;
-          border: 1px solid var(--border);
-          border-radius: var(--radius-sm);
+          border: 1px solid #E5E7EB;
+          border-radius: 8px;
           font-size: 0.8125rem;
           font-weight: 500;
-          color: var(--text-muted);
+          color: #6B7280;
           cursor: pointer;
-          transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
           text-decoration: none;
+          transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
         }
 
-        .conta-azul-link:hover {
-          border-color: var(--primary);
-          color: var(--primary);
-          background: rgba(var(--primary-rgb), 0.04);
+        .lp-ca-link:hover {
+          border-color: #2563EB;
+          color: #2563EB;
+          background: rgba(37, 99, 235, 0.04);
         }
 
-        /* ── Role Selector ──────────────────────────────────── */
-        .role-grid {
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           ROLE SELECTOR
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .lp-roles {
           display: flex;
           flex-direction: column;
           gap: 0.625rem;
           margin-bottom: 1.5rem;
         }
 
-        .role-option {
+        .lp-role-btn {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.875rem 1rem;
-          background: var(--background);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-sm);
+          padding: 0.9375rem 1.125rem;
+          background: #FFFFFF;
+          border: 1px solid #E5E7EB;
+          border-radius: 8px;
           cursor: pointer;
-          transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-          font-size: 0.875rem;
+          transition: all 0.15s ease;
+          text-align: left;
+        }
+
+        .lp-role-btn:hover {
+          border-color: #2563EB;
+          background: rgba(37, 99, 235, 0.03);
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+        }
+
+        .lp-role-name {
+          font-size: 0.9375rem;
           font-weight: 500;
-          color: var(--text);
+          color: #0F172A;
         }
 
-        .role-option:hover {
-          border-color: var(--primary);
-          background: rgba(var(--primary-rgb), 0.04);
-          box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.08);
+        .lp-role-desc {
+          font-size: 0.75rem;
+          color: #6B7280;
+          margin-top: 0.125rem;
         }
 
-        .role-option .arrow-icon {
-          color: var(--text-muted);
-          transition: transform 0.15s ease, color 0.15s ease;
+        .lp-role-icon {
+          color: #D1D5DB;
+          transition: color 0.15s, transform 0.15s;
         }
 
-        .role-option:hover .arrow-icon {
+        .lp-role-btn:hover .lp-role-icon {
+          color: #2563EB;
           transform: translateX(3px);
-          color: var(--primary);
         }
 
-        .back-link {
-          display: block;
-          text-align: center;
-          font-size: 0.8125rem;
-          color: var(--text-muted);
-          background: none;
-          border: none;
-          cursor: pointer;
-          font-family: var(--font-sans);
-          transition: color 0.15s ease;
-          padding: 0;
-          width: 100%;
-        }
-
-        .back-link:hover {
-          color: var(--primary);
-        }
-
-        /* ── Responsive ─────────────────────────────────────── */
-        @media (max-width: 768px) {
-          .login-page {
-            flex-direction: column;
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           RESPONSIVE
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        @media (max-width: 900px) {
+          .lp-left {
+            flex: 0 0 40%;
+            padding: 2.5rem;
           }
+          .lp-headline { font-size: 2rem; }
+          .lp-metrics { display: none; }
+        }
 
-          .login-brand {
+        @media (max-width: 680px) {
+          .lp-root { flex-direction: column; }
+          .lp-left {
             flex: none;
-            padding: 2rem 1.5rem;
+            padding: 2rem;
             min-height: auto;
           }
-
-          .brand-text h1 {
-            font-size: 1.375rem;
-          }
-
-          .brand-text p {
-            font-size: 0.8125rem;
-          }
-
-          .login-form-panel {
-            padding: 2rem 1.5rem;
-          }
+          .lp-left-center { padding: 1.5rem 0; }
+          .lp-headline { font-size: 1.75rem; }
+          .lp-subtitle { display: none; }
+          .lp-left-bottom { display: none; }
+          .lp-right { padding: 2rem 1.5rem; }
         }
       `}</style>
 
-      {/* ── Left Panel — Branding ────────────────────────── */}
-      <div className="login-brand">
-        <div className="brand-logo-container">
-          <Image
-            src="/logo.png"
-            alt="Samppel"
-            width={52}
-            height={52}
-            style={{ objectFit: 'contain' }}
-          />
+      <div className="lp-root">
+        {/* ── Left Panel ───────────────────────────────────── */}
+        <div className="lp-left">
+          <div className="lp-left-top">
+            <Image
+              src="/logo.png"
+              alt="Samppel Embalagens"
+              width={210}
+              height={80}
+              className="lp-logo"
+              style={{ objectFit: 'contain', objectPosition: 'left' }}
+              priority
+            />
+          </div>
+
+          <div className="lp-left-center">
+            <span className="lp-tagline-label">Portal de Gestão</span>
+            <h1 className="lp-headline">
+              Controle total<br />
+              do seu <span>negócio.</span>
+            </h1>
+            <p className="lp-subtitle">
+              Gerencie pedidos, clientes, produção e financeiro em um único sistema integrado ao Conta Azul.
+            </p>
+
+            <div className="lp-metrics">
+              <div className="lp-metric">
+                <span className="lp-metric-value">100%</span>
+                <span className="lp-metric-label">Integrado ao ERP</span>
+              </div>
+              <div className="lp-metric">
+                <span className="lp-metric-value">4</span>
+                <span className="lp-metric-label">Módulos ativos</span>
+              </div>
+              <div className="lp-metric">
+                <span className="lp-metric-value">RT</span>
+                <span className="lp-metric-label">Dados em tempo real</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="lp-left-bottom">
+            © {new Date().getFullYear()} Samppel Embalagens — Todos os direitos reservados.
+          </div>
         </div>
-        <div className="brand-text">
-          <h1>Portal Samppel</h1>
-          <p>Sistema de gestão comercial e produção para embalagens personalizadas</p>
-        </div>
-      </div>
 
-      {/* ── Right Panel — Form / Role Selector ──────────── */}
-      <div className="login-form-panel">
-        <div className="login-form-container">
-          {showRoleSelector ? (
-            /* ── Role Selector View ──────────────────────── */
-            <>
-              <div className="login-form-header">
-                <h2>Olá, {tempProfile?.full_name?.split(' ')[0]}</h2>
-                <p>Selecione o perfil de acesso para esta sessão.</p>
-              </div>
+        {/* ── Right Panel ──────────────────────────────────── */}
+        <div className="lp-right">
+          <div className="lp-form-box">
+            {showRoleSelector ? (
+              /* ── Role Selector ────────────────────────── */
+              <>
+                <p className="lp-form-title">Olá, {tempProfile?.full_name?.split(' ')[0]} 👋</p>
+                <p className="lp-form-sub">Escolha o perfil para acessar o sistema.</p>
 
-              <div className="role-grid">
-                {(['Administrador', 'Comercial', 'Produção', 'Financeiro'] as UserRole[]).map((roleOption) => (
-                  <button
-                    key={roleOption}
-                    type="button"
-                    className="role-option"
-                    onClick={() => handleSelectRole(roleOption)}
-                  >
-                    <span>{roleOption}</span>
-                    <ArrowRight size={16} className="arrow-icon" />
-                  </button>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                className="back-link"
-                onClick={() => {
-                  setShowRoleSelector(false);
-                  setTempProfile(null);
-                }}
-              >
-                ← Voltar para o login
-              </button>
-            </>
-          ) : (
-            /* ── Login / Sign Up Form ────────────────────── */
-            <>
-              <div className="login-form-header">
-                <h2>{isSignUpMode ? 'Criar conta' : 'Entrar no sistema'}</h2>
-                <p>{isSignUpMode
-                  ? 'Preencha os dados para solicitar acesso ao portal.'
-                  : 'Informe suas credenciais para acessar o painel.'
-                }</p>
-              </div>
-
-              {error && (
-                <div className="login-error">
-                  <AlertCircle size={16} />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <form autoComplete="off" onSubmit={handleSubmit}>
-                {isSignUpMode && (
-                  <div className="field">
-                    <label htmlFor="fullName">Nome completo</label>
-                    <input
-                      id="fullName"
-                      type="text"
-                      placeholder="Ex: Paulo Junior"
-                      required
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                    />
-                  </div>
-                )}
-
-                <div className="field">
-                  <label htmlFor="email">E-mail</label>
-                  <input
-                    id="email"
-                    type="email"
-                    placeholder="seuemail@samppel.com.br"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-
-                <div className="field">
-                  <label htmlFor="password">Senha</label>
-                  <div className="field-input-wrap">
-                    <input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="••••••••"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      style={{ paddingRight: '2.5rem' }}
-                    />
+                <div className="lp-roles">
+                  {([
+                    { role: 'Administrador' as UserRole, desc: 'Acesso total ao sistema' },
+                    { role: 'Comercial' as UserRole, desc: 'Pedidos, clientes e vendas' },
+                    { role: 'Produção' as UserRole, desc: 'Kanban e etapas de fabricação' },
+                    { role: 'Financeiro' as UserRole, desc: 'Contas a receber e relatórios' },
+                  ]).map(({ role: r, desc }) => (
                     <button
+                      key={r}
                       type="button"
-                      className="eye-toggle"
-                      onClick={() => setShowPassword(!showPassword)}
-                      tabIndex={-1}
+                      className="lp-role-btn"
+                      onClick={() => handleSelectRole(r)}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      <div>
+                        <div className="lp-role-name">{r}</div>
+                        <div className="lp-role-desc">{desc}</div>
+                      </div>
+                      <ChevronRight size={18} className="lp-role-icon" />
                     </button>
-                  </div>
+                  ))}
                 </div>
 
-                {isSignUpMode && (
-                  <div className="field">
-                    <label htmlFor="role">Cargo / Função</label>
-                    <select
-                      id="role"
-                      required
-                      value={role}
-                      onChange={(e) => setRole(e.target.value as UserRole)}
-                    >
-                      <option value="Administrador">Administrador</option>
-                      <option value="Comercial">Comercial</option>
-                      <option value="Produção">Produção (Fábrica)</option>
-                      <option value="Financeiro">Financeiro</option>
-                    </select>
-                  </div>
-                )}
-
-                <button type="submit" disabled={loading} className="login-submit">
-                  {loading ? (
-                    <>
-                      <Loader2 size={18} className="spinner" />
-                      Processando...
-                    </>
-                  ) : (
-                    isSignUpMode ? 'Criar conta' : 'Entrar'
-                  )}
-                </button>
-              </form>
-
-              <div className="login-footer">
-                <a
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('Entre em contato com o administrador do sistema para redefinir sua senha.');
-                  }}
-                >
-                  Esqueceu a senha?
-                </a>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsSignUpMode(!isSignUpMode);
-                    setError(null);
-                  }}
+                  className="lp-link"
+                  style={{ display: 'block', textAlign: 'center', width: '100%' }}
+                  onClick={() => { setShowRoleSelector(false); setTempProfile(null); }}
                 >
-                  {isSignUpMode ? 'Já tenho conta' : 'Criar conta'}
+                  ← Voltar para o login
                 </button>
-              </div>
+              </>
+            ) : (
+              /* ── Login / Cadastro ─────────────────────── */
+              <>
+                <p className="lp-form-title">
+                  {isSignUpMode ? 'Criar conta' : 'Bem-vindo de volta'}
+                </p>
+                <p className="lp-form-sub">
+                  {isSignUpMode
+                    ? 'Preencha os dados para solicitar acesso.'
+                    : 'Informe suas credenciais para entrar.'}
+                </p>
 
-              <div className="login-divider">ou</div>
+                {error && (
+                  <div className="lp-error">
+                    <AlertCircle size={16} />
+                    <span>{error}</span>
+                  </div>
+                )}
 
-              <a
-                href="https://login.contaazul.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="conta-azul-link"
-              >
-                <Building2 size={16} />
-                Acessar o Conta Azul
-              </a>
-            </>
-          )}
+                <form autoComplete="off" onSubmit={handleSubmit}>
+                  {isSignUpMode && (
+                    <div className="lp-field">
+                      <label htmlFor="fullName">Nome completo</label>
+                      <input
+                        id="fullName"
+                        className="lp-input"
+                        type="text"
+                        placeholder="Paulo Junior"
+                        required
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <div className="lp-field">
+                    <label htmlFor="email">E-mail</label>
+                    <input
+                      id="email"
+                      className="lp-input"
+                      type="email"
+                      placeholder="voce@samppel.com.br"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="lp-field">
+                    <label htmlFor="password">Senha</label>
+                    <div className="lp-input-wrap">
+                      <input
+                        id="password"
+                        className="lp-input lp-input-with-icon"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="lp-eye"
+                        onClick={() => setShowPassword(!showPassword)}
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isSignUpMode && (
+                    <div className="lp-field">
+                      <label htmlFor="role">Cargo</label>
+                      <select
+                        id="role"
+                        className="lp-select"
+                        required
+                        value={role}
+                        onChange={(e) => setRole(e.target.value as UserRole)}
+                      >
+                        <option value="Administrador">Administrador</option>
+                        <option value="Comercial">Comercial</option>
+                        <option value="Produção">Produção</option>
+                        <option value="Financeiro">Financeiro</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <button type="submit" disabled={loading} className="lp-btn">
+                    {loading ? (
+                      <><Loader2 size={18} className="spinner" /> Processando...</>
+                    ) : (
+                      isSignUpMode ? 'Criar conta' : 'Entrar'
+                    )}
+                  </button>
+                </form>
+
+                <div className="lp-footer">
+                  <a
+                    href="#"
+                    className="lp-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      alert('Entre em contato com o administrador do sistema para redefinir sua senha.');
+                    }}
+                  >
+                    Esqueceu a senha?
+                  </a>
+                  <button
+                    type="button"
+                    className="lp-link"
+                    onClick={() => { setIsSignUpMode(!isSignUpMode); setError(null); }}
+                  >
+                    {isSignUpMode ? 'Já tenho conta' : 'Criar conta'}
+                  </button>
+                </div>
+
+                <div className="lp-divider">ou continue com</div>
+
+                <a
+                  href="https://login.contaazul.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="lp-ca-link"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <rect width="24" height="24" rx="4" fill="#0073CF"/>
+                    <path d="M12 6C8.686 6 6 8.686 6 12s2.686 6 6 6 6-2.686 6-6-2.686-6-6-6zm0 9.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" fill="white"/>
+                  </svg>
+                  Acessar Conta Azul
+                </a>
+              </>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
