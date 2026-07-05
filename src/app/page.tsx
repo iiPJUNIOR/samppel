@@ -3,7 +3,71 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
-import { Boxes, ArrowRight, ShieldCheck, Database, Cpu, Eye, EyeOff } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff } from 'lucide-react';
+import Image from 'next/image';
+
+interface InputProps {
+  label?: string;
+  placeholder?: string;
+  icon?: React.ReactNode;
+  [key: string]: any;
+}
+
+const AppInput = (props: InputProps) => {
+  const { label, placeholder, icon, ...rest } = props;
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMousePosition({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  };
+
+  return (
+    <div className="w-full min-w-[200px] relative text-left">
+      {label && (
+        <label className="block mb-2 text-sm text-[var(--color-text-primary)] font-medium">
+          {label}
+        </label>
+      )}
+      <div className="relative w-full">
+        <input
+          type="text"
+          className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[var(--color-surface)] px-4 font-thin outline-none drop-shadow-sm transition-all duration-200 ease-in-out focus:bg-[var(--color-bg)] placeholder:font-medium text-[var(--color-text-primary)] text-sm"
+          placeholder={placeholder}
+          onMouseMove={handleMouseMove}
+          onMouseEnter={() => setIsHovering(true)}
+          onMouseLeave={() => setIsHovering(false)}
+          {...rest}
+        />
+        {isHovering && (
+          <>
+            <div
+              className="absolute pointer-events-none top-0 left-0 right-0 h-[2px] z-20 rounded-t-md overflow-hidden"
+              style={{
+                background: `radial-gradient(30px circle at ${mousePosition.x}px 0px, var(--color-text-primary) 0%, transparent 70%)`,
+              }}
+            />
+            <div
+              className="absolute pointer-events-none bottom-0 left-0 right-0 h-[2px] z-20 rounded-b-md overflow-hidden"
+              style={{
+                background: `radial-gradient(30px circle at ${mousePosition.x}px 2px, var(--color-text-primary) 0%, transparent 70%)`,
+              }}
+            />
+          </>
+        )}
+        {icon && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20">
+            {icon}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,7 +86,27 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Redireciona para o dashboard se o usuario ja estiver logado e nao estiver no seletor
+  // Glow cursor states
+  const [mousePosition, setMousePosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const leftSection = e.currentTarget.getBoundingClientRect();
+    setMousePosition({
+      x: e.clientX - leftSection.left,
+      y: e.clientY - leftSection.top
+    });
+  };
+
+  const handleMouseEnter = () => {
+    setIsHovering(true);
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovering(false);
+  };
+
+  // Redirect if user is already logged in
   useEffect(() => {
     if (user && !showRoleSelector) {
       router.push('/dashboard');
@@ -37,12 +121,11 @@ export default function LoginPage() {
     try {
       if (isSignUpMode) {
         if (!fullName.trim() || !email.trim() || !password) {
-          throw new Error('Todos os campos sao obrigatorios para o cadastro.');
+          throw new Error('Todos os campos são obrigatórios para o cadastro.');
         }
         const { data, error: signUpErr } = await signUp(email, password, fullName, role);
         if (signUpErr) throw signUpErr;
         
-        // Se a sessao for nula, significa que a confirmacao por e-mail esta ativa no Supabase
         if (data && !data.session) {
           alert('Cadastro realizado com sucesso! Um e-mail de confirmação foi enviado. Por favor, acesse sua caixa de entrada e confirme sua conta clicando no link do e-mail antes de fazer login.');
         } else {
@@ -52,7 +135,7 @@ export default function LoginPage() {
         setPassword('');
       } else {
         if (!email.trim() || !password) {
-          throw new Error('E-mail e senha sao obrigatorios.');
+          throw new Error('E-mail e senha são obrigatórios.');
         }
         const { data, error: signInErr } = await signIn(email, password);
         if (signInErr) throw signInErr;
@@ -66,7 +149,7 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Falha na autenticacao.');
+      setError(err.message || 'Falha na autenticação.');
     } finally {
       setLoading(false);
     }
@@ -79,254 +162,197 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '1.5rem',
-      background: 'linear-gradient(135deg, hsl(222, 47%, 6%) 0%, hsl(222, 47%, 14%) 100%)',
-      width: '100%'
-    }}>
-      <div style={{
-        maxWidth: '500px',
-        width: '100%',
-        backgroundColor: 'var(--surface)',
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--border)',
-        boxShadow: 'var(--shadow-premium)',
-        padding: '2.5rem',
-        animation: 'fadeIn 0.5s ease',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        textAlign: 'center'
-      }}>
-        
-        {/* Logo da Marca */}
-        <div style={{
-          width: '64px',
-          height: '64px',
-          borderRadius: 'var(--radius-md)',
-          backgroundColor: 'rgba(var(--primary-rgb), 0.1)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--primary)',
-          marginBottom: '1.5rem'
-        }}>
-          <Boxes size={36} />
-        </div>
+    <div className="min-h-screen w-[100%] bg-[var(--color-bg)] flex items-center justify-center p-4">
+      <div className="w-full max-w-[900px] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl overflow-hidden flex flex-row h-[600px] relative z-10">
+        {/* Left Section (Form Container) */}
+        <div
+          className="w-full lg:w-1/2 px-8 lg:px-12 flex flex-col justify-center h-full relative overflow-hidden bg-[var(--color-surface)]"
+          onMouseMove={handleMouseMove}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          {/* Animated glow */}
+          <div
+            className={`absolute pointer-events-none w-[500px] h-[500px] bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-full blur-3xl transition-opacity duration-200 ${
+              isHovering ? 'opacity-100' : 'opacity-0'
+            }`}
+            style={{
+              transform: `translate(${mousePosition.x - 250}px, ${mousePosition.y - 250}px)`,
+              transition: 'transform 0.1s ease-out'
+            }}
+          />
 
-        {/* Nome da Marca */}
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '0.5rem', letterSpacing: '-0.02em' }}>
-          Portal Samppel
-        </h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '2rem' }}>
-          Sistema Comercial & Gestao de Producao de Embalagens Personalizadas
-        </p>
+          {showRoleSelector ? (
+            <div className="w-full text-left z-10 py-4 flex flex-col justify-center h-full">
+              <h2 className="text-xl font-bold mb-2 text-[var(--color-heading)]">
+                Olá, {tempProfile?.full_name}!
+              </h2>
+              <p className="text-xs text-[var(--color-text-secondary)] mb-6 leading-relaxed">
+                Você possui acesso administrativo. Escolha com qual perfil deseja navegar no sistema nesta sessão:
+              </p>
 
-        {showRoleSelector ? (
-          <div style={{ width: '100%', textAlign: 'left', animation: 'fadeIn 0.3s ease' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text)' }}>
-              Olá, {tempProfile?.full_name}!
-            </h2>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1.5rem', lineHeight: '1.4' }}>
-              Você possui acesso administrativo. Escolha com qual perfil deseja navegar no sistema nesta sessão:
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              {(['Administrador', 'Comercial', 'Produção', 'Financeiro'] as UserRole[]).map((roleOption) => (
-                <button
-                  key={roleOption}
-                  onClick={() => handleSelectRole(roleOption)}
-                  className="btn btn-secondary"
-                  style={{
-                    width: '100%',
-                    padding: '1rem',
-                    textAlign: 'left',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    fontWeight: 600,
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border)',
-                    backgroundColor: roleOption === 'Administrador' ? 'rgba(var(--primary-rgb), 0.05)' : 'var(--surface)',
-                    color: roleOption === 'Administrador' ? 'var(--primary)' : 'var(--text)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <span>Acessar como {roleOption}</span>
-                  <ArrowRight size={16} />
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => {
-                setShowRoleSelector(false);
-                setTempProfile(null);
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                padding: 0,
-                width: '100%',
-                textAlign: 'center'
-              }}
-            >
-              Voltar para a tela de login
-            </button>
-          </div>
-        ) : (
-          <>
-            {error && (
-              <div style={{
-                width: '100%',
-                padding: '0.75rem 1rem',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid var(--danger)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--danger)',
-                fontSize: '0.8rem',
-                textAlign: 'left',
-                marginBottom: '1.5rem'
-              }}>
-                {error}
-              </div>
-            )}
-
-            {/* Formulario de Autenticacao */}
-            <form onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'left' }}>
-              
-              {isSignUpMode && (
-                <div className="form-group">
-                  <label className="form-label">Nome Completo *</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    required 
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                  />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label">E-mail *</label>
-                <input 
-                  type="email" 
-                  className="form-input" 
-                  required 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Senha *</label>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <input 
-                    type={showPassword ? "text" : "password"} 
-                    className="form-input" 
-                    required 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    style={{ paddingRight: '2.5rem', width: '100%' }}
-                  />
+              <div className="flex flex-col gap-3 mb-6">
+                {(['Administrador', 'Comercial', 'Produção', 'Financeiro'] as UserRole[]).map((roleOption) => (
                   <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      position: 'absolute',
-                      right: '10px',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      color: 'var(--text-muted, #888)',
-                      padding: '4px'
-                    }}
+                    key={roleOption}
+                    onClick={() => handleSelectRole(roleOption)}
+                    className="flex justify-between items-center w-full p-3.5 text-left font-semibold text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-muted-surface)] text-[var(--color-text-primary)] cursor-pointer transition-all duration-200"
                   >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    <span>Acessar como {roleOption}</span>
+                    <ArrowRight size={14} className="text-[var(--color-text-secondary)]" />
                   </button>
-                </div>
+                ))}
               </div>
 
-              {isSignUpMode && (
-                <div className="form-group">
-                  <label className="form-label">Cargo / Funcao *</label>
-                  <select 
-                    className="form-select" 
-                    required 
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                  >
-                    <option value="Administrador">Administrador</option>
-                    <option value="Comercial">Comercial</option>
-                    <option value="Produção">Producao (Fabrica)</option>
-                    <option value="Financeiro">Financeiro</option>
-                  </select>
-                </div>
-              )}
-
-              <button 
-                type="submit" 
-                disabled={loading}
-                className="btn btn-primary"
-                style={{ 
-                  width: '100%', 
-                  padding: '0.875rem', 
-                  borderRadius: 'var(--radius-md)', 
-                  fontSize: '1rem', 
-                  fontWeight: 600,
-                  marginTop: '1rem',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <span>{loading ? 'Processando...' : isSignUpMode ? 'Criar Minha Conta' : 'Acessar o Painel'}</span>
-                {!loading && <ArrowRight size={18} />}
-              </button>
-            </form>
-
-            {/* Link para alternar modo */}
-            <div style={{ marginTop: '1.5rem', fontSize: '0.875rem' }}>
-              <span style={{ color: 'var(--text-muted)' }}>
-                {isSignUpMode ? 'Ja possui uma conta?' : 'Ainda nao tem acesso?'}
-              </span>{' '}
-              <button 
+              <button
                 type="button"
                 onClick={() => {
-                  setIsSignUpMode(!isSignUpMode);
-                  setError(null);
+                  setShowRoleSelector(false);
+                  setTempProfile(null);
                 }}
-                style={{ 
-                  background: 'none', 
-                  border: 'none', 
-                  color: 'var(--primary)', 
-                  fontWeight: 600, 
-                  cursor: 'pointer',
-                  padding: 0,
-                  textDecoration: 'underline'
-                }}
+                className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-xs underline text-center w-full cursor-pointer"
               >
-                {isSignUpMode ? 'Entrar no painel' : 'Cadastre-se aqui'}
+                Voltar para a tela de login
               </button>
             </div>
-          </>
-        )}
+          ) : (
+            <div className="form-container h-full z-10 flex flex-col justify-center">
+              <form className="text-center py-6 grid gap-4 w-full" onSubmit={handleSubmit}>
+                <div className="grid gap-2 mb-2">
+                  <h1 className="text-2xl md:text-3xl font-extrabold text-[var(--color-heading)]">
+                    {isSignUpMode ? 'Criar Conta' : 'Entrar no Painel'}
+                  </h1>
+                  
+                  {/* Conta Azul Login Shortcut */}
+                  <div className="social-container my-1">
+                    <a
+                      href="https://login.contaazul.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-muted-surface)] text-xs text-[var(--color-text-primary)] rounded-md transition-all duration-200 cursor-pointer font-medium w-full"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#00A4E4]">
+                        <path d="M15 3h6v6" />
+                        <path d="M10 14 21 3" />
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      </svg>
+                      <span>Ir para o Login do Conta Azul</span>
+                    </a>
+                  </div>
+                  <span className="text-[var(--color-text-secondary)] text-xs font-light">ou acesse o portal da fábrica</span>
+                </div>
 
-        <div style={{ marginTop: '2.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Samppel Embalagens Ltda &copy; {new Date().getFullYear()}
+                {error && (
+                  <div className="w-full p-2.5 border border-red-500/30 bg-red-500/10 text-red-400 text-xs rounded-md text-left">
+                    {error}
+                  </div>
+                )}
+
+                <div className="grid gap-3 items-center">
+                  {isSignUpMode && (
+                    <AppInput 
+                      label="Nome Completo *" 
+                      placeholder="Ex: Paulo Junior" 
+                      type="text"
+                      value={fullName}
+                      onChange={(e: any) => setFullName(e.target.value)}
+                      required
+                    />
+                  )}
+
+                  <AppInput 
+                    label="E-mail *" 
+                    placeholder="Ex: seuemail@samppel.com.br" 
+                    type="email"
+                    value={email}
+                    onChange={(e: any) => setEmail(e.target.value)}
+                    required
+                  />
+                  
+                  <AppInput 
+                    label="Senha *" 
+                    placeholder="Sua senha" 
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e: any) => setPassword(e.target.value)}
+                    required
+                    icon={
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] focus:outline-none cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    }
+                  />
+
+                  {isSignUpMode && (
+                    <div className="w-full min-w-[200px] text-left">
+                      <label className="block mb-2 text-sm text-[var(--color-text-primary)] font-medium">
+                        Cargo / Função *
+                      </label>
+                      <select 
+                        className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[var(--color-surface)] px-4 font-thin outline-none drop-shadow-sm transition-all focus:bg-[var(--color-bg)] text-[var(--color-text-primary)] text-sm cursor-pointer"
+                        required 
+                        value={role}
+                        onChange={(e) => setRole(e.target.value as UserRole)}
+                      >
+                        <option value="Administrador" className="bg-[var(--color-surface)]">Administrador</option>
+                        <option value="Comercial" className="bg-[var(--color-surface)]">Comercial</option>
+                        <option value="Produção" className="bg-[var(--color-surface)]">Produção (Fábrica)</option>
+                        <option value="Financeiro" className="bg-[var(--color-surface)]">Financeiro</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-4 justify-between items-center mt-2">
+                  <a href="#" className="font-light text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
+                    Esqueceu sua senha?
+                  </a>
+                  
+                  <button 
+                    type="submit"
+                    disabled={loading}
+                    className="group/button relative inline-flex justify-center items-center overflow-hidden rounded-md bg-[#2C333A] px-6 py-2 text-xs font-semibold text-white transition-all duration-300 ease-in-out hover:scale-105 hover:shadow-lg hover:shadow-[var(--color-text-primary)] cursor-pointer"
+                  >
+                    <span className="text-sm px-2 py-0.5">{loading ? 'Carregando...' : isSignUpMode ? 'Cadastrar' : 'Entrar'}</span>
+                    <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-13deg)_translateX(-100%)] group-hover/button:duration-1000 group-hover/button:[transform:skew(-13deg)_translateX(100%)]">
+                      <div className="relative h-full w-8 bg-white/20" />
+                    </div>
+                  </button>
+                </div>
+
+                {/* Toggle Mode */}
+                <div className="mt-4 text-xs text-[var(--color-text-secondary)] text-center">
+                  <span>{isSignUpMode ? 'Já possui uma conta?' : 'Ainda não tem acesso?'}</span>{' '}
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setIsSignUpMode(!isSignUpMode);
+                      setError(null);
+                    }}
+                    className="text-[var(--color-text-primary)] hover:underline font-semibold cursor-pointer"
+                  >
+                    {isSignUpMode ? 'Entrar no painel' : 'Cadastre-se aqui'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+
+        {/* Right Section (Brand Logo Banner) */}
+        <div className="hidden lg:flex w-1/2 right h-full bg-[#161a1d] items-center justify-center border-l border-[var(--color-border)] p-12">
+          <Image
+            src="/logo.png"
+            width={350}
+            height={200}
+            alt="Samppel Embalagens Logo"
+            className="max-w-[80%] object-contain"
+            priority
+          />
         </div>
       </div>
     </div>
