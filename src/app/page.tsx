@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
-import { ArrowRight, Eye, EyeOff } from 'lucide-react';
+import Image from 'next/image';
+import { ArrowRight, Eye, EyeOff, Loader2, AlertCircle, Building2 } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,45 +16,12 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<UserRole>('Administrador');
-  
+
   const [showRoleSelector, setShowRoleSelector] = useState(false);
   const [tempProfile, setTempProfile] = useState<any>(null);
-  
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // Generate static random values once per mount to prevent hydration errors
-  const blobsData = useMemo(() => {
-    return Array.from({ length: 6 }).map(() => ({
-      size: Math.random() * 200 + 150,
-      left: Math.random() * 80 + 10,
-      top: Math.random() * 80 + 10,
-      animationDelay: Math.random() * -20,
-      animationDuration: Math.random() * 15 + 15,
-    }));
-  }, []);
-
-  // Keep track of the blob DOM elements for high-performance updates
-  const blobRefs = useRef<(HTMLDivElement | null)[]>([]);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const x = e.clientX / window.innerWidth;
-      const y = e.clientY / window.innerHeight;
-
-      // Apply subtle parallax effect to each blob
-      blobRefs.current.forEach((blob, index) => {
-        if (blob) {
-          const speed = (index + 1) * 20;
-          blob.style.marginLeft = `${x * speed}px`;
-          blob.style.marginTop = `${y * speed}px`;
-        }
-      });
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    return () => document.removeEventListener('mousemove', handleMouseMove);
-  }, []);
 
   // Redirect if user is already logged in
   useEffect(() => {
@@ -74,7 +42,7 @@ export default function LoginPage() {
         }
         const { data, error: signUpErr } = await signUp(email, password, fullName, role);
         if (signUpErr) throw signUpErr;
-        
+
         if (data && !data.session) {
           alert('Cadastro realizado com sucesso! Um e-mail de confirmação foi enviado. Por favor, acesse sua caixa de entrada e confirme sua conta clicando no link do e-mail antes de fazer login.');
         } else {
@@ -88,7 +56,7 @@ export default function LoginPage() {
         }
         const { data, error: signInErr } = await signIn(email, password);
         if (signInErr) throw signInErr;
-        
+
         if (data?.profile && data.profile.role === 'Administrador') {
           setTempProfile(data.profile);
           setShowRoleSelector(true);
@@ -111,433 +79,564 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="mercury-wrapper">
+    <div className="login-page">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;800&family=Space+Mono&display=swap');
-
-        :root {
-          --bg: #050505;
-          --mercury: #e0e0e0;
-          --mercury-dark: #666666;
-          --accent: #ffffff;
-          --text-dim: rgba(255, 255, 255, 0.5);
-          --filter-goo: url('#gooey');
+        .login-page {
+          display: flex;
+          min-height: 100vh;
+          width: 100vw;
+          background: var(--background);
+          font-family: var(--font-sans);
         }
 
-        .mercury-wrapper {
-          background-color: var(--bg);
-          color: var(--accent);
-          font-family: 'Inter', sans-serif;
-          height: 100vh;
-          width: 100vw;
+        /* ── Left Panel — Branding ──────────────────────────── */
+        .login-brand {
+          flex: 0 0 45%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 2rem;
+          background: linear-gradient(135deg, #1E40AF 0%, #2563EB 40%, #3B82F6 100%);
+          color: #FFFFFF;
+          padding: 3rem;
+          position: relative;
           overflow: hidden;
+        }
+
+        /* Subtle decorative pattern */
+        .login-brand::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(circle at 20% 80%, rgba(255,255,255,0.06) 0%, transparent 50%),
+            radial-gradient(circle at 80% 20%, rgba(255,255,255,0.04) 0%, transparent 50%);
+          pointer-events: none;
+        }
+
+        .brand-logo-container {
+          width: 80px;
+          height: 80px;
+          background: rgba(255,255,255,0.15);
+          border-radius: var(--radius-lg);
           display: flex;
           align-items: center;
           justify-content: center;
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255,255,255,0.2);
+          position: relative;
+          z-index: 1;
+        }
+
+        .brand-text {
+          text-align: center;
+          position: relative;
+          z-index: 1;
+        }
+
+        .brand-text h1 {
+          font-size: 1.75rem;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          color: #FFFFFF;
+          margin-bottom: 0.5rem;
+        }
+
+        .brand-text p {
+          font-size: 0.9375rem;
+          color: rgba(255,255,255,0.7);
+          line-height: 1.5;
+          max-width: 280px;
+        }
+
+        /* ── Right Panel — Form ─────────────────────────────── */
+        .login-form-panel {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 3rem;
+          background: var(--surface);
+        }
+
+        .login-form-container {
+          width: 100%;
+          max-width: 400px;
+          animation: fadeIn 0.4s ease;
+        }
+
+        .login-form-header {
+          margin-bottom: 2rem;
+        }
+
+        .login-form-header h2 {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: var(--text);
+          margin-bottom: 0.375rem;
+        }
+
+        .login-form-header p {
+          font-size: 0.875rem;
+          color: var(--text-muted);
+        }
+
+        /* ── Error Alert ────────────────────────────────────── */
+        .login-error {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.625rem;
+          padding: 0.75rem 1rem;
+          background: var(--danger-bg);
+          border: 1px solid rgba(220, 38, 38, 0.2);
+          border-radius: var(--radius-sm);
+          margin-bottom: 1.5rem;
+          font-size: 0.8125rem;
+          color: var(--danger);
+          line-height: 1.4;
+        }
+
+        .login-error svg {
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+
+        /* ── Form Fields ────────────────────────────────────── */
+        .field {
+          margin-bottom: 1.25rem;
+        }
+
+        .field label {
+          display: block;
+          font-size: 0.8125rem;
+          font-weight: 500;
+          color: var(--text-muted);
+          margin-bottom: 0.375rem;
+        }
+
+        .field-input-wrap {
           position: relative;
         }
 
-        .mercury-wrapper * {
-          box-sizing: border-box;
-          -webkit-font-smoothing: antialiased;
+        .field input,
+        .field select {
+          width: 100%;
+          padding: 0.6875rem 0.875rem;
+          background: var(--background);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          font-size: 0.875rem;
+          color: var(--text);
+          outline: none;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
 
-        /* Background Liquid Physics Simulation */
-        .stage {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          z-index: 0;
-          filter: var(--filter-goo);
+        .field input:focus,
+        .field select:focus {
+          border-color: var(--primary);
+          box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.12);
+        }
+
+        .field input::placeholder {
+          color: var(--text-muted);
           opacity: 0.6;
         }
 
-        .blob {
+        .field select option {
+          background: var(--surface);
+          color: var(--text);
+        }
+
+        .eye-toggle {
           position: absolute;
-          background: linear-gradient(135deg, var(--mercury), #888);
-          border-radius: 50%;
-          filter: blur(20px);
-          animation: float 20s infinite alternate ease-in-out;
-          box-shadow: inset -10px -10px 20px rgba(0,0,0,0.5), 
-                      10px 10px 30px rgba(255,255,255,0.2);
-          transition: margin 0.1s ease-out; /* Smooths the JS mousemove */
-        }
-
-        @keyframes float {
-          0% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(10vw, 20vh) scale(1.2); }
-          66% { transform: translate(-5vw, 10vh) scale(0.8); }
-          100% { transform: translate(5vw, -10vh) scale(1.1); }
-        }
-
-        /* Interface Container */
-        .auth-container {
-          position: relative;
-          z-index: 10;
-          width: 100%;
-          max-width: 440px;
-          padding: 40px;
-        }
-
-        .header {
-          margin-bottom: 40px;
-          text-align: left;
-        }
-
-        .brand-id {
-          font-family: 'Space Mono', monospace;
-          font-size: 10px;
-          letter-spacing: 4px;
-          text-transform: uppercase;
-          color: var(--text-dim);
-          margin-bottom: 8px;
-          display: block;
-        }
-
-        .header h1 {
-          font-weight: 800;
-          font-size: 3rem;
-          line-height: 0.9;
-          letter-spacing: -2px;
-          margin-left: -4px;
-          margin-top: 0;
-          color: #FF4757;
-        }
-
-        /* Form Elements */
-        .form-group {
-          position: relative;
-          margin-bottom: 25px;
-          transition: transform 0.4s cubic-bezier(0.2, 1, 0.3, 1);
-        }
-
-        .form-group:focus-within {
-          transform: translateX(10px);
-        }
-
-        .form-group label {
-          display: block;
-          font-family: 'Space Mono', monospace;
-          font-size: 11px;
-          color: var(--text-dim);
-          margin-bottom: 8px;
-          text-transform: uppercase;
-        }
-
-        .form-group input, .form-group select {
-          width: 100%;
-          background: transparent;
-          border: none;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-          color: var(--accent);
-          padding: 12px 0;
-          font-size: 18px;
-          outline: none;
-          transition: border-color 0.4s;
-        }
-
-        .input-glow {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          width: 0%;
-          height: 2px;
-          background: var(--mercury);
-          transition: width 0.6s cubic-bezier(0.2, 1, 0.3, 1);
-          box-shadow: 0 0 15px var(--mercury);
-        }
-
-        .form-group input:focus + .input-glow, .form-group select:focus + .input-glow {
-          width: 100%;
-        }
-
-        /* The Mercury Button */
-        .submit-wrap {
-          margin-top: 40px;
-          position: relative;
-          filter: var(--filter-goo);
-        }
-
-        .btn-base {
-          background: var(--accent);
-          color: #000;
-          border: none;
-          padding: 20px 40px;
-          font-size: 14px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 2px;
-          cursor: pointer;
-          width: 100%;
-          position: relative;
-          z-index: 2;
-          transition: letter-spacing 0.3s;
-        }
-
-        .btn-base:hover {
-          letter-spacing: 4px;
-        }
-
-        .mercury-drop {
-          position: absolute;
+          right: 0.75rem;
           top: 50%;
-          left: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--text-muted);
+          padding: 2px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: color 0.15s ease;
+        }
+
+        .eye-toggle:hover {
+          color: var(--text);
+        }
+
+        /* ── Submit Button ──────────────────────────────────── */
+        .login-submit {
           width: 100%;
-          height: 100%;
-          background: var(--mercury);
-          transform: translate(-50%, -50%);
-          z-index: 1;
-          border-radius: 50px;
-          transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          padding: 0.75rem 1.5rem;
+          background: var(--primary);
+          color: #FFFFFF;
+          border: none;
+          border-radius: var(--radius-sm);
+          font-size: 0.9375rem;
+          font-weight: 600;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          transition: background-color 0.15s ease, transform 0.1s ease;
+          margin-top: 0.5rem;
         }
 
-        .submit-wrap:hover .mercury-drop {
-          transform: translate(-50%, -50%) scale(1.05, 1.2);
-          filter: brightness(1.2);
+        .login-submit:hover:not(:disabled) {
+          background: var(--primary-hover);
         }
 
-        /* Utility */
-        .footer-nav {
-          margin-top: 40px;
+        .login-submit:active:not(:disabled) {
+          transform: scale(0.98);
+        }
+
+        .login-submit:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+
+        /* ── Footer Links ───────────────────────────────────── */
+        .login-footer {
           display: flex;
           justify-content: space-between;
-          font-family: 'Space Mono', monospace;
-          font-size: 10px;
+          align-items: center;
+          margin-top: 1.5rem;
+          font-size: 0.8125rem;
         }
 
-        .footer-nav a, .footer-nav button {
-          color: var(--text-dim);
+        .login-footer a,
+        .login-footer button {
+          color: var(--text-muted);
+          transition: color 0.15s ease;
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-size: 0.8125rem;
+          font-family: var(--font-sans);
+          padding: 0;
+        }
+
+        .login-footer a:hover,
+        .login-footer button:hover {
+          color: var(--primary);
+        }
+
+        .login-divider {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin: 1.5rem 0;
+          color: var(--text-muted);
+          font-size: 0.75rem;
+        }
+
+        .login-divider::before,
+        .login-divider::after {
+          content: '';
+          flex: 1;
+          height: 1px;
+          background: var(--border);
+        }
+
+        .conta-azul-link {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.625rem 1rem;
+          background: transparent;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          font-size: 0.8125rem;
+          font-weight: 500;
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
           text-decoration: none;
-          transition: color 0.3s;
         }
 
-        .footer-nav a:hover, .footer-nav button:hover {
-          color: var(--accent);
+        .conta-azul-link:hover {
+          border-color: var(--primary);
+          color: var(--primary);
+          background: rgba(var(--primary-rgb), 0.04);
         }
 
-        /* SVG Filter Definition Hidden Element */
-        .svg-filter-hidden {
-          position: absolute;
-          width: 0;
-          height: 0;
+        /* ── Role Selector ──────────────────────────────────── */
+        .role-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 0.625rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .role-option {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0.875rem 1rem;
+          background: var(--background);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+          font-size: 0.875rem;
+          font-weight: 500;
+          color: var(--text);
+        }
+
+        .role-option:hover {
+          border-color: var(--primary);
+          background: rgba(var(--primary-rgb), 0.04);
+          box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.08);
+        }
+
+        .role-option .arrow-icon {
+          color: var(--text-muted);
+          transition: transform 0.15s ease, color 0.15s ease;
+        }
+
+        .role-option:hover .arrow-icon {
+          transform: translateX(3px);
+          color: var(--primary);
+        }
+
+        .back-link {
+          display: block;
+          text-align: center;
+          font-size: 0.8125rem;
+          color: var(--text-muted);
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-family: var(--font-sans);
+          transition: color 0.15s ease;
+          padding: 0;
+          width: 100%;
+        }
+
+        .back-link:hover {
+          color: var(--primary);
+        }
+
+        /* ── Responsive ─────────────────────────────────────── */
+        @media (max-width: 768px) {
+          .login-page {
+            flex-direction: column;
+          }
+
+          .login-brand {
+            flex: none;
+            padding: 2rem 1.5rem;
+            min-height: auto;
+          }
+
+          .brand-text h1 {
+            font-size: 1.375rem;
+          }
+
+          .brand-text p {
+            font-size: 0.8125rem;
+          }
+
+          .login-form-panel {
+            padding: 2rem 1.5rem;
+          }
         }
       `}</style>
 
-      <svg className="svg-filter-hidden">
-        <defs>
-          <filter id="gooey">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur" />
-            <feColorMatrix 
-              in="blur" 
-              mode="matrix" 
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9" 
-              result="goo" 
-            />
-            <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
-          </filter>
-        </defs>
-      </svg>
-
-      <div className="stage" id="stage">
-        {blobsData.map((data, index) => (
-          <div
-            key={index}
-            ref={(el) => { blobRefs.current[index] = el; }}
-            className="blob"
-            style={{
-              width: `${data.size}px`,
-              height: `${data.size}px`,
-              left: `${data.left}%`,
-              top: `${data.top}%`,
-              animationDelay: `${data.animationDelay}s`,
-              animationDuration: `${data.animationDuration}s`,
-            }}
+      {/* ── Left Panel — Branding ────────────────────────── */}
+      <div className="login-brand">
+        <div className="brand-logo-container">
+          <Image
+            src="/logo.png"
+            alt="Samppel"
+            width={52}
+            height={52}
+            style={{ objectFit: 'contain' }}
           />
-        ))}
+        </div>
+        <div className="brand-text">
+          <h1>Portal Samppel</h1>
+          <p>Sistema de gestão comercial e produção para embalagens personalizadas</p>
+        </div>
       </div>
 
-      <main className="auth-container">
-        {showRoleSelector ? (
-          <div className="text-left" style={{ animation: 'fadeIn 0.3s ease' }}>
-            <span className="brand-id">Acesso Administrativo</span>
-            <h1 style={{ fontWeight: 800, fontSize: '2.5rem', lineHeight: 0.9, letterSpacing: '-2px', marginBottom: '20px' }}>
-              OLÁ,<br/>{tempProfile?.full_name?.toUpperCase()}
-            </h1>
-            <p className="text-xs text-[var(--text-dim)] mb-6 leading-relaxed">
-              Escolha com qual perfil deseja navegar no sistema nesta sessão:
-            </p>
-
-            <div className="flex flex-col gap-3 mb-6">
-              {(['Administrador', 'Comercial', 'Produção', 'Financeiro'] as UserRole[]).map((roleOption) => (
-                <button
-                  key={roleOption}
-                  type="button"
-                  onClick={() => handleSelectRole(roleOption)}
-                  style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    width: '100%', padding: '16px', textAlign: 'left', fontWeight: 'bold',
-                    fontSize: '11px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)',
-                    backgroundColor: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer',
-                    transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '2px'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)';
-                  }}
-                >
-                  <span>Acessar como {roleOption}</span>
-                  <ArrowRight size={14} style={{ color: 'var(--text-dim)' }} />
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowRoleSelector(false);
-                setTempProfile(null);
-              }}
-              style={{
-                background: 'none', border: 'none', color: 'var(--text-dim)',
-                fontSize: '11px', cursor: 'pointer', textDecoration: 'underline',
-                width: '100%', textAlign: 'center', fontFamily: "'Space Mono', monospace"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-            >
-              Voltar para a tela de login
-            </button>
-          </div>
-        ) : (
-          <>
-            <header className="header">
-              <span className="brand-id">Sistema de Gestão & Produção</span>
-              <h1>PORTAL<br/>SAMPPEL</h1>
-            </header>
-
-            {error && (
-              <div style={{
-                width: '100%',
-                padding: '10px 14px',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.4)',
-                borderRadius: '4px',
-                color: '#ff6b6b',
-                fontSize: '12px',
-                textAlign: 'left',
-                marginBottom: '20px',
-                fontFamily: "'Space Mono', monospace"
-              }}>
-                {error.toUpperCase()}
-              </div>
-            )}
-
-            <form autoComplete="off" onSubmit={handleSubmit}>
-              {isSignUpMode && (
-                <div className="form-group">
-                  <label>Nome Completo</label>
-                  <input 
-                    type="text" 
-                    placeholder="EX: PAULO JUNIOR" 
-                    required 
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                  />
-                  <div className="input-glow"></div>
-                </div>
-              )}
-
-              <div className="form-group">
-                <label>Identidade do Usuário (E-mail)</label>
-                <input 
-                  type="email" 
-                  placeholder="EX: SEUEMAIL@SAMPPEL.COM.BR" 
-                  required 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-                <div className="input-glow"></div>
+      {/* ── Right Panel — Form / Role Selector ──────────── */}
+      <div className="login-form-panel">
+        <div className="login-form-container">
+          {showRoleSelector ? (
+            /* ── Role Selector View ──────────────────────── */
+            <>
+              <div className="login-form-header">
+                <h2>Olá, {tempProfile?.full_name?.split(' ')[0]}</h2>
+                <p>Selecione o perfil de acesso para esta sessão.</p>
               </div>
 
-              <div className="form-group" style={{ position: 'relative' }}>
-                <label>Chave de Acesso (Senha)</label>
-                <input 
-                  type={showPassword ? 'text' : 'password'} 
-                  placeholder="••••••••" 
-                  required 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={{ paddingRight: '40px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute', right: '0', bottom: '12px',
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--text-dim)', padding: '4px', zIndex: 12
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-                <div className="input-glow"></div>
-              </div>
-
-              {isSignUpMode && (
-                <div className="form-group">
-                  <label>Cargo / Função</label>
-                  <select 
-                    required 
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                    className="w-full bg-transparent border-0 border-b border-[rgba(255,255,255,0.1)] text-[var(--accent)] py-3 text-lg outline-none cursor-pointer"
-                    style={{ colorScheme: 'dark' }}
+              <div className="role-grid">
+                {(['Administrador', 'Comercial', 'Produção', 'Financeiro'] as UserRole[]).map((roleOption) => (
+                  <button
+                    key={roleOption}
+                    type="button"
+                    className="role-option"
+                    onClick={() => handleSelectRole(roleOption)}
                   >
-                    <option value="Administrador" className="bg-[#050505]">Administrador</option>
-                    <option value="Comercial" className="bg-[#050505]">Comercial</option>
-                    <option value="Produção" className="bg-[#050505]">Produção (Fábrica)</option>
-                    <option value="Financeiro" className="bg-[#050505]">Financeiro</option>
-                  </select>
-                  <div className="input-glow"></div>
-                </div>
-              )}
-
-              <div className="submit-wrap">
-                <div className="mercury-drop"></div>
-                <button type="submit" disabled={loading} className="btn-base">
-                  {loading ? 'PROCESSANDO...' : isSignUpMode ? 'CRIAR CONTA' : 'ACESSAR O PAINEL'}
-                </button>
+                    <span>{roleOption}</span>
+                    <ArrowRight size={16} className="arrow-icon" />
+                  </button>
+                ))}
               </div>
-            </form>
 
-            <footer className="footer-nav">
-              <a href="#encrypted" onClick={(e) => { e.preventDefault(); alert("Entre em contato com o administrador do sistema para redefinir sua senha."); }}>
-                ESQUECEU A SENHA?
-              </a>
               <button
                 type="button"
+                className="back-link"
                 onClick={() => {
-                  setIsSignUpMode(!isSignUpMode);
-                  setError(null);
+                  setShowRoleSelector(false);
+                  setTempProfile(null);
                 }}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                  fontFamily: "'Space Mono', monospace", fontSize: '10px',
-                  color: 'var(--text-dim)', transition: 'color 0.3s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
               >
-                {isSignUpMode ? 'ENTRAR NO PAINEL' : 'CADASTRAR CONTA'}
+                ← Voltar para o login
               </button>
-            </footer>
-          </>
-        )}
-      </main>
+            </>
+          ) : (
+            /* ── Login / Sign Up Form ────────────────────── */
+            <>
+              <div className="login-form-header">
+                <h2>{isSignUpMode ? 'Criar conta' : 'Entrar no sistema'}</h2>
+                <p>{isSignUpMode
+                  ? 'Preencha os dados para solicitar acesso ao portal.'
+                  : 'Informe suas credenciais para acessar o painel.'
+                }</p>
+              </div>
+
+              {error && (
+                <div className="login-error">
+                  <AlertCircle size={16} />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <form autoComplete="off" onSubmit={handleSubmit}>
+                {isSignUpMode && (
+                  <div className="field">
+                    <label htmlFor="fullName">Nome completo</label>
+                    <input
+                      id="fullName"
+                      type="text"
+                      placeholder="Ex: Paulo Junior"
+                      required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div className="field">
+                  <label htmlFor="email">E-mail</label>
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="seuemail@samppel.com.br"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+
+                <div className="field">
+                  <label htmlFor="password">Senha</label>
+                  <div className="field-input-wrap">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      style={{ paddingRight: '2.5rem' }}
+                    />
+                    <button
+                      type="button"
+                      className="eye-toggle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                {isSignUpMode && (
+                  <div className="field">
+                    <label htmlFor="role">Cargo / Função</label>
+                    <select
+                      id="role"
+                      required
+                      value={role}
+                      onChange={(e) => setRole(e.target.value as UserRole)}
+                    >
+                      <option value="Administrador">Administrador</option>
+                      <option value="Comercial">Comercial</option>
+                      <option value="Produção">Produção (Fábrica)</option>
+                      <option value="Financeiro">Financeiro</option>
+                    </select>
+                  </div>
+                )}
+
+                <button type="submit" disabled={loading} className="login-submit">
+                  {loading ? (
+                    <>
+                      <Loader2 size={18} className="spinner" />
+                      Processando...
+                    </>
+                  ) : (
+                    isSignUpMode ? 'Criar conta' : 'Entrar'
+                  )}
+                </button>
+              </form>
+
+              <div className="login-footer">
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    alert('Entre em contato com o administrador do sistema para redefinir sua senha.');
+                  }}
+                >
+                  Esqueceu a senha?
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSignUpMode(!isSignUpMode);
+                    setError(null);
+                  }}
+                >
+                  {isSignUpMode ? 'Já tenho conta' : 'Criar conta'}
+                </button>
+              </div>
+
+              <div className="login-divider">ou</div>
+
+              <a
+                href="https://login.contaazul.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="conta-azul-link"
+              >
+                <Building2 size={16} />
+                Acessar o Conta Azul
+              </a>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
