@@ -47,7 +47,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  Scale
+  Scale,
+  Copy,
+  Check
 } from 'lucide-react';
 
 // Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
@@ -56,6 +58,65 @@ const getStatusForStageName = (stageName: string): string => {
   if (stageName === 'Embalagem') return 'Em revisão';
   if (stageName === 'Concluído') return 'Entregue';
   return stageName;
+};
+
+// Componente de botão de cópia rápido
+const CopyButton = ({ text }: { text: string }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        handleCopy();
+      }}
+      type="button"
+      style={{
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        padding: '0.15rem',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: copied ? 'var(--success, #10b981)' : 'var(--text-muted, #94a3b8)',
+        transition: 'color 0.2s',
+        marginLeft: '0.35rem',
+        verticalAlign: 'middle'
+      }}
+      title="Copiar"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  );
+};
+
+// Formatação de telefone brasileiro
+const formatPhone = (phone: string) => {
+  if (!phone) return '';
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 11) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
+  } else if (cleaned.length === 10) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 6)}-${cleaned.substring(6)}`;
+  }
+  return phone;
+};
+
+// Formatação de documento (CNPJ/CPF)
+const formatDocument = (doc: string) => {
+  if (!doc) return '';
+  const cleaned = doc.replace(/\D/g, '');
+  if (cleaned.length === 14) {
+    return `${cleaned.substring(0, 2)}.${cleaned.substring(2, 5)}.${cleaned.substring(5, 8)}/${cleaned.substring(8, 12)}-${cleaned.substring(12)}`;
+  } else if (cleaned.length === 11) {
+    return `${cleaned.substring(0, 3)}.${cleaned.substring(3, 6)}.${cleaned.substring(6, 9)}-${cleaned.substring(9)}`;
+  }
+  return doc;
 };
 
 export default function PedidosPage() {
@@ -3750,17 +3811,25 @@ export default function PedidosPage() {
                     Cliente
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                    {[
-                      { label: 'Nome', value: customer.name || '—' },
-                      { label: 'CNPJ/CPF', value: customer.cnpj || customer.cpf || '—' },
-                      { label: 'E-mail', value: customer.email || '—' },
-                      { label: 'Telefone', value: customer.phone || '—' },
-                    ].map(({ label, value }) => (
-                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500, wordBreak: 'break-all' }}>{value}</span>
-                      </div>
-                    ))}
+                    {(() => {
+                      const formattedDoc = formatDocument(customer.document);
+                      const formattedEmail = customer.email ? customer.email.toLowerCase() : '';
+                      const formattedPhone = formatPhone(customer.phone);
+                      return [
+                        { label: 'Nome', value: customer.name || '—', copyText: customer.name },
+                        { label: 'CNPJ/CPF', value: formattedDoc || '—', copyText: formattedDoc },
+                        { label: 'E-mail', value: formattedEmail || '—', copyText: formattedEmail, style: { textTransform: 'lowercase' } },
+                        { label: 'Telefone', value: formattedPhone || '—', copyText: formattedPhone },
+                      ].map(({ label, value, copyText, style }) => (
+                        <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                          <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500, wordBreak: 'break-all', ...style }}>
+                            {value}
+                            {copyText && copyText !== '—' && <CopyButton text={copyText} />}
+                          </span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </section>
 
