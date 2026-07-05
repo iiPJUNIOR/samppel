@@ -1148,10 +1148,52 @@ export class ContaAzulService {
             .delete()
             .eq('order_id', orderId);
 
+          let totalPaidInstallments = 0;
+          let paymentReleasedDate: string | null = null;
+
           // E inserimos as novas parcelas
-          const transactionsPayload = installments.map((inst: any) => {
-            const isInstPaid = localStatus === 'Pago' || isPaidAVista || (inst.situacao === 'BAIXADO' || inst.situacao === 'CONCILIADO');
-            return {
+          const transactionsPayload = [];
+          
+          for (const inst of installments) {
+            let isInstPaid = false;
+            let paymentDateStr: string | null = null;
+            
+            if (inst.id) {
+              try {
+                // Puxamos a situação real da parcela pela API financeira
+                const instRes = await fetch(`${CONTA_AZUL_API_URL}/v1/financeiro/eventos-financeiros/parcelas/${inst.id}`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (instRes.ok) {
+                  const instDetail = await instRes.json();
+                  isInstPaid = instDetail.status === 'QUITADO' || instDetail.status === 'BAIXADO' || instDetail.status === 'CONCILIADO';
+                  if (isInstPaid) {
+                    totalPaidInstallments++;
+                    // A data de pagamento é a da baixa ou da vencimento
+                    paymentDateStr = instDetail.baixas?.[0]?.data_pagamento || instDetail.data_vencimento || null;
+                    if (!paymentReleasedDate || (paymentDateStr && paymentDateStr < paymentReleasedDate)) {
+                      paymentReleasedDate = paymentDateStr;
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error(`Erro ao buscar detalhes da parcela ${inst.id} na API:`, err);
+              }
+            }
+            
+            // Fallback para nossa heurística local caso o fetch falhe ou a parcela seja sem ID
+            if (!isInstPaid) {
+              isInstPaid = localStatus === 'Pago' || isPaidAVista || (inst.situacao === 'BAIXADO' || inst.situacao === 'CONCILIADO');
+              if (isInstPaid) {
+                totalPaidInstallments++;
+                paymentDateStr = inst.data_vencimento || null;
+                if (!paymentReleasedDate) {
+                  paymentReleasedDate = paymentDateStr;
+                }
+              }
+            }
+
+            transactionsPayload.push({
               tenant_id: this.tenantId,
               order_id: orderId,
               type: 'RECEITA',
@@ -1159,9 +1201,9 @@ export class ContaAzulService {
               status: isInstPaid ? 'CONCILIADO' : 'PENDENTE',
               description: `Parcela ${inst.numero || 1}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
               due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
-              payment_date: isInstPaid ? (inst.data_vencimento || new Date().toISOString().split('T')[0]) : null
-            };
-          });
+              payment_date: isInstPaid ? (paymentDateStr || inst.data_vencimento || new Date().toISOString().split('T')[0]) : null
+            });
+          }
 
           const { error: finInsertErr } = await dbClient
             .from('financial_transactions')
@@ -1169,6 +1211,17 @@ export class ContaAzulService {
 
           if (finInsertErr) {
             console.error('Erro ao inserir transações financeiras:', finInsertErr);
+          }
+
+          // Se tivermos alguma parcela paga, atualizamos o orders correspondente com a data real
+          if (totalPaidInstallments > 0) {
+            await dbClient
+              .from('orders')
+              .update({
+                installments_paid: totalPaidInstallments,
+                first_payment_date: paymentReleasedDate || installments[0].data_vencimento
+              })
+              .eq('id', orderId);
           }
         }
 
