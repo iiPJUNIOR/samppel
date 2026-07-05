@@ -12,27 +12,31 @@ async function handleSync(request: NextRequest) {
     const queueService = new SyncQueueService(tenantId);
     const queueResult = await queueService.processQueue();
 
-    // 2. Fetch new orders from Conta Azul (last 12 hours for speed and safety)
-    let importResult: any = null;
-    try {
-      const caService = new ContaAzulService(tenantId);
-      const today = new Date();
-      const yesterday = new Date(Date.now() - 12 * 60 * 60 * 1000);
-      
-      const startDateStr = searchParams.get('startDate') || yesterday.toISOString().split('T')[0];
-      const endDateStr = searchParams.get('endDate') || today.toISOString().split('T')[0];
-      
-      importResult = await caService.importOrders(startDateStr, endDateStr);
-    } catch (importErr: any) {
-      console.error('Error executing auto order import during cron:', importErr);
-      importResult = { success: false, error: importErr.message };
-    }
+    // 2. Fetch new orders from Conta Azul (run in background using setTimeout)
+    const caService = new ContaAzulService(tenantId);
+    const today = new Date();
+    const yesterday = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    
+    const startDateStr = searchParams.get('startDate') || yesterday.toISOString().split('T')[0];
+    const endDateStr = searchParams.get('endDate') || today.toISOString().split('T')[0];
+    
+    // We do NOT await the promise here. We delegate it to setTimeout to run in background.
+    setTimeout(() => {
+      console.log(`Starting background cron sync for dates ${startDateStr} to ${endDateStr}...`);
+      caService.importOrders(startDateStr, endDateStr)
+        .then((res) => {
+          console.log(`Background cron sync completed successfully for dates ${startDateStr} to ${endDateStr}:`, res);
+        })
+        .catch((err) => {
+          console.error(`Background cron sync failed for dates ${startDateStr} to ${endDateStr}:`, err);
+        });
+    }, 50);
     
     return NextResponse.json({
       success: true,
       timestamp: new Date().toISOString(),
-      queue: queueResult,
-      import: importResult
+      message: 'Background sync triggered successfully',
+      queue: queueResult
     });
   } catch (error: any) {
     console.error('Error running background sync:', error);
