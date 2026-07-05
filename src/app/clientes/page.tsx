@@ -44,6 +44,19 @@ export default function ClientesPage() {
     actions: 100
   });
 
+  // Column Visibility States
+  const [visibleColumns, setVisibleColumns] = useState<{ [key: string]: boolean }>({
+    name: true,
+    ids: true,
+    document: true,
+    email: true,
+    phone: true,
+    address: true,
+    sync: true,
+    actions: true
+  });
+  const [isColumnsDropdownOpen, setIsColumnsDropdownOpen] = useState(false);
+
   useEffect(() => {
     const saved = localStorage.getItem('samppel_customer_column_widths');
     if (saved) {
@@ -53,7 +66,23 @@ export default function ClientesPage() {
         console.error('Error loading column widths:', e);
       }
     }
+    const savedCols = localStorage.getItem('samppel_customer_visible_columns');
+    if (savedCols) {
+      try {
+        setVisibleColumns(JSON.parse(savedCols));
+      } catch (e) {
+        console.error('Error loading visible columns:', e);
+      }
+    }
   }, []);
+
+  const toggleColumnVisibility = (colKey: string) => {
+    setVisibleColumns(prev => {
+      const next = { ...prev, [colKey]: !prev[colKey] };
+      localStorage.setItem('samppel_customer_visible_columns', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const handleMouseDown = (e: React.MouseEvent, colKey: string) => {
     e.preventDefault();
@@ -390,8 +419,8 @@ export default function ClientesPage() {
       </header>
 
       {/* SEARCH BAR */}
-      <div className="filter-bar">
-        <div className="form-group" style={{ flex: 1, minWidth: '300px' }}>
+      <div className="filter-bar" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+        <div className="form-group" style={{ flex: 1, minWidth: '300px', margin: 0 }}>
           <label className="form-label">Buscar Cliente</label>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <Search size={18} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
@@ -405,7 +434,64 @@ export default function ClientesPage() {
             />
           </div>
         </div>
-        <button onClick={fetchCustomers} className="btn btn-secondary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+
+        {/* Dropdown de Colunas Aparentes */}
+        <div style={{ position: 'relative' }} onMouseLeave={() => setIsColumnsDropdownOpen(false)}>
+          <button 
+            type="button"
+            onClick={() => setIsColumnsDropdownOpen(!isColumnsDropdownOpen)} 
+            className="btn btn-secondary" 
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', height: '42px' }}
+          >
+            <span>Colunas</span>
+            <span style={{
+              display: 'inline-block',
+              width: '0', height: '0',
+              marginLeft: '2px',
+              verticalAlign: 'middle',
+              borderTop: '4px solid',
+              borderRight: '4px solid transparent',
+              borderLeft: '4px solid transparent'
+            }} />
+          </button>
+          
+          {isColumnsDropdownOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', right: 0, marginTop: '8px',
+              backgroundColor: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-premium)',
+              padding: '0.85rem', zIndex: 100, display: 'flex', flexDirection: 'column',
+              gap: '0.65rem', minWidth: '200px', textAlign: 'left',
+              animation: 'fadeIn 0.15s ease'
+            }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.25rem' }}>
+                Colunas Visíveis
+              </div>
+              {[
+                { key: 'name', label: 'Nome / Razão Social' },
+                { key: 'ids', label: 'IDs' },
+                { key: 'document', label: 'CNPJ / CPF' },
+                { key: 'email', label: 'E-mail' },
+                { key: 'phone', label: 'Telefone' },
+                { key: 'address', label: 'Endereço' },
+                { key: 'sync', label: 'Sincronização' },
+                { key: 'actions', label: 'Ações' }
+              ].map(col => (
+                <label key={col.key} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer', userSelect: 'none', margin: 0 }}>
+                  <input 
+                    type="checkbox" 
+                    checked={visibleColumns[col.key] !== false} 
+                    onChange={() => toggleColumnVisibility(col.key)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span>{col.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button onClick={fetchCustomers} className="btn btn-secondary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', height: '42px' }}>
           <RefreshCw size={16} />
           <span>Recarregar</span>
         </button>
@@ -426,7 +512,7 @@ export default function ClientesPage() {
                   { key: 'address', label: 'Endereço' },
                   { key: 'sync', label: 'Sincronização Conta Azul' },
                   { key: 'actions', label: 'Ações' }
-                ].map((col) => (
+                ].filter(col => visibleColumns[col.key] !== false).map((col) => (
                   <th key={col.key} style={getColStyle(col.key)}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                       <span>{col.label}</span>
@@ -452,11 +538,11 @@ export default function ClientesPage() {
             <tbody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, idx) => (
-                  <TableRowSkeleton key={idx} cols={8} />
+                  <TableRowSkeleton key={idx} cols={Object.keys(visibleColumns).filter(key => visibleColumns[key] !== false).length} />
                 ))
               ) : groupedCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={Object.keys(visibleColumns).filter(key => visibleColumns[key] !== false).length} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
                     Nenhum cliente cadastrado ou encontrado.
                   </td>
                 </tr>
@@ -471,151 +557,167 @@ export default function ClientesPage() {
                   return (
                     <tr key={customer.id}>
                       {/* Nome */}
-                      <td style={{ ...getColStyle('name'), fontWeight: 600 }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                          <span 
-                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.name || 200) - 25}px` }} 
-                            title={name}
-                          >
-                            {name}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(name)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
-                            title="Copiar Nome"
-                          >
-                            <Copy size={11} />
-                          </button>
-                        </div>
-                      </td>
+                      {visibleColumns.name !== false && (
+                        <td style={{ ...getColStyle('name'), fontWeight: 600 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <span 
+                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.name || 200) - 25}px` }} 
+                              title={name}
+                            >
+                              {name}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => navigator.clipboard.writeText(name)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
+                              title="Copiar Nome"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
 
                       {/* IDs */}
-                      <td style={getColStyle('ids')}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                          <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.ids || 90) - 25}px` }}>
-                            {customer.all_ids}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(customer.all_ids)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
-                            title="Copiar IDs"
-                          >
-                            <Copy size={11} />
-                          </button>
-                        </div>
-                      </td>
-
-                      {/* CNPJ / CPF */}
-                      <td style={getColStyle('document')}>
-                        {doc ? (
+                      {visibleColumns.ids !== false && (
+                        <td style={getColStyle('ids')}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.document || 155) - 25}px` }}>
-                              {doc}
+                            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.ids || 90) - 25}px` }}>
+                              {customer.all_ids}
                             </code>
                             <button
                               type="button"
-                              onClick={() => navigator.clipboard.writeText(doc)}
+                              onClick={() => navigator.clipboard.writeText(customer.all_ids)}
                               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
-                              title="Copiar CNPJ/CPF"
+                              title="Copiar IDs"
                             >
                               <Copy size={11} />
                             </button>
                           </div>
-                        ) : '---'}
-                      </td>
+                        </td>
+                      )}
+
+                      {/* CNPJ / CPF */}
+                      {visibleColumns.document !== false && (
+                        <td style={getColStyle('document')}>
+                          {doc ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                              <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.document || 155) - 25}px` }}>
+                                {doc}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => navigator.clipboard.writeText(doc)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
+                                title="Copiar CNPJ/CPF"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            </div>
+                          ) : '---'}
+                        </td>
+                      )}
 
                       {/* E-mail */}
-                      <td style={getColStyle('email')}>
-                        {email ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                            <span 
-                              style={{ textTransform: 'lowercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.email || 190) - 25}px` }} 
-                              title={email}
-                            >
-                              {email}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => navigator.clipboard.writeText(email)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
-                              title="Copiar E-mail"
-                            >
-                              <Copy size={11} />
-                            </button>
-                          </div>
-                        ) : '---'}
-                      </td>
+                      {visibleColumns.email !== false && (
+                        <td style={getColStyle('email')}>
+                          {email ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                              <span 
+                                style={{ textTransform: 'lowercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.email || 190) - 25}px` }} 
+                                title={email}
+                              >
+                                {email}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => navigator.clipboard.writeText(email)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
+                                title="Copiar E-mail"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            </div>
+                          ) : '---'}
+                        </td>
+                      )}
 
                       {/* Telefone */}
-                      <td style={getColStyle('phone')}>
-                        {phone ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.phone || 150) - 25}px` }}>
-                              {phone}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => navigator.clipboard.writeText(phone)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
-                              title="Copiar Telefone"
-                            >
-                              <Copy size={11} />
-                            </button>
-                          </div>
-                        ) : '---'}
-                      </td>
+                      {visibleColumns.phone !== false && (
+                        <td style={getColStyle('phone')}>
+                          {phone ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.phone || 150) - 25}px` }}>
+                                {phone}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => navigator.clipboard.writeText(phone)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
+                                title="Copiar Telefone"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            </div>
+                          ) : '---'}
+                        </td>
+                      )}
 
                       {/* Endereço */}
-                      <td style={{ ...getColStyle('address'), fontSize: '0.8rem' }}>
-                        {address ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                            <span 
-                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.address || 220) - 25}px` }} 
-                              title={address}
-                            >
-                              {address}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => navigator.clipboard.writeText(address)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
-                              title="Copiar Endereço"
-                            >
-                              <Copy size={11} />
-                            </button>
-                          </div>
-                        ) : '---'}
-                      </td>
+                      {visibleColumns.address !== false && (
+                        <td style={{ ...getColStyle('address'), fontSize: '0.8rem' }}>
+                          {address ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                              <span 
+                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.address || 220) - 25}px` }} 
+                                title={address}
+                              >
+                                {address}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => navigator.clipboard.writeText(address)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', flexShrink: 0 }}
+                                title="Copiar Endereço"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            </div>
+                          ) : '---'}
+                        </td>
+                      )}
 
                       {/* Sincronização */}
-                      <td style={getColStyle('sync')}>
-                        {customer.conta_azul_id ? (
-                          <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
-                            <CheckCircle2 size={12} />
-                            Integrado ({customer.conta_azul_id.substring(0, 8)})
-                          </span>
-                        ) : (
-                          <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
-                            <HelpCircle size={12} />
-                            Pendente
-                          </span>
-                        )}
-                      </td>
+                      {visibleColumns.sync !== false && (
+                        <td style={getColStyle('sync')}>
+                          {customer.conta_azul_id ? (
+                            <span className="badge badge-success" title={`ID: ${customer.conta_azul_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                              <CheckCircle2 size={12} />
+                              Integrado ({customer.conta_azul_id.substring(0, 8)})
+                            </span>
+                          ) : (
+                            <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                              <HelpCircle size={12} />
+                              Pendente
+                            </span>
+                          )}
+                        </td>
+                      )}
 
                       {/* Ações */}
-                      <td style={getColStyle('actions')}>
-                        <button 
-                          type="button"
-                          onClick={() => handleOpenEdit(customer)} 
-                          className="btn btn-secondary"
-                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
-                        >
-                          <Edit size={12} />
-                          <span>Editar</span>
-                        </button>
-                      </td>
+                      {visibleColumns.actions !== false && (
+                        <td style={getColStyle('actions')}>
+                          <button 
+                            type="button"
+                            onClick={() => handleOpenEdit(customer)} 
+                            className="btn btn-secondary"
+                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', gap: '0.25rem', alignItems: 'center', whiteSpace: 'nowrap' }}
+                          >
+                            <Edit size={12} />
+                            <span>Editar</span>
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
