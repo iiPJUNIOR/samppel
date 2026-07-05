@@ -14,7 +14,7 @@ interface InputProps {
 }
 
 const AppInput = (props: InputProps) => {
-  const { label, placeholder, icon, ...rest } = props;
+  const { label, placeholder, icon, type = 'text', ...rest } = props;
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [isHovering, setIsHovering] = useState(false);
 
@@ -35,8 +35,8 @@ const AppInput = (props: InputProps) => {
       )}
       <div className="relative w-full">
         <input
-          type="text"
-          className="peer relative z-10 border-2 border-[var(--color-border)] h-12 w-full rounded-md bg-[rgba(22,26,29,0.55)] backdrop-blur-md px-4 font-thin outline-none drop-shadow-sm transition-all duration-200 ease-in-out focus:bg-[rgba(16,18,20,0.75)] placeholder:font-medium text-[var(--color-text-primary)] text-sm"
+          type={type}
+          className="peer relative z-10 border-0 h-12 w-full rounded-md bg-[rgba(22,26,29,0.55)] backdrop-blur-md px-4 font-thin outline-none drop-shadow-sm transition-all duration-200 ease-in-out focus:bg-[rgba(16,18,20,0.75)] placeholder:font-medium text-[var(--color-text-primary)] text-sm"
           placeholder={placeholder}
           onMouseMove={handleMouseMove}
           onMouseEnter={() => setIsHovering(true)}
@@ -46,15 +46,15 @@ const AppInput = (props: InputProps) => {
         {isHovering && (
           <>
             <div
-              className="absolute pointer-events-none top-0 left-0 right-0 h-[2px] z-20 rounded-t-md overflow-hidden"
+              className="absolute pointer-events-none top-0 left-0 right-0 h-[1.5px] z-20 rounded-t-md overflow-hidden"
               style={{
-                background: `radial-gradient(30px circle at ${mousePosition.x}px 0px, var(--color-text-primary) 0%, transparent 70%)`,
+                background: `radial-gradient(35px circle at ${mousePosition.x}px 0px, var(--color-text-primary) 0%, transparent 70%)`,
               }}
             />
             <div
-              className="absolute pointer-events-none bottom-0 left-0 right-0 h-[2px] z-20 rounded-b-md overflow-hidden"
+              className="absolute pointer-events-none bottom-0 left-0 right-0 h-[1.5px] z-20 rounded-b-md overflow-hidden"
               style={{
-                background: `radial-gradient(30px circle at ${mousePosition.x}px 2px, var(--color-text-primary) 0%, transparent 70%)`,
+                background: `radial-gradient(35px circle at ${mousePosition.x}px 2px, var(--color-text-primary) 0%, transparent 70%)`,
               }}
             />
           </>
@@ -229,7 +229,7 @@ export default function LoginPage() {
                       href="https://login.contaazul.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 px-4 py-2.5 border border-[var(--color-border)] bg-transparent hover:bg-white/5 text-xs text-[var(--color-text-primary)] rounded-md transition-all duration-200 cursor-pointer font-medium w-full"
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent hover:bg-white/5 text-xs text-[var(--color-text-primary)] rounded-md transition-all duration-200 cursor-pointer font-medium w-full"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#00A4E4]">
                         <path d="M15 3h6v6" />
@@ -272,7 +272,7 @@ export default function LoginPage() {
                   <AppInput 
                     label="Senha *" 
                     placeholder="Sua senha" 
-                    type={showPassword ? "text" : "password"}
+                    type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e: any) => setPassword(e.target.value)}
                     required
@@ -311,7 +311,7 @@ export default function LoginPage() {
                   <button 
                     type="submit"
                     disabled={loading}
-                    className="w-full py-3 px-6 rounded-md bg-[#FF4757] hover:bg-[#ff5b6b] text-white font-bold text-sm transition-all duration-200 cursor-pointer shadow-md hover:shadow-lg hover:shadow-red-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                    className="w-full py-2.5 px-6 bg-transparent hover:text-[#ff5b6b] text-[#FF4757] font-bold text-sm transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                   >
                     <span>{loading ? 'Carregando...' : isSignUpMode ? 'Cadastrar' : 'Entrar'}</span>
                   </button>
