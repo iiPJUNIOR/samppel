@@ -146,6 +146,7 @@ export default function PedidosPage() {
   const [filterDate, setFilterDate] = useState('');
   const [filterHandlingTeam, setFilterHandlingTeam] = useState('');
   const [filterSearchOrder, setFilterSearchOrder] = useState('');
+  const [filterContaAzulStatus, setFilterContaAzulStatus] = useState('');
 
   const getContaAzulStatusStyle = (status: string) => {
     const norm = (status || '').toLowerCase().trim();
@@ -1510,7 +1511,8 @@ export default function PedidosPage() {
     const matchSector = filterSector ? order.production_sector === filterSector : true;
     const matchDate = filterDate ? new Date(order.order_date).toLocaleDateString('pt-BR') === new Date(filterDate + 'T12:00:00').toLocaleDateString('pt-BR') : true;
     const matchSearchOrder = filterSearchOrder ? order.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(order.order_number).includes(filterSearchOrder) : true;
-    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchSearchOrder;
+    const matchContaAzulStatus = filterContaAzulStatus ? order.conta_azul_status === filterContaAzulStatus : true;
+    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchSearchOrder && matchContaAzulStatus;
   });
 
   // Lógica de Filtros para Itens no Kanban
@@ -1540,7 +1542,8 @@ export default function PedidosPage() {
     const matchDate = filterDate ? new Date(parentOrder.order_date).toLocaleDateString('pt-BR') === new Date(filterDate + 'T12:00:00').toLocaleDateString('pt-BR') : true;
     const matchHandlingTeam = filterHandlingTeam ? item.handling_team_id === filterHandlingTeam : true;
     const matchSearchOrder = filterSearchOrder ? parentOrder?.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(parentOrder?.order_number).includes(filterSearchOrder) || item.friendly_id?.toLowerCase().includes(filterSearchOrder.toLowerCase()) : true;
-    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchHandlingTeam && matchSearchOrder;
+    const matchContaAzulStatus = filterContaAzulStatus ? parentOrder.conta_azul_status === filterContaAzulStatus : true;
+    return matchCustomer && matchSeller && matchStatus && matchSector && matchDate && matchHandlingTeam && matchSearchOrder && matchContaAzulStatus;
   });
 
   const getFreightBadgeStyle = (shippingType: string) => {
@@ -1799,6 +1802,22 @@ export default function PedidosPage() {
           />
         </div>
 
+        <div className="form-group">
+          <label className="form-label">Situação Conta Azul</label>
+          <select 
+            className="form-select"
+            value={filterContaAzulStatus}
+            onChange={(e) => setFilterContaAzulStatus(e.target.value)}
+          >
+            <option value="">Todas as Situações</option>
+            <option value="Aprovado">Aprovado</option>
+            <option value="Cancelado">Cancelado</option>
+            <option value="Em andamento">Em andamento</option>
+            <option value="Faturado">Faturado</option>
+            <option value="Recusado">Recusado</option>
+          </select>
+        </div>
+
         {/* Filtro exclusivo para o setor de manuseio */}
         {(user?.role === 'Produção' || user?.role === 'Administrador' || user?.role === 'Comercial') && handlingTeams.length > 0 && (
           <div className="form-group" style={{ background: 'hsla(271, 91.2%, 65.1%, 0.06)', border: '1px solid hsla(271, 91.2%, 65.1%, 0.2)', borderRadius: 'var(--radius-md)', padding: '0.5rem 0.75rem' }}>
@@ -1831,6 +1850,7 @@ export default function PedidosPage() {
             setFilterDate('');
             setFilterHandlingTeam('');
             setFilterSearchOrder('');
+            setFilterContaAzulStatus('');
           }}
         >
           Limpar Filtros
