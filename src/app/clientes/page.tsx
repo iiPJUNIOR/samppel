@@ -266,10 +266,42 @@ export default function ClientesPage() {
     }
   };
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) || 
-    (c.document && c.document.includes(search))
-  );
+  const getGroupedCustomers = () => {
+    // 1. Filtra pela busca
+    const filtered = customers.filter(c => 
+      c.name.toLowerCase().includes(search.toLowerCase()) || 
+      (c.document && c.document.includes(search))
+    );
+
+    // 2. Agrupa por nome e documento
+    const groups: { [key: string]: any[] } = {};
+    for (const c of filtered) {
+      const cleanDoc = (c.document || '').replace(/\D/g, '');
+      const nameKey = (c.name || '').toLowerCase().trim();
+      const key = `${nameKey}_${cleanDoc}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(c);
+    }
+
+    // 3. Formata e junta os IDs
+    return Object.values(groups).map(group => {
+      const primary = group[0];
+      const allIds = group.map(c => {
+        const idStr = c.id || '';
+        return idStr.substring(idStr.length - 3);
+      }).join(', ');
+
+      return {
+        ...primary,
+        all_ids: allIds,
+        is_grouped: group.length > 1
+      };
+    });
+  };
+
+  const groupedCustomers = getGroupedCustomers();
 
   return (
     <div className="page-container">
@@ -328,6 +360,7 @@ export default function ClientesPage() {
             <thead>
               <tr>
                 <th>Nome / Razão Social</th>
+                <th>IDs</th>
                 <th>CNPJ / CPF</th>
                 <th>E-mail</th>
                 <th>Telefone</th>
@@ -339,21 +372,22 @@ export default function ClientesPage() {
             <tbody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, idx) => (
-                  <TableRowSkeleton key={idx} cols={7} />
+                  <TableRowSkeleton key={idx} cols={8} />
                 ))
-              ) : filteredCustomers.length === 0 ? (
+              ) : groupedCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
                     Nenhum cliente cadastrado ou encontrado.
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((customer) => (
+                groupedCustomers.map((customer) => (
                   <tr key={customer.id}>
                     <td style={{ fontWeight: 600 }}>{customer.name}</td>
-                    <td><code>{customer.document || '---'}</code></td>
-                    <td>{customer.email || '---'}</td>
-                    <td>{customer.phone || '---'}</td>
+                    <td><code>{customer.all_ids}</code></td>
+                    <td><code>{formatDocument(customer.document) || '---'}</code></td>
+                    <td style={{ textTransform: 'lowercase' }}>{customer.email || '---'}</td>
+                    <td>{formatPhone(customer.phone) || '---'}</td>
                     <td style={{ fontSize: '0.8rem', maxWidth: '250px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {customer.address || '---'}
                     </td>
