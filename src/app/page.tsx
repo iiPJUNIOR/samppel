@@ -175,32 +175,7 @@ export default function LoginPage() {
           max-width: 380px;
         }
 
-        /* Métricas decorativas */
-        .lp-metrics {
-          display: flex;
-          gap: 2rem;
-          margin-top: 3rem;
-          padding-top: 2rem;
-          border-top: 1px solid rgba(255,255,255,0.06);
-        }
 
-        .lp-metric {
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-        }
-
-        .lp-metric-value {
-          font-size: 1.5rem;
-          font-weight: 700;
-          color: #F1F5F9;
-          letter-spacing: -0.02em;
-        }
-
-        .lp-metric-label {
-          font-size: 0.75rem;
-          color: #475569;
-        }
 
         .lp-left-bottom {
           position: relative;
@@ -542,20 +517,7 @@ export default function LoginPage() {
               Gerencie pedidos, clientes, produção e financeiro em um único sistema integrado ao Conta Azul.
             </p>
 
-            <div className="lp-metrics">
-              <div className="lp-metric">
-                <span className="lp-metric-value">100%</span>
-                <span className="lp-metric-label">Integrado ao ERP</span>
-              </div>
-              <div className="lp-metric">
-                <span className="lp-metric-value">4</span>
-                <span className="lp-metric-label">Módulos ativos</span>
-              </div>
-              <div className="lp-metric">
-                <span className="lp-metric-value">RT</span>
-                <span className="lp-metric-label">Dados em tempo real</span>
-              </div>
-            </div>
+
           </div>
 
           <div className="lp-left-bottom">
