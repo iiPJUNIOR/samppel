@@ -927,24 +927,62 @@ export class ContaAzulService {
           const clientUuid = clienteInfo.uuid || clienteInfo.id;
           const { data: existingCust } = await dbClient
             .from('customers')
-            .select('id')
+            .select('id, document, email, phone')
             .eq('tenant_id', this.tenantId)
             .eq('conta_azul_id', clientUuid)
             .maybeSingle();
 
+          let custDetails: any = null;
+          const needsDetails = !existingCust || !existingCust.document || !existingCust.email || !existingCust.phone;
+
+          if (needsDetails) {
+            try {
+              const custResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${clientUuid}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (custResponse.ok) {
+                custDetails = await custResponse.json();
+              }
+            } catch (err) {
+              console.error('Erro ao buscar detalhes da pessoa no Conta Azul:', err);
+            }
+          }
+
+          const nameVal = custDetails?.nome || clienteInfo.nome || 'Cliente Importado';
+          const docVal = custDetails?.documento || clienteInfo.documento || '';
+          const emailVal = custDetails?.email || '';
+          const phoneVal = custDetails?.telefone_celular || custDetails?.telefone_comercial || '';
+          let addrVal = '';
+          if (custDetails?.enderecos?.[0]) {
+            const addr = custDetails.enderecos[0];
+            addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
+          }
+
           if (existingCust) {
             customerId = existingCust.id;
+            if (needsDetails && custDetails) {
+              await dbClient
+                .from('customers')
+                .update({
+                  name: nameVal,
+                  document: docVal,
+                  email: emailVal,
+                  phone: phoneVal,
+                  address: addrVal
+                })
+                .eq('id', customerId);
+            }
           } else {
             const { data: newCust, error: custErr } = await dbClient
               .from('customers')
               .insert([{
                 tenant_id: this.tenantId,
-                name: clienteInfo.nome || 'Cliente Importado',
+                name: nameVal,
                 conta_azul_id: clientUuid,
-                document: clienteInfo.documento || '',
-                email: '',
-                phone: '',
-                address: ''
+                document: docVal,
+                email: emailVal,
+                phone: phoneVal,
+                address: addrVal
               }])
               .select('id')
               .single();
