@@ -490,11 +490,6 @@ export default function ClientesPage() {
             </div>
           )}
         </div>
-
-        <button onClick={fetchCustomers} className="btn btn-secondary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', height: '42px' }}>
-          <RefreshCw size={16} />
-          <span>Recarregar</span>
-        </button>
       </div>
 
       {/* CUSTOMERS LIST */}
