@@ -52,6 +52,34 @@ export default function DashboardPage() {
   const [isListModalOpen, setIsListModalOpen] = useState(false);
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [updatingPayments, setUpdatingPayments] = useState(false);
+
+  const handleUpdatePayments = async () => {
+    if (updatingPayments) return;
+    setUpdatingPayments(true);
+    try {
+      // Sincronizar em lote todos os pedidos do modal
+      for (let i = 0; i < filteredOrders.length; i++) {
+        const o = filteredOrders[i];
+        const res = await fetch('/api/sync/import-single-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: o.id, userRole: user?.role })
+        });
+        if (!res.ok) {
+          console.warn(`Falha ao sincronizar faturamento do pedido ${o.pv_number}`);
+        }
+      }
+      alert('Sincronização de pagamentos concluída com sucesso!');
+      await fetchData();
+      setIsListModalOpen(false);
+    } catch (err) {
+      console.error('Erro na sincronização de pagamentos:', err);
+      alert('Erro inesperado ao sincronizar pagamentos.');
+    } finally {
+      setUpdatingPayments(false);
+    }
+  };
 
   const openIndicatorList = (label: string) => {
     let itemsList: any[] = [];
@@ -538,12 +566,48 @@ export default function DashboardPage() {
                   {filteredOrders.length} {filteredOrders.length === 1 ? 'pedido encontrado' : 'pedidos encontrados'}
                 </span>
               </div>
-              <button
-                onClick={() => setIsListModalOpen(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)' }}
-              >
-                &times;
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                {selectedIndicator === 'Pedidos Sem Pagamento' && (
+                  <button
+                    disabled={updatingPayments}
+                    onClick={handleUpdatePayments}
+                    style={{
+                      padding: '0.45rem 0.85rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      backgroundColor: 'var(--primary)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      transition: 'opacity 0.2s',
+                      opacity: updatingPayments ? 0.7 : 1
+                    }}
+                  >
+                    <RefreshCw 
+                      size={13} 
+                      style={{
+                        animation: updatingPayments ? 'spin 1.2s linear infinite' : 'none'
+                      }}
+                    />
+                    {updatingPayments ? 'Atualizando...' : 'Atualizar Pagamentos'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsListModalOpen(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  &times;
+                </button>
+              </div>
+              <style jsx>{`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}</style>
             </div>
 
             {/* Lista */}
