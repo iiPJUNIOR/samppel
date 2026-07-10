@@ -90,7 +90,7 @@ export default function RelatoriosPage() {
   }, [user, router]);
   
   // Navigation tabs: 'efficiency' | 'credits' | 'commercial' | 'traceability'
-  const [activeTab, setActiveTab] = useState<'efficiency' | 'credits' | 'commercial' | 'traceability'>('efficiency');
+  const [activeTab, setActiveTab] = useState<'efficiency' | 'credits' | 'commercial' | 'traceability'>('traceability');
 
   // Lists for filters
   const [customers, setCustomers] = useState<any[]>([]);
@@ -511,6 +511,13 @@ export default function RelatoriosPage() {
 
       <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '1.5rem', paddingBottom: '1px', overflowX: 'auto', whiteSpace: 'nowrap' }} className="no-scrollbar">
         <button 
+          onClick={() => setActiveTab('traceability')}
+          className={`btn ${activeTab === 'traceability' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'traceability' ? '2px solid var(--primary)' : 'none' }}
+        >
+          Rastreamento de Pedido (Timeline)
+        </button>
+        <button 
           onClick={() => setActiveTab('efficiency')}
           className={`btn ${activeTab === 'efficiency' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'efficiency' ? '2px solid var(--primary)' : 'none' }}
@@ -530,13 +537,6 @@ export default function RelatoriosPage() {
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'commercial' ? '2px solid var(--primary)' : 'none' }}
         >
           Desempenho Comercial
-        </button>
-        <button 
-          onClick={() => setActiveTab('traceability')}
-          className={`btn ${activeTab === 'traceability' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'traceability' ? '2px solid var(--primary)' : 'none' }}
-        >
-          Rastreamento Kanban
         </button>
       </div>
 
@@ -858,6 +858,46 @@ export default function RelatoriosPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          {/* Gráfico do Tempo Médio por Etapa */}
+          <div className="card" style={{ padding: '1.5rem', marginTop: '2rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Hourglass size={18} style={{ color: 'var(--primary)' }} />
+              Tempo Médio de Retenção por Etapa do Kanban
+            </h3>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              Esta métrica aponta gargalos na linha de produção, medindo a média de dias que os cartões de itens passam estacionados em cada coluna do Kanban.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {stageAveragesList.map(avg => {
+                const percentage = Math.min((avg.averageHours / 120) * 100, 100);
+                const roundedDays = (avg.averageHours / 24).toFixed(1);
+                
+                return (
+                  <div key={avg.stageName} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 100px', alignItems: 'center', gap: '1rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>{avg.stageName}</span>
+                    <div style={{ height: '12px', backgroundColor: 'var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+                      <div style={{ 
+                        height: '100%', 
+                        width: `${percentage}%`, 
+                        backgroundColor: avg.averageHours > 48 ? 'var(--danger, #ef4444)' : avg.averageHours > 24 ? 'var(--warning, #f59e0b)' : 'var(--primary, #3b82f6)',
+                        borderRadius: '6px',
+                        transition: 'width 0.5s ease-in-out'
+                      }} />
+                    </div>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, textAlign: 'right' }}>
+                      {roundedDays} dias ({formatHoursToRealTime(avg.averageHours)})
+                    </span>
+                  </div>
+                );
+              })}
+              {stageAveragesList.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
+                  Aguardando primeiras movimentações do Kanban para gerar cálculo de tempo.
+                </div>
+              )}
             </div>
           </div>
         </>
@@ -1212,46 +1252,6 @@ export default function RelatoriosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {activeTab === 'traceability' && (
         <>
-          {/* Gráfico do Tempo Médio por Etapa */}
-          <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Hourglass size={18} style={{ color: 'var(--primary)' }} />
-              Tempo Médio de Retenção por Etapa do Kanban
-            </h3>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-              Esta métrica aponta gargalos na linha de produção, medindo a média de dias que os cartões de itens passam estacionados em cada coluna do Kanban.
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {stageAveragesList.map(avg => {
-                const percentage = Math.min((avg.averageHours / 120) * 100, 100);
-                const roundedDays = (avg.averageHours / 24).toFixed(1);
-                
-                return (
-                  <div key={avg.stageName} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 100px', alignItems: 'center', gap: '1rem' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>{avg.stageName}</span>
-                    <div style={{ height: '12px', backgroundColor: 'var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
-                      <div style={{ 
-                        height: '100%', 
-                        width: `${percentage}%`, 
-                        backgroundColor: avg.averageHours > 48 ? 'var(--danger, #ef4444)' : avg.averageHours > 24 ? 'var(--warning, #f59e0b)' : 'var(--primary, #3b82f6)',
-                        borderRadius: '6px',
-                        transition: 'width 0.5s ease-in-out'
-                      }} />
-                    </div>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 600, textAlign: 'right' }}>
-                      {roundedDays} dias ({formatHoursToRealTime(avg.averageHours)})
-                    </span>
-                  </div>
-                );
-              })}
-              {stageAveragesList.length === 0 && (
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
-                  Aguardando primeiras movimentações do Kanban para gerar cálculo de tempo.
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* Rastreio Individual de Pedido por Número */}
           <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
