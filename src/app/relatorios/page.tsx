@@ -126,6 +126,16 @@ export default function RelatoriosPage() {
   const [traceError, setTraceError] = useState('');
   const [traceOrderItems, setTraceOrderItems] = useState<any[]>([]);
   const [traceSelectedItemId, setTraceSelectedItemId] = useState<string>('all');
+  const [traceSelectedOrder, setTraceSelectedOrder] = useState<any | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
+
+  const openOrderDetails = (order: any) => {
+    const client = customers.find(c => c.id === order.customer_id);
+    const orderFinance = financialTransactions.filter(f => f.order_id === order.id);
+    setSelectedOrderDetails({ ...order, customer: client, finance: orderFinance });
+    setIsDetailsModalOpen(true);
+  };
 
   const fetchFiltersData = async () => {
     try {
@@ -224,6 +234,7 @@ export default function RelatoriosPage() {
     setTraceTimeline([]);
     setTraceOrderItems([]);
     setTraceSelectedItemId('all');
+    setTraceSelectedOrder(null);
 
     try {
       const cleanNum = traceSearchNumber.replace(/\D/g, '');
@@ -244,6 +255,8 @@ export default function RelatoriosPage() {
         setTraceLoading(false);
         return;
       }
+
+      setTraceSelectedOrder(targetOrder);
 
       // 2. Buscar todos os itens deste pedido
       const itemsOfOrder = orderItems.filter(item => item.order_id === targetOrder.id);
@@ -1285,6 +1298,41 @@ export default function RelatoriosPage() {
               </div>
             )}
 
+            {traceSelectedOrder && (
+              <div style={{
+                marginBottom: '1.25rem',
+                padding: '0.85rem 1rem',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                fontSize: '0.85rem'
+              }}>
+                <span style={{ color: 'var(--text-muted)' }}>Histórico carregado do pedido:</span>
+                <button
+                  type="button"
+                  onClick={() => openOrderDetails(traceSelectedOrder)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    color: 'var(--primary)',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    fontSize: '0.85rem'
+                  }}
+                  title="Clique para abrir os detalhes deste pedido"
+                >
+                  PV-{traceSelectedOrder.pv_number?.replace(/\D/g, '')}
+                </button>
+                <span style={{ color: 'var(--text-muted)' }}>&bull; Cliente: <strong>{customers.find(c => c.id === traceSelectedOrder.customer_id)?.name || 'Cliente Desconhecido'}</strong></span>
+              </div>
+            )}
+
             {/* Seletores de subitens */}
             {traceOrderItems.length > 1 && (
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1.5rem', padding: '0.5rem', backgroundColor: 'var(--surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
@@ -1346,54 +1394,219 @@ export default function RelatoriosPage() {
 
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderLeft: '2px solid var(--border)', marginLeft: '10px', paddingLeft: '20px', marginTop: '1.5rem' }}>
-                  {filteredEvents.map((evt, idx) => (
-                    <div key={evt.id || idx} style={{ position: 'relative', marginBottom: '0.5rem' }}>
-                      {/* Marcador na Timeline */}
-                      <div style={{ 
-                        position: 'absolute', 
-                        left: '-26px', 
-                        top: '4px', 
-                        width: '10px', 
-                        height: '10px', 
-                        borderRadius: '50%', 
-                        backgroundColor: 'var(--primary)',
-                        border: '2px solid var(--surface)' 
-                      }} />
-                      
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                        {new Date(evt.changed_at).toLocaleString('pt-BR')}
-                      </div>
-                      <div style={{ fontSize: '0.825rem', marginTop: '2px', color: 'var(--text)' }}>
-                        {evt.eventType === 'sector_change' ? (
-                          <>
-                            Item <strong style={{ color: 'var(--primary)' }}>{evt.itemFriendlyId}</strong> ({evt.itemName}) teve o Setor de Produção Física alterado para{' '}
-                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.sector}</span>
-                            {evt.machineName && evt.machineName !== 'Sem Máquina' && (
-                              <>
-                                {' '}na máquina <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.machineName}</span>
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            Item <strong style={{ color: 'var(--primary)' }}>{evt.itemFriendlyId}</strong> ({evt.itemName}) foi movido de{' '}
-                            <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.from_stage?.name || 'Início'}</span> para{' '}
-                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.to_stage?.name || 'Final'}</span>
-                          </>
-                        )}
-                      </div>
+                  {filteredEvents.map((evt, idx) => {
+                    const cleanFriendlyId = (traceOrderItems.length === 1 && evt.itemFriendlyId.endsWith('/1'))
+                      ? evt.itemFriendlyId.substring(0, evt.itemFriendlyId.length - 2)
+                      : evt.itemFriendlyId;
+
+                    return (
+                      <div key={evt.id || idx} style={{ position: 'relative', marginBottom: '0.5rem' }}>
+                        {/* Marcador na Timeline */}
+                        <div style={{ 
+                          position: 'absolute', 
+                          left: '-26px', 
+                          top: '4px', 
+                          width: '10px', 
+                          height: '10px', 
+                          borderRadius: '50%', 
+                          backgroundColor: 'var(--primary)',
+                          border: '2px solid var(--surface)' 
+                        }} />
+                        
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                          {new Date(evt.changed_at).toLocaleString('pt-BR')}
+                        </div>
+                        <div style={{ fontSize: '0.825rem', marginTop: '2px', color: 'var(--text)' }}>
+                          {evt.eventType === 'sector_change' ? (
+                            <>
+                              Item <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> teve o Setor de Produção Física alterado para{' '}
+                              <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.sector}</span>
+                              {evt.machineName && evt.machineName !== 'Sem Máquina' && (
+                                <>
+                                  {' '}na máquina <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.machineName}</span>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              Item <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> foi movido de{' '}
+                              <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.from_stage?.name || 'Início'}</span> para{' '}
+                              <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.to_stage?.name || 'Final'}</span>
+                            </>
+                          )}
+                        </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', fontStyle: 'italic' }}>
                         {evt.eventType === 'sector_change' ? 'Alterado por: ' : 'Movido por: '}<strong style={{ color: 'var(--text)' }}>
                           {evt.changed_by ? (evt.changed_by.full_name || evt.changed_by.name || evt.changed_by.email || 'Operador') : 'Sistema'}
                         </strong> {evt.changed_by?.role ? `(${evt.changed_by.role})` : ''}
                       </div>
                     </div>
-                  ))}
+                  );
+                })}
                 </div>
               );
             })()}
           </div>
         </>
+      )}
+      {/* MODAL DE DETALHES DO PEDIDO SELECIONADO */}
+      {isDetailsModalOpen && selectedOrderDetails && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setIsDetailsModalOpen(false); }}
+          style={{
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1100, padding: '1rem',
+            backdropFilter: 'blur(4px)'
+          }}
+        >
+          <div style={{
+            backgroundColor: 'var(--surface)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-premium)',
+            width: '100%',
+            maxWidth: '780px',
+            maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'fadeIn 0.2s ease'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              backgroundColor: 'var(--background)'
+            }}>
+              <div>
+                <h3 style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>Pedido {selectedOrderDetails.pv_number}</span>
+                  {selectedOrderDetails.op_number && <span style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>({selectedOrderDetails.op_number})</span>}
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Cadastrado em {new Date(selectedOrderDetails.order_date).toLocaleDateString('pt-BR')}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsDetailsModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Conteúdo */}
+            <div style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              
+              {/* Grid Informações Principais */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
+                {/* Bloco Pedido */}
+                <div style={{ backgroundColor: 'var(--background)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>Dados de Produção</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Produto:</strong> {selectedOrderDetails.art_name}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Tiragem:</strong> {selectedOrderDetails.print_run?.toLocaleString('pt-BR')} unidades</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Medida:</strong> {selectedOrderDetails.measure}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Setor Físico:</strong> {selectedOrderDetails.production_sector || 'Não definido'}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Status Kanban:</strong> {selectedOrderDetails.status}</div>
+                  </div>
+                </div>
+
+                {/* Bloco Cliente */}
+                <div style={{ backgroundColor: 'var(--background)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>Dados do Cliente</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Cliente:</strong> {selectedOrderDetails.customer?.name || 'Não informado'}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Documento:</strong> {selectedOrderDetails.customer?.document || 'Não informado'}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Email:</strong> {selectedOrderDetails.customer?.email || 'Não informado'}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Celular:</strong> {selectedOrderDetails.customer?.phone || 'Não informado'}</div>
+                    <div><strong style={{ color: 'var(--text-muted)' }}>Vendedora:</strong> {selectedOrderDetails.seller_name}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Endereço */}
+              {selectedOrderDetails.customer?.address && (
+                <div style={{ backgroundColor: 'var(--background)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.8rem' }}>
+                  <strong style={{ color: 'var(--text-muted)' }}>Endereço de Entrega:</strong> {selectedOrderDetails.customer.address}
+                </div>
+              )}
+
+              {/* Bloco Financeiro */}
+              <div style={{ backgroundColor: 'var(--background)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>Transações e Parcelas Financeiras</h4>
+                {selectedOrderDetails.finance && selectedOrderDetails.finance.length > 0 ? (
+                  <div className="table-responsive">
+                    <table className="table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                          <th style={{ textAlign: 'left', padding: '0.5rem' }}>Vencimento</th>
+                          <th style={{ textAlign: 'right', padding: '0.5rem' }}>Valor</th>
+                          <th style={{ textAlign: 'center', padding: '0.5rem' }}>Status</th>
+                          <th style={{ textAlign: 'left', padding: '0.5rem' }}>Observação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedOrderDetails.finance.map((f: any, fIdx: number) => {
+                          const currencyFormat = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(f.amount);
+                          return (
+                            <tr key={f.id || fIdx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                              <td style={{ padding: '0.5rem' }}>{f.due_date ? new Date(f.due_date).toLocaleDateString('pt-BR') : 'Sem data'}</td>
+                              <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>{currencyFormat}</td>
+                              <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                                <span className="badge" style={{
+                                  backgroundColor: f.status === 'CONCILIADO' ? 'rgba(46, 213, 115, 0.15)' : 'rgba(255, 71, 87, 0.15)',
+                                  color: f.status === 'CONCILIADO' ? '#2ed573' : 'var(--danger)',
+                                  border: `1px solid ${f.status === 'CONCILIADO' ? '#2ed57330' : 'var(--danger)30'}`,
+                                  fontSize: '0.7rem'
+                                }}>
+                                  {f.status === 'CONCILIADO' ? 'PAGO' : f.status}
+                                </span>
+                              </td>
+                              <td style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>{f.description || '-'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '1rem' }}>
+                    Nenhuma parcela financeira encontrada localmente para este pedido.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Rodapé */}
+            <div style={{
+              padding: '1rem 1.5rem',
+              borderTop: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'flex-end',
+              backgroundColor: 'var(--background)'
+            }}>
+              <button
+                onClick={() => setIsDetailsModalOpen(false)}
+                className="btn btn-secondary"
+                style={{
+                  padding: '0.55rem 1.25rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  borderRadius: 'var(--radius-md)',
+                  cursor: 'pointer',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  color: 'var(--text)'
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
