@@ -42,7 +42,7 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
     }
   }, [user, isLoading, pathname, router]);
 
-  // Exibe tela de carregamento premium enquanto valida a sessao real
+  // Exibe tela de carregamento premium com animação de zoom no logo da Samppel
   if (isLoading) {
     return (
       <div style={{
@@ -51,26 +51,121 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
         justifyContent: 'center',
         height: '100vh',
         width: '100vw',
-        background: 'linear-gradient(135deg, hsl(222, 47%, 6%) 0%, hsl(222, 47%, 14%) 100%)',
-        color: 'var(--text-muted)',
-        fontFamily: 'var(--font-geist-sans), sans-serif',
-        fontSize: '1rem',
-        fontWeight: 500
+        background: 'linear-gradient(135deg, #0A0D14 0%, #111827 100%)',
+        color: '#E5E7EB',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+        {/* Grade de fundo sutil */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundImage: `
+            linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px)
+          `,
+          backgroundSize: '40px 40px',
+          pointerEvents: 'none'
+        }} />
+
+        {/* Brilho radial de fundo */}
+        <div style={{
+          position: 'absolute',
+          width: '600px',
+          height: '600px',
+          background: 'radial-gradient(circle, rgba(37, 99, 235, 0.07) 0%, transparent 70%)',
+          pointerEvents: 'none',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)'
+        }} />
+
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '1.75rem',
+          zIndex: 1,
+          textAlign: 'center'
+        }}>
+          {/* Logo animado com efeito de zoom pulsante */}
           <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '50%',
-            border: '3px solid rgba(var(--primary-rgb), 0.1)',
-            borderTopColor: 'var(--primary)',
-            animation: 'spin 1s linear infinite'
-          }} />
-          <span>Verificando autenticação...</span>
+            animation: 'pulseZoom 2s ease-in-out infinite',
+            filter: 'drop-shadow(0 4px 20px rgba(37, 99, 235, 0.15))'
+          }}>
+            <img 
+              src="/logo.png" 
+              alt="Logo Samppel" 
+              style={{
+                width: '280px',
+                height: 'auto',
+                display: 'block'
+              }}
+            />
+          </div>
+
+          {/* Container do Loader de Progresso */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
+            {/* Linha de progresso indeterminada moderna */}
+            <div style={{
+              width: '180px',
+              height: '4px',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              borderRadius: '2px',
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                position: 'absolute',
+                height: '100%',
+                width: '40%',
+                background: 'linear-gradient(90deg, #2563eb, #3b82f6)',
+                borderRadius: '2px',
+                animation: 'indeterminateProgress 1.4s ease-in-out infinite'
+              }} />
+            </div>
+            
+            <span style={{ 
+              fontSize: '0.78rem', 
+              color: '#9CA3AF', 
+              fontWeight: 500,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase'
+            }}>
+              Carregando portal...
+            </span>
+          </div>
         </div>
+
+        {/* CSS KEYFRAMES */}
         <style jsx global>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
+          @keyframes pulseZoom {
+            0% {
+              transform: scale(0.96);
+              opacity: 0.9;
+            }
+            50% {
+              transform: scale(1.03);
+              opacity: 1;
+            }
+            100% {
+              transform: scale(0.96);
+              opacity: 0.9;
+            }
+          }
+          @keyframes indeterminateProgress {
+            0% {
+              left: -40%;
+            }
+            50% {
+              left: 100%;
+              width: 50%;
+            }
+            100% {
+              left: 100%;
+              width: 30%;
+            }
           }
         `}</style>
       </div>
