@@ -9,6 +9,18 @@ export async function POST(request: NextRequest) {
   const startDate = searchParams.get('startDate') || undefined;
   const endDate = searchParams.get('endDate') || undefined;
 
+  let userRole = '';
+  try {
+    const body = await request.json();
+    userRole = body.userRole || '';
+  } catch (e) {
+    // Ignorar se a requisição não tiver body
+  }
+
+  if (userRole === 'Produção' || userRole === 'Fábrica') {
+    return new Response(JSON.stringify({ error: 'Operadores de Produção não têm permissão para importar novos pedidos.' }), { status: 403 });
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

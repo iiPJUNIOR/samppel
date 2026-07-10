@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getProducts, createProduct, updateProduct, adjustStock } from '@/services/supabase';
+import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
 
@@ -30,6 +31,10 @@ export default function ProdutosPage() {
   const [stockQtyChange, setStockQtyChange] = useState(100);
   const [stockAdjType, setStockAdjType] = useState<'ENTRADA' | 'SAIDA' | 'AJUSTE'>('ENTRADA');
   const [stockDescription, setStockDescription] = useState('');
+
+  // Operator secondary authentication
+  const [isOpAuthOpen, setIsOpAuthOpen] = useState(false);
+  const [pendingStockAdj, setPendingStockAdj] = useState<{ quantity: number; type: any; desc: string } | null>(null);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -140,12 +145,41 @@ export default function ProdutosPage() {
     const quantity = stockAdjType === 'SAIDA' ? -Math.abs(stockQtyChange) : Math.abs(stockQtyChange);
     const desc = stockDescription || `Ajuste manual de estoque (${stockAdjType})`;
 
+    if (user?.role === 'Administrador') {
+      const { error } = await adjustStock(
+        selectedProduct.id,
+        quantity,
+        stockAdjType as any,
+        `${desc} (Autorizado por Administrador: ${user.full_name})`,
+        user.tenant_id
+      );
+
+      if (error) {
+        alert('Erro ao ajustar estoque: ' + error);
+      } else {
+        setIsStockModalOpen(false);
+        fetchProducts();
+      }
+    } else {
+      setPendingStockAdj({ quantity, type: stockAdjType, desc });
+      setIsOpAuthOpen(true);
+    }
+  };
+
+  const handleOpAuthSuccess = async (operatorId: string, operatorName: string) => {
+    setIsOpAuthOpen(false);
+    if (!selectedProduct || !pendingStockAdj) return;
+
     const { error } = await adjustStock(
       selectedProduct.id,
-      quantity,
-      stockAdjType as any,
-      desc
+      pendingStockAdj.quantity,
+      pendingStockAdj.type,
+      `${pendingStockAdj.desc} (Autorizado por Operador: ${operatorName})`,
+      user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+      operatorId
     );
+
+    setPendingStockAdj(null);
 
     if (error) {
       alert('Erro ao ajustar estoque: ' + error);
@@ -163,14 +197,16 @@ export default function ProdutosPage() {
   const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial';
   const canEditDetails = user?.role === 'Administrador' || user?.role === 'Comercial';
   const isAdmin = user?.role === 'Administrador';
+  const isVendedor = user?.role === 'Vendedor';
+  const numCols = 6 + (isAdmin ? 1 : 0) - (isVendedor ? 1 : 0);
 
   return (
     <div className="page-container">
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Produtos &amp; Estoque</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-            {filteredProducts.length} produto{filteredProducts.length !== 1 ? 's' : ''} encontrado{filteredProducts.length !== 1 ? 's' : ''}
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            Lista geral de produtos cadastrados e nível de estoque atual.
           </p>
         </div>
 
@@ -209,17 +245,17 @@ export default function ProdutosPage() {
                 {isAdmin && <th>Preço Unitário</th>}
                 <th>Estoque Físico</th>
                 <th>Sincronização ERP</th>
-                <th>Ações</th>
+                {!isVendedor && <th>Ações</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, idx) => (
-                  <TableRowSkeleton key={idx} cols={isAdmin ? 7 : 6} />
+                  <TableRowSkeleton key={idx} cols={numCols} />
                 ))
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={numCols} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
                     Nenhum produto cadastrado ou encontrado.
                   </td>
                 </tr>
@@ -261,28 +297,11 @@ export default function ProdutosPage() {
                         </span>
                       )}
                     </td>
-                    <td style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button
-                        onClick={() => handleOpenStock(product)}
-                        title="Ajustar estoque"
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                          padding: '0.375rem 0.75rem', background: 'transparent',
-                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                          fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
-                          cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                      >
-                        <Warehouse size={12} />
-                        <span>Estoque</span>
-                      </button>
-
-                      {canEditDetails && (
+                    {!isVendedor && (
+                      <td style={{ display: 'flex', gap: '0.5rem' }}>
                         <button
-                          onClick={() => handleOpenEdit(product)}
-                          title="Editar produto"
+                          onClick={() => handleOpenStock(product)}
+                          title="Ajustar estoque"
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
                             padding: '0.375rem 0.75rem', background: 'transparent',
@@ -293,11 +312,30 @@ export default function ProdutosPage() {
                           onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
                           onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                         >
-                          <Edit size={12} />
-                          <span>Editar</span>
+                          <Warehouse size={12} />
+                          <span>Estoque</span>
                         </button>
-                      )}
-                    </td>
+
+                        {canEditDetails && (
+                          <button
+                            onClick={() => handleOpenEdit(product)}
+                            title="Editar produto"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                              padding: '0.375rem 0.75rem', background: 'transparent',
+                              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                              cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                          >
+                            <Edit size={12} />
+                            <span>Editar</span>
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -569,6 +607,14 @@ export default function ProdutosPage() {
           </div>
         </div>
       )}
+
+      <OperatorAuthModal 
+        isOpen={isOpAuthOpen}
+        tenantId={user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'}
+        onSuccess={handleOpAuthSuccess}
+        onClose={() => setIsOpAuthOpen(false)}
+        actionDescription={`Ajuste de Estoque (${stockAdjType}) - ${selectedProduct?.name}`}
+      />
     </div>
   );
 }

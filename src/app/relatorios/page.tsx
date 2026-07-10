@@ -10,7 +10,14 @@ import {
   getSectorTransitionReport,
   getCustomerStockCredits,
   getOrderBalanceAdjustments,
-  getCustomerProductStock
+  getCustomerProductStock,
+  getOrders,
+  getOrderItems,
+  getFinancialTransactions,
+  getOrderStages,
+  getAllStageHistory,
+  getOrderItemStageHistory,
+  getOrderItemSectorHistory
 } from '@/services/supabase';
 import { Skeleton, CardSkeleton, TableRowSkeleton } from '@/components/ui/Skeleton';
 import { 
@@ -72,6 +79,7 @@ const formatHoursToDaysHours = (decimalHours: number | string): string => {
 export default function RelatoriosPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const dataFetchedRef = React.useRef(false);
 
   useEffect(() => {
     if (user && !['Administrador', 'Comercial'].includes(user.role)) {
@@ -79,8 +87,8 @@ export default function RelatoriosPage() {
     }
   }, [user, router]);
   
-  // Navigation tabs: 'efficiency' | 'credits'
-  const [activeTab, setActiveTab] = useState<'efficiency' | 'credits'>('efficiency');
+  // Navigation tabs: 'efficiency' | 'credits' | 'commercial' | 'traceability'
+  const [activeTab, setActiveTab] = useState<'efficiency' | 'credits' | 'commercial' | 'traceability'>('efficiency');
 
   // Lists for filters
   const [customers, setCustomers] = useState<any[]>([]);
@@ -103,6 +111,21 @@ export default function RelatoriosPage() {
   const [credits, setCredits] = useState<any[]>([]);
   const [adjustments, setAdjustments] = useState<any[]>([]);
   const [productStocks, setProductStocks] = useState<any[]>([]);
+
+  // Novos estados para Comercial, Rastreamento e Histórico de Kanban
+  const [orders, setOrders] = useState<any[]>([]);
+  const [orderItems, setOrderItems] = useState<any[]>([]);
+  const [financialTransactions, setFinancialTransactions] = useState<any[]>([]);
+  const [orderStages, setOrderStages] = useState<any[]>([]);
+  const [stageHistory, setStageHistory] = useState<any[]>([]);
+
+  // Estados específicos para a Timeline de Rastreio de Pedido por Número
+  const [traceSearchNumber, setTraceSearchNumber] = useState('');
+  const [traceTimeline, setTraceTimeline] = useState<any[]>([]);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState('');
+  const [traceOrderItems, setTraceOrderItems] = useState<any[]>([]);
+  const [traceSelectedItemId, setTraceSelectedItemId] = useState<string>('all');
 
   const fetchFiltersData = async () => {
     try {
@@ -140,16 +163,26 @@ export default function RelatoriosPage() {
       });
       setReportData(reportRes.data || null);
 
-      // Fetch credits, adjustments and stocks
-      const [creditsRes, adjRes, stocksRes] = await Promise.all([
+      // Fetch credits, adjustments, stocks, orders, order items, financial transactions, stages, and stage history
+      const [creditsRes, adjRes, stocksRes, ordersRes, itemsRes, finRes, stagesRes, histRes] = await Promise.all([
         getCustomerStockCredits(selectedCustomerId || undefined, undefined, tenantId),
         getOrderBalanceAdjustments(undefined, selectedCustomerId || undefined, tenantId),
-        getCustomerProductStock(selectedCustomerId || undefined, selectedProductId || undefined, tenantId)
+        getCustomerProductStock(selectedCustomerId || undefined, selectedProductId || undefined, tenantId),
+        getOrders(tenantId),
+        getOrderItems(undefined, tenantId),
+        getFinancialTransactions(tenantId),
+        getOrderStages(tenantId),
+        getAllStageHistory(tenantId)
       ]);
       
       setCredits(creditsRes.data || []);
       setAdjustments(adjRes.data || []);
       setProductStocks(stocksRes.data || []);
+      setOrders(ordersRes.data || []);
+      setOrderItems(itemsRes.data || []);
+      setFinancialTransactions(finRes.data || []);
+      setOrderStages(stagesRes.data || []);
+      setStageHistory(histRes.data || []);
     } catch (e) {
       console.error('Error loading reports data:', e);
     } finally {
@@ -159,8 +192,11 @@ export default function RelatoriosPage() {
   };
 
   useEffect(() => {
-    fetchFiltersData();
-    fetchReport();
+    if (user && !dataFetchedRef.current) {
+      dataFetchedRef.current = true;
+      fetchFiltersData();
+      fetchReport();
+    }
   }, [user]);
 
   const handleApplyFilters = (e: React.FormEvent) => {
@@ -177,6 +213,103 @@ export default function RelatoriosPage() {
     setTimeout(() => {
       fetchReport(true);
     }, 50);
+  };
+
+  const handleSearchTraceOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!traceSearchNumber.trim()) return;
+    
+    setTraceLoading(true);
+    setTraceError('');
+    setTraceTimeline([]);
+    setTraceOrderItems([]);
+    setTraceSelectedItemId('all');
+
+    try {
+      const cleanNum = traceSearchNumber.replace(/\D/g, '');
+      if (!cleanNum) {
+        setTraceError('Digite um número de pedido válido.');
+        setTraceLoading(false);
+        return;
+      }
+
+      // 1. Procurar o pedido localmente para obter o ID
+      const targetOrder = orders.find(o => {
+        const numStr = String(o.pv_number || '').replace(/\D/g, '');
+        return numStr === cleanNum;
+      });
+
+      if (!targetOrder) {
+        setTraceError(`Pedido PV-${cleanNum} não encontrado no banco de dados do portal.`);
+        setTraceLoading(false);
+        return;
+      }
+
+      // 2. Buscar todos os itens deste pedido
+      const itemsOfOrder = orderItems.filter(item => item.order_id === targetOrder.id);
+      if (itemsOfOrder.length === 0) {
+        setTraceError(`Nenhum item encontrado para o pedido PV-${cleanNum}.`);
+        setTraceLoading(false);
+        return;
+      }
+      
+      // Ordenar os itens pelo índice para exibição ordenada dos botões
+      itemsOfOrder.sort((a, b) => (a.item_index || 0) - (b.item_index || 0));
+      setTraceOrderItems(itemsOfOrder);
+
+      // 3. Buscar o histórico de transições de cada um desses itens
+      const timelineEvents: any[] = [];
+
+      for (const item of itemsOfOrder) {
+        // A. Histórico de Estágios do Kanban
+        const { data: historyEvents } = await getOrderItemStageHistory(item.id);
+        if (historyEvents && historyEvents.length > 0) {
+          historyEvents.forEach((evt: any) => {
+            timelineEvents.push({
+              ...evt,
+              order_item_id: item.id,
+              itemFriendlyId: item.friendly_id,
+              itemName: item.name,
+              eventType: 'stage_change'
+            });
+          });
+        }
+
+        // B. Histórico de Setores/Máquinas
+        const { data: sectorEvents } = await getOrderItemSectorHistory(item.id, targetOrder.tenant_id);
+        if (sectorEvents && sectorEvents.length > 0) {
+          sectorEvents.forEach((evt: any) => {
+            timelineEvents.push({
+              id: evt.id,
+              created_at: evt.entered_at,
+              changed_at: evt.entered_at,
+              order_item_id: item.id,
+              itemFriendlyId: item.friendly_id,
+              itemName: item.name,
+              from_stage: null,
+              to_stage: null,
+              changed_by: evt.operator,
+              sector: evt.sector,
+              machineName: evt.machine?.name || 'Sem Máquina',
+              eventType: 'sector_change'
+            });
+          });
+        }
+      }
+
+      // Ordenar os eventos por data de ocorrência decrescente (mais recente no topo)
+      timelineEvents.sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
+      
+      setTraceTimeline(timelineEvents);
+      if (timelineEvents.length === 0) {
+        setTraceError(`O pedido PV-${cleanNum} foi importado mas ainda não foi movido no Kanban (nenhum histórico registrado).`);
+      }
+    } catch (err: any) {
+      console.error('Erro ao rastrear pedido:', err);
+      setTraceError(err.message || 'Erro ao buscar dados de rastreamento.');
+    } finally {
+      setTraceLoading(false);
+    }
   };
 
   // Render Skeletons during initial load
@@ -259,6 +392,91 @@ export default function RelatoriosPage() {
     .filter(a => ['CREDITO_PROXIMO_PEDIDO', 'GUARDAR_ESTOQUE_CLIENTE', 'CANCELADO_DESCONTO', 'COBRADO_ADICIONAL'].includes(a.action_taken))
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
+  // --- TAB 3 (COMMERCIAL & SALES) CALCULATIONS ---
+  const sellerStatsMap: Record<string, { sellerName: string; totalOrders: number; totalRevenue: number }> = {};
+  
+  orders.forEach(order => {
+    const seller = order.seller_name || 'Vendedor Desconhecido';
+    if (!sellerStatsMap[seller]) {
+      sellerStatsMap[seller] = { sellerName: seller, totalOrders: 0, totalRevenue: 0 };
+    }
+    sellerStatsMap[seller].totalOrders += 1;
+    
+    // Somar transações do tipo RECEITA para esse pedido
+    const orderTrans = financialTransactions.filter(t => t.order_id === order.id && t.type === 'RECEITA' && t.status !== 'CANCELADO');
+    const orderTotal = orderTrans.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    sellerStatsMap[seller].totalRevenue += orderTotal;
+  });
+
+  const sellerStatsList = Object.values(sellerStatsMap)
+    .map(stat => ({
+      ...stat,
+      ticketAverage: stat.totalOrders > 0 ? stat.totalRevenue / stat.totalOrders : 0
+    }))
+    .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+  const itemStatsMap: Record<string, { itemName: string; totalQty: number; totalOrders: number }> = {};
+  
+  orderItems.forEach(item => {
+    const name = item.name || 'Item Desconhecido';
+    if (!itemStatsMap[name]) {
+      itemStatsMap[name] = { itemName: name, totalQty: 0, totalOrders: 0 };
+    }
+    itemStatsMap[name].totalQty += Number(item.print_run || 0);
+    itemStatsMap[name].totalOrders += 1;
+  });
+
+  const sortedItemsList = Object.values(itemStatsMap)
+    .sort((a, b) => b.totalQty - a.totalQty);
+
+  const topSellingItems = sortedItemsList.slice(0, 10);
+  const bottomSellingItems = sortedItemsList.filter(i => i.totalQty > 0).slice(-10).reverse();
+
+  // --- TAB 4 (STAGE HISTORY & KANBAN TRANSITIONS) CALCULATIONS ---
+  const stageTimesMap: Record<string, { stageName: string; totalMs: number; count: number }> = {};
+  
+  orderStages.forEach(st => {
+    stageTimesMap[st.id] = { stageName: st.name, totalMs: 0, count: 0 };
+  });
+
+  const historyByItem: Record<string, any[]> = {};
+  stageHistory.forEach(h => {
+    if (!historyByItem[h.order_item_id]) {
+      historyByItem[h.order_item_id] = [];
+    }
+    historyByItem[h.order_item_id].push(h);
+  });
+
+  Object.keys(historyByItem).forEach(itemId => {
+    const itemHistory = historyByItem[itemId].sort((a, b) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime());
+    
+    for (let i = 0; i < itemHistory.length; i++) {
+      const current = itemHistory[i];
+      const next = itemHistory[i + 1];
+      
+      const entryTime = new Date(current.changed_at).getTime();
+      const exitTime = next ? new Date(next.changed_at).getTime() : Date.now();
+      const durationMs = exitTime - entryTime;
+      
+      const stageId = current.to_stage_id;
+      if (stageId && stageTimesMap[stageId]) {
+        stageTimesMap[stageId].totalMs += durationMs;
+        stageTimesMap[stageId].count += 1;
+      }
+    }
+  });
+
+  const stageAveragesList = Object.values(stageTimesMap)
+    .map(avg => {
+      const averageHours = avg.count > 0 ? (avg.totalMs / (1000 * 60 * 60)) / avg.count : 0;
+      return {
+        stageName: avg.stageName,
+        averageHours,
+        count: avg.count
+      };
+    })
+    .sort((a, b) => b.averageHours - a.averageHours); // Ordenar pelas etapas que mais retêm tempo
+
   return (
     <div className="page-container">
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -288,6 +506,20 @@ export default function RelatoriosPage() {
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'credits' ? '2px solid var(--primary)' : 'none' }}
         >
           Sobras, Faltas e Créditos
+        </button>
+        <button 
+          onClick={() => setActiveTab('commercial')}
+          className={`btn ${activeTab === 'commercial' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'commercial' ? '2px solid var(--primary)' : 'none' }}
+        >
+          Desempenho Comercial
+        </button>
+        <button 
+          onClick={() => setActiveTab('traceability')}
+          className={`btn ${activeTab === 'traceability' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'traceability' ? '2px solid var(--primary)' : 'none' }}
+        >
+          Rastreamento Kanban
         </button>
       </div>
 
@@ -815,6 +1047,351 @@ export default function RelatoriosPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* TAB 3: DESEMPENHO COMERCIAL                                   */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {activeTab === 'commercial' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+            {/* Cards do Top Vendedores */}
+            <div className="card" style={{ padding: '1.5rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <TrendingUp size={18} style={{ color: 'var(--success)' }} />
+                Desempenho por Vendedora
+              </h3>
+              <div className="table-responsive">
+                <table className="table" style={{ fontSize: '0.825rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Vendedora</th>
+                      <th style={{ textAlign: 'center' }}>Pedidos</th>
+                      <th style={{ textAlign: 'right' }}>Faturamento</th>
+                      <th style={{ textAlign: 'right' }}>Ticket Médio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sellerStatsList.map((stat, idx) => (
+                      <tr key={stat.sellerName}>
+                        <td style={{ fontWeight: 600 }}>
+                          <span style={{ marginRight: '0.35rem', color: idx === 0 ? 'var(--warning)' : 'var(--text-muted)' }}>
+                            {idx === 0 ? '👑' : `#${idx + 1}`}
+                          </span>
+                          {stat.sellerName}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{stat.totalOrders}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
+                          R$ {stat.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                          R$ {stat.ticketAverage.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                    {sellerStatsList.length === 0 && (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
+                          Nenhum dado comercial disponível.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Top Produtos/Itens Mais Vendidos (Tiragem Física) */}
+            <div className="card" style={{ padding: '1.5rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Package size={18} style={{ color: 'var(--primary)' }} />
+                Produtos Mais Vendidos (Volume Físico)
+              </h3>
+              <div className="table-responsive">
+                <table className="table" style={{ fontSize: '0.825rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Produto / Tamanho</th>
+                      <th style={{ textAlign: 'center' }}>Pedidos</th>
+                      <th style={{ textAlign: 'right' }}>Tiragem Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topSellingItems.map((item, idx) => (
+                      <tr key={item.itemName}>
+                        <td style={{ fontWeight: 600, maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.itemName}>
+                          <span style={{ marginRight: '0.35rem', color: 'var(--text-muted)' }}>
+                            #{idx + 1}
+                          </span>
+                          {item.itemName}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.totalOrders}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--primary)' }}>
+                          {item.totalQty.toLocaleString('pt-BR')} un
+                        </td>
+                      </tr>
+                    ))}
+                    {topSellingItems.length === 0 && (
+                      <tr>
+                        <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
+                          Nenhum dado de itens disponível.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Produtos Menos Vendidos (Menos Saem) */}
+          <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <TrendingDown size={18} style={{ color: 'var(--danger)' }} />
+              Produtos com Menor Saída (Volume de Produção)
+            </h3>
+            <div className="table-responsive">
+              <table className="table" style={{ fontSize: '0.825rem' }}>
+                <thead>
+                  <tr>
+                    <th>Produto / Descrição</th>
+                    <th style={{ textAlign: 'center' }}>Pedidos Registrados</th>
+                    <th style={{ textAlign: 'right' }}>Tiragem Acumulada</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bottomSellingItems.map((item, idx) => (
+                    <tr key={item.itemName}>
+                      <td style={{ fontWeight: 600 }}>
+                        <span style={{ marginRight: '0.35rem', color: 'var(--text-muted)' }}>
+                          #{sortedItemsList.length - bottomSellingItems.length + idx + 1}
+                        </span>
+                        {item.itemName}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>{item.totalOrders}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-muted)' }}>
+                        {item.totalQty.toLocaleString('pt-BR')} un
+                      </td>
+                    </tr>
+                  ))}
+                  {bottomSellingItems.length === 0 && (
+                    <tr>
+                      <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
+                        Nenhum dado de itens disponível.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* TAB 4: RASTREAMENTO KANBAN                                   */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {activeTab === 'traceability' && (
+        <>
+          {/* Gráfico do Tempo Médio por Etapa */}
+          <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Hourglass size={18} style={{ color: 'var(--primary)' }} />
+              Tempo Médio de Retenção por Etapa do Kanban
+            </h3>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              Esta métrica aponta gargalos na linha de produção, medindo a média de dias que os cartões de itens passam estacionados em cada coluna do Kanban.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {stageAveragesList.map(avg => {
+                const percentage = Math.min((avg.averageHours / 120) * 100, 100);
+                const roundedDays = (avg.averageHours / 24).toFixed(1);
+                
+                return (
+                  <div key={avg.stageName} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 100px', alignItems: 'center', gap: '1rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>{avg.stageName}</span>
+                    <div style={{ height: '12px', backgroundColor: 'var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+                      <div style={{ 
+                        height: '100%', 
+                        width: `${percentage}%`, 
+                        backgroundColor: avg.averageHours > 48 ? 'var(--danger, #ef4444)' : avg.averageHours > 24 ? 'var(--warning, #f59e0b)' : 'var(--primary, #3b82f6)',
+                        borderRadius: '6px',
+                        transition: 'width 0.5s ease-in-out'
+                      }} />
+                    </div>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, textAlign: 'right' }}>
+                      {roundedDays} dias ({formatHoursToRealTime(avg.averageHours)})
+                    </span>
+                  </div>
+                );
+              })}
+              {stageAveragesList.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
+                  Aguardando primeiras movimentações do Kanban para gerar cálculo de tempo.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Rastreio Individual de Pedido por Número */}
+          <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <History size={18} style={{ color: 'var(--primary)' }} />
+              Rastreamento Histórico de Pedido (Timeline)
+            </h3>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+              Consulte a timeline de movimentação de um pedido. Descubra quem moveu, quando moveu e qual item transitou no Kanban.
+            </p>
+            
+            <form onSubmit={handleSearchTraceOrder} style={{ display: 'flex', gap: '0.5rem', maxWidth: '400px', marginBottom: '1.5rem' }}>
+              <input 
+                type="text" 
+                placeholder="Nº do pedido comercial (Ex: 521)" 
+                className="form-input"
+                value={traceSearchNumber}
+                onChange={(e) => setTraceSearchNumber(e.target.value)}
+                style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+              />
+              <button 
+                type="submit" 
+                className="btn btn-primary" 
+                disabled={traceLoading || !traceSearchNumber.trim()}
+                style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', fontSize: '0.85rem', padding: '0.4rem 1rem' }}
+              >
+                <Search size={14} />
+                <span>Rastrear</span>
+              </button>
+            </form>
+
+            {traceLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem', color: 'var(--text-muted)' }}>
+                <RefreshCw size={16} className="spinner" />
+                <span>Buscando histórico e carregando timeline...</span>
+              </div>
+            )}
+
+            {traceError && (
+              <div style={{ 
+                padding: '0.75rem 1rem', 
+                backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                color: 'var(--danger)', 
+                borderRadius: 'var(--radius-sm)', 
+                fontSize: '0.85rem', 
+                marginBottom: '1rem' 
+              }}>
+                {traceError}
+              </div>
+            )}
+
+            {/* Seletores de subitens */}
+            {traceOrderItems.length > 1 && (
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1.5rem', padding: '0.5rem', backgroundColor: 'var(--surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setTraceSelectedItemId('all')}
+                  className="btn"
+                  style={{
+                    padding: '0.3rem 0.6rem',
+                    fontSize: '0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: 'none',
+                    backgroundColor: traceSelectedItemId === 'all' ? 'var(--primary)' : 'transparent',
+                    color: traceSelectedItemId === 'all' ? '#fff' : 'var(--text-muted)',
+                    fontWeight: 600
+                  }}
+                >
+                  Todos os itens ({traceOrderItems.length})
+                </button>
+                {traceOrderItems.map(item => {
+                  const finalPart = item.friendly_id ? `/${item.friendly_id.split('/').pop()}` : `/${item.item_index}`;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setTraceSelectedItemId(item.id)}
+                      className="btn"
+                      style={{
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.75rem',
+                        borderRadius: 'var(--radius-sm)',
+                        border: 'none',
+                        backgroundColor: traceSelectedItemId === item.id ? 'var(--primary)' : 'transparent',
+                        color: traceSelectedItemId === item.id ? '#fff' : 'var(--text-muted)',
+                        fontWeight: 600
+                      }}
+                      title={item.name}
+                    >
+                      {finalPart} ({item.name.length > 15 ? `${item.name.substring(0, 15)}...` : item.name})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {(() => {
+              // 1. Filtrar eventos
+              let filteredEvents = [...traceTimeline];
+              if (traceSelectedItemId !== 'all') {
+                filteredEvents = filteredEvents.filter(evt => evt.order_item_id === traceSelectedItemId);
+                // Ordenar cronologicamente crescente para ver o fluxo sequencial (mais antigo primeiro)
+                filteredEvents.sort((a, b) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime());
+              } else {
+                // Se for todos, ordenamos decrescente (mais recente no topo)
+                filteredEvents.sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
+              }
+
+              if (filteredEvents.length === 0) return null;
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderLeft: '2px solid var(--border)', marginLeft: '10px', paddingLeft: '20px', marginTop: '1.5rem' }}>
+                  {filteredEvents.map((evt, idx) => (
+                    <div key={evt.id || idx} style={{ position: 'relative', marginBottom: '0.5rem' }}>
+                      {/* Marcador na Timeline */}
+                      <div style={{ 
+                        position: 'absolute', 
+                        left: '-26px', 
+                        top: '4px', 
+                        width: '10px', 
+                        height: '10px', 
+                        borderRadius: '50%', 
+                        backgroundColor: 'var(--primary)',
+                        border: '2px solid var(--surface)' 
+                      }} />
+                      
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                        {new Date(evt.changed_at).toLocaleString('pt-BR')}
+                      </div>
+                      <div style={{ fontSize: '0.825rem', marginTop: '2px', color: 'var(--text)' }}>
+                        {evt.eventType === 'sector_change' ? (
+                          <>
+                            Item <strong style={{ color: 'var(--primary)' }}>{evt.itemFriendlyId}</strong> ({evt.itemName}) teve o Setor de Produção Física alterado para{' '}
+                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.sector}</span>
+                            {evt.machineName && evt.machineName !== 'Sem Máquina' && (
+                              <>
+                                {' '}na máquina <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.machineName}</span>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            Item <strong style={{ color: 'var(--primary)' }}>{evt.itemFriendlyId}</strong> ({evt.itemName}) foi movido de{' '}
+                            <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.from_stage?.name || 'Início'}</span> para{' '}
+                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.to_stage?.name || 'Final'}</span>
+                          </>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', fontStyle: 'italic' }}>
+                        {evt.eventType === 'sector_change' ? 'Alterado por: ' : 'Movido por: '}<strong style={{ color: 'var(--text)' }}>
+                          {evt.changed_by ? (evt.changed_by.full_name || evt.changed_by.name || evt.changed_by.email || 'Operador') : 'Sistema'}
+                        </strong> {evt.changed_by?.role ? `(${evt.changed_by.role})` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </>
       )}

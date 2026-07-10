@@ -29,6 +29,7 @@ import {
   updateProductionSector,
   deleteProductionSector,
   logSectorTransition,
+  logNotesTransition,
   getHandlingTeams,
   getPackagingMaterialTypes,
   getOrderItemPackaging,
@@ -44,6 +45,7 @@ import {
 } from '@/services/supabase';
 import { parseDeadlineFromNotes, isCardOverdue } from '@/services/deadline_service';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
+import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { 
   Plus, 
   Search, 
@@ -65,7 +67,9 @@ import {
   Copy,
   Check,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  Download,
+  Clock
 } from 'lucide-react';
 
 // Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
@@ -103,6 +107,7 @@ const extractDeadlineDays = (deadlineText: string | null): number | null => {
 // Verificar se o item está atrasado (cronômetro a partir da data de início da produção)
 const checkIsDelayed = (item: any, stagesList: any[]): boolean => {
   const parentOrder = item.order || {};
+  if (parentOrder.conta_azul_status === 'Em andamento') return false;
   if (!parentOrder.production_start_date) return false;
 
   const itemStage = stagesList.find(s => s.id === item.stage_id);
@@ -182,6 +187,13 @@ const formatDocument = (doc: string) => {
 
 export default function PedidosPage() {
   const { user } = useAuth();
+
+  // Operator secondary authentication
+  const [isOpAuthOpen, setIsOpAuthOpen] = useState(false);
+  const [pendingKanbanMove, setPendingKanbanMove] = useState<{
+    item: any;
+    targetStageId: string;
+  } | null>(null);
   
   // Listas de dados
   const [orders, setOrders] = useState<any[]>([]);
@@ -212,6 +224,8 @@ export default function PedidosPage() {
   const [filterHandlingTeam, setFilterHandlingTeam] = useState('');
   const [filterSearchOrder, setFilterSearchOrder] = useState('');
   const [filterContaAzulStatus, setFilterContaAzulStatus] = useState('');
+  const [pullOrderNumber, setPullOrderNumber] = useState('');
+  const [syncingOrderNumber, setSyncingOrderNumber] = useState('');
 
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
@@ -240,6 +254,7 @@ export default function PedidosPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'create' | 'edit'>('create');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [syncingSingleOrder, setSyncingSingleOrder] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [customerCredits, setCustomerCredits] = useState<any[]>([]);
   const [customerStocks, setCustomerStocks] = useState<any[]>([]);
@@ -344,7 +359,16 @@ export default function PedidosPage() {
   const [freightHeight, setFreightHeight] = useState<string>('');
   const [freightBoxesCount, setFreightBoxesCount] = useState<string>('');
   const [freightQtyPerBox, setFreightQtyPerBox] = useState<string>('');
+  const [selectedFreightSiblings, setSelectedFreightSiblings] = useState<string[]>([]);
   const freightBypass = useRef(false);
+
+  // Estados para o Modal de Alerta de Pedido Em Andamento (não faturado/aprovado)
+  const [isOrderInProgressModalOpen, setIsOrderInProgressModalOpen] = useState(false);
+  const [inProgressItem, setInProgressItem] = useState<any>(null);
+  const [inProgressTargetStageId, setInProgressTargetStageId] = useState<string>('');
+  const [inProgressSyncing, setInProgressSyncing] = useState(false);
+  const inProgressOrderBypass = useRef(false);
+  const authActionType = useRef<'kanban_move' | 'save_details'>('kanban_move');
 
   // Estados de Tipo de Frete e CRUD
   const [shippingTypes, setShippingTypes] = useState<ShippingTypeConfig[]>([]);
@@ -377,6 +401,7 @@ export default function PedidosPage() {
   const [handlingTeamModalTargetStageId, setHandlingTeamModalTargetStageId] = useState<string>('');
   const [selectedHandlingTeamId, setSelectedHandlingTeamId] = useState<string>('');
   const handlingTeamMoveBypass = useRef(false);
+  const currentOperator = useRef<{ id: string; name: string } | null>(null);
 
   const getTimeInStage = (updatedAt: string) => {
     if (!updatedAt) return '—';
@@ -487,8 +512,10 @@ export default function PedidosPage() {
         }));
         setItemsWithPackaging(packaged);
       }
+      return ordersRes.data || [];
     } catch (e) {
       console.error('Erro ao carregar dados da página de pedidos:', e);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -498,7 +525,7 @@ export default function PedidosPage() {
   const fetchUserPermissions = async () => {
     if (!user || !supabase) return;
     try {
-      if (user.role === 'Administrador') {
+      if (user.role === 'Administrador' && !user.is_factory_account) {
         return; // Admin tem permissão irrestrita por padrão
       }
       
@@ -546,6 +573,7 @@ export default function PedidosPage() {
   const [syncResult, setSyncResult] = useState<{ success: boolean; imported?: number; updated?: number; error?: string } | null>(null);
   const [activeAbortController, setActiveAbortController] = useState<AbortController | null>(null);
   const [isCancelled, setIsCancelled] = useState(false);
+  const [isSyncingSingle, setIsSyncingSingle] = useState(false);
 
   const handleCancelSync = () => {
     if (activeAbortController) {
@@ -555,6 +583,7 @@ export default function PedidosPage() {
   };
 
   const handleImportOrders = async () => {
+    setIsSyncingSingle(false);
     setImporting(true);
     setIsSyncModalOpen(true);
     setSyncStep('Iniciando comunicação com Conta Azul...');
@@ -572,6 +601,8 @@ export default function PedidosPage() {
 
       const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, { 
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userRole: user?.role }),
         signal: controller.signal
       });
 
@@ -685,6 +716,22 @@ export default function PedidosPage() {
     checkAndTransitionOverdueItems();
   }, [orderItems, stages, loading]);
 
+  const handleOpAuthSuccess = async (operatorId: string, operatorName: string) => {
+    setIsOpAuthOpen(false);
+    
+    currentOperator.current = { id: operatorId, name: operatorName };
+
+    if (authActionType.current === 'save_details') {
+      authActionType.current = 'kanban_move'; // reseta
+      await executeDetailsSave(operatorId, operatorName);
+    } else {
+      if (!pendingKanbanMove) return;
+      const { item, targetStageId } = pendingKanbanMove;
+      setPendingKanbanMove(null);
+      await moveOrderItemToStage(item, targetStageId, operatorId, operatorName);
+    }
+  };
+
   // Função auxiliar para resetar todos os bypasses de movimentação
   const resetAllBypasses = () => {
     freightBypass.current = false;
@@ -693,10 +740,36 @@ export default function PedidosPage() {
     expeditionMoveBypass.current = false;
     handlingTeamMoveBypass.current = false;
     expeditionTransitionMoveBypass.current = false;
+    inProgressOrderBypass.current = false;
+    currentOperator.current = null;
   };
 
   // Movimentar item de pedido para uma etapa
-  const moveOrderItemToStage = async (item: any, targetStageId: string) => {
+  const moveOrderItemToStage = async (item: any, targetStageId: string, operatorId?: string | null, operatorName?: string | null) => {
+    if (user?.role === 'Vendedor') {
+      alert('Acesso de Leitura: Vendedores não podem movimentar cards no Kanban.');
+      return;
+    }
+    // ---------------------------------------------------------------
+    // RESOLVER OPERADOR AUTENTICADO DA MOVIMENTAÇÃO CORRENTE
+    // ---------------------------------------------------------------
+    const activeOpId = operatorId || currentOperator.current?.id;
+    const activeOpName = operatorName || currentOperator.current?.name;
+
+    // Se o operatorId veio como parâmetro direto da autenticação bem-sucedida, salvamos na ref
+    if (operatorId && operatorName) {
+      currentOperator.current = { id: operatorId, name: operatorName };
+    }
+
+    // ---------------------------------------------------------------
+    // REGRA DE AUTENTICAÇÃO SECUNDÁRIA DO OPERADOR (OBRIGATÓRIO PARA TODOS)
+    // ---------------------------------------------------------------
+    if (!activeOpId) {
+      setPendingKanbanMove({ item, targetStageId });
+      setIsOpAuthOpen(true);
+      return;
+    }
+
     const currentStageId = item.stage_id;
     const targetStage = stages.find(s => s.id === targetStageId);
     if (!targetStage) return;
@@ -704,6 +777,20 @@ export default function PedidosPage() {
     const currentStage = stages.find(s => s.id === currentStageId);
 
     const parentOrder = orders.find(o => o.id === item.order_id) || item.order;
+
+    // ---------------------------------------------------------------
+    // REGRA DE SEGURANÇA: PEDIDO EM ANDAMENTO (NÃO APROVADO) NO CONTA AZUL
+    // ---------------------------------------------------------------
+    const isFromInitial = !currentStageId || currentStage?.name === 'Pedidos';
+    const isMovingToProd = targetStage.name !== 'Pedidos';
+    const isOrderInProgress = parentOrder?.conta_azul_status === 'Em andamento';
+
+    if (isFromInitial && isMovingToProd && isOrderInProgress && !inProgressOrderBypass.current) {
+      setInProgressItem(item);
+      setInProgressTargetStageId(targetStageId);
+      setIsOrderInProgressModalOpen(true);
+      return;
+    }
 
     // ---------------------------------------------------------------
     // REGRA DE VALIDAÇÃO DE FRETE (Qualquer etapa -> Expedição) - TRAVA ANTERIOR
@@ -931,7 +1018,7 @@ export default function PedidosPage() {
     }
 
     // Regras de Transições baseadas em Papel
-    if (user && user.role !== 'Administrador') {
+    if (user && user.role !== 'Administrador' && !activeOpId) {
       // 1. Vendedor(a) regular
       if (isVendedor) {
         const userFirstName = user.full_name.split(' ')[0].toLowerCase();
@@ -1019,7 +1106,8 @@ export default function PedidosPage() {
       const updates: any = {
         stage_id: targetStageId,
         status: targetStatus,
-        production_sector: targetSector
+        production_sector: targetSector,
+        last_operator_id: activeOpId || null
       };
 
       if (selectedHandlingTeamId) {
@@ -1039,7 +1127,8 @@ export default function PedidosPage() {
                 stage_id: targetStageId,
                 status: targetStatus,
                 production_sector: targetSector,
-                handling_team_id: updates.handling_team_id || sib.handling_team_id
+                handling_team_id: updates.handling_team_id || sib.handling_team_id,
+                last_operator_id: activeOpId || null
               })
             ));
           } catch (sibErr) {
@@ -1057,7 +1146,7 @@ export default function PedidosPage() {
 
         if (item.production_sector !== targetSector) {
           const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-          await logSectorTransition(item.id, targetSector, item.machine_id, tenantId);
+          await logSectorTransition(item.id, targetSector, item.machine_id, tenantId, activeOpId);
         }
         await fetchAllData();
 
@@ -1084,6 +1173,262 @@ export default function PedidosPage() {
       setLoading(false);
       resetAllBypasses();
     }
+  };
+
+  const handleSyncSingleOrder = async (orderId: string) => {
+    if (!orderId) return;
+    const cleanPv = selectedOrder?.pv_number?.replace(/\D/g, '') || '';
+    setSyncingOrderNumber(cleanPv);
+    setIsSyncingSingle(true);
+    setImporting(true);
+    setIsSyncModalOpen(true);
+    setSyncStep('Iniciando comunicação com o Conta Azul para este pedido...');
+    setSyncProgress(5);
+    setSyncResult(null);
+
+    try {
+      const res = await fetch('/api/sync/import-single-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, userRole: user?.role })
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Falha ao conectar com o serviço de importação.');
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const chunk = JSON.parse(line);
+                if (chunk.step) setSyncStep(chunk.step);
+                if (chunk.progress !== undefined) setSyncProgress(chunk.progress);
+                if (chunk.success !== undefined) {
+                  const isSuccess = chunk.success && (!chunk.result || chunk.result.success !== false);
+                  if (isSuccess) {
+                    setSyncProgress(100);
+                    setSyncStep('Sincronização concluída com sucesso!');
+                    setSyncResult({ success: true });
+                    
+                    const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+                    const [ordersRes, finRes] = await Promise.all([
+                      getOrders(tenantId),
+                      getFinancialTransactions(tenantId)
+                    ]);
+                    
+                    if (ordersRes.data) {
+                      setOrders(ordersRes.data);
+                      const match = ordersRes.data.find((o: any) => o.id === orderId);
+                      if (match) setSelectedOrder(match);
+                    }
+                    if (finRes.data) {
+                      setFinancialTransactions(finRes.data);
+                    }
+                    
+                    fetchAllData();
+                  } else {
+                    const errMsg = chunk.error || chunk.result?.message || 'Erro desconhecido ao sincronizar pedido.';
+                    setSyncProgress(100);
+                    setSyncStep('Falha na sincronização.');
+                    setSyncResult({ success: false, error: errMsg });
+                  }
+                }
+              } catch (e) {
+                console.error('Erro ao ler linha de progresso:', e);
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      setSyncProgress(100);
+      setSyncStep('Falha na sincronização.');
+      setSyncResult({ success: false, error: err.message || 'Erro ao importar pedido.' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleSyncOrderByNumber = async (orderNumber: string) => {
+    if (!orderNumber) return;
+    setSyncingOrderNumber(orderNumber);
+    setIsSyncingSingle(true);
+    setImporting(true);
+    setIsSyncModalOpen(true);
+    setSyncStep(`Iniciando comunicação com o Conta Azul para o pedido ${orderNumber}...`);
+    setSyncProgress(5);
+    setSyncResult(null);
+
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const res = await fetch('/api/sync/import-single-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber, tenantId, userRole: user?.role })
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Falha ao conectar com o serviço de importação.');
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const chunk = JSON.parse(line);
+                if (chunk.step) setSyncStep(chunk.step);
+                if (chunk.progress !== undefined) setSyncProgress(chunk.progress);
+                if (chunk.success !== undefined) {
+                  const isSuccess = chunk.success && (!chunk.result || chunk.result.success !== false);
+                  if (isSuccess) {
+                    setSyncProgress(100);
+                    setSyncStep('Sincronização concluída com sucesso!');
+                    setSyncResult({ success: true });
+                    setPullOrderNumber(''); // Limpar campo após puxar
+                    
+                    // Recarregar os dados para que o novo card apareça
+                    const refreshedOrders = await fetchAllData();
+                    
+                    // Buscar o pv_number do pedido importado e setar automaticamente no filtro local
+                    if (chunk.result && chunk.result.orderId && refreshedOrders) {
+                      const importedOrder = refreshedOrders.find((o: any) => o.id === chunk.result.orderId);
+                      if (importedOrder && importedOrder.pv_number) {
+                        const cleanPv = importedOrder.pv_number.replace(/\D/g, '');
+                        setFilterSearchOrder(cleanPv);
+                      }
+                    }
+                  } else {
+                    const errMsg = chunk.error || chunk.result?.message || 'Erro desconhecido ao sincronizar pedido.';
+                    setSyncProgress(100);
+                    setSyncStep('Falha na sincronização.');
+                    setSyncResult({ success: false, error: errMsg });
+                  }
+                }
+              } catch (e) {
+                console.error('Erro ao ler linha de progresso:', e);
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      setSyncProgress(100);
+      setSyncStep('Falha na sincronização.');
+      setSyncResult({ success: false, error: err.message || 'Erro ao importar pedido.' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleSyncInProgressOrder = async () => {
+    if (!inProgressItem) return;
+    setInProgressSyncing(true);
+
+    try {
+      const parentOrder = orders.find(o => o.id === inProgressItem.order_id) || inProgressItem.order;
+      if (!parentOrder?.id) throw new Error('Dados do pedido não encontrados.');
+
+      const res = await fetch('/api/sync/import-single-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: parentOrder.id, userRole: user?.role })
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Falha ao conectar com o serviço de sincronização.');
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const chunk = JSON.parse(line);
+              if (chunk.success === false) {
+                throw new Error(chunk.error || 'Erro desconhecido ao sincronizar.');
+              }
+            } catch (e: any) {
+              if (e instanceof SyntaxError) continue;
+              throw e;
+            }
+          }
+        }
+      }
+
+      // Recarregar os dados locais
+      await fetchAllData();
+
+      // Consultar de forma isolada e imediata o status do pedido atualizado no banco
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const { data: orderRes } = await getOrders(tenantId);
+      const updatedOrder = (orderRes || []).find((o: any) => o.id === parentOrder.id);
+      
+      if (updatedOrder && updatedOrder.conta_azul_status !== 'Em andamento') {
+        alert('Pedido atualizado no Conta Azul e agora consta como Aprovado! Iniciando a produção/separação...');
+        setIsOrderInProgressModalOpen(false);
+        inProgressOrderBypass.current = true;
+        await moveOrderItemToStage(inProgressItem, inProgressTargetStageId);
+      } else {
+        alert('Sincronização concluída com sucesso, mas este pedido continua constando como "Em andamento" no Conta Azul.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao sincronizar status de andamento:', err);
+      alert('Erro ao sincronizar pedido: ' + (err.message || 'Erro desconhecido.'));
+    } finally {
+      setInProgressSyncing(false);
+    }
+  };
+
+  const handleForceStartInProgressOrder = async () => {
+    setIsOrderInProgressModalOpen(false);
+    inProgressOrderBypass.current = true;
+    await moveOrderItemToStage(inProgressItem, inProgressTargetStageId);
+  };
+
+  const handleCancelInProgressOrder = () => {
+    setIsOrderInProgressModalOpen(false);
+    setInProgressItem(null);
+    setInProgressTargetStageId('');
+    resetAllBypasses();
   };
 
   const handleAdjustmentSubmit = async (e: React.FormEvent) => {
@@ -1572,14 +1917,64 @@ export default function PedidosPage() {
   };
 
   // Confirmação de movimentação para expedição com múltiplos itens vinculados
+  const handleConfirmExpeditionMoveAll = async () => {
+    if (!linkedItemsWarningData) return;
+    const { item, siblings, targetStageId } = linkedItemsWarningData;
+    setIsLinkedItemsWarningOpen(false);
+    setLinkedItemsWarningData(null);
+    
+    // Captura o operador autenticado do PIN antes de chamar as funções que limpam a ref!
+    const savedOpId = currentOperator.current?.id;
+    const savedOpName = currentOperator.current?.name;
+
+    setLoading(true);
+    try {
+      expeditionMoveBypass.current = true;
+      freightBypass.current = true;
+      conferencyBypass.current = true;
+      productionAlertBypass.current = true;
+      handlingTeamMoveBypass.current = true;
+      expeditionTransitionMoveBypass.current = true;
+      adminMoveOverride.current = true;
+
+      // 1. Mover o item principal
+      await moveOrderItemToStage(item, targetStageId, savedOpId, savedOpName);
+
+      // 2. Mover todos os irmãos
+      for (const sib of siblings) {
+        const fullSib = orderItems.find(oi => oi.id === sib.id);
+        if (fullSib) {
+          expeditionMoveBypass.current = true;
+          freightBypass.current = true;
+          conferencyBypass.current = true;
+          productionAlertBypass.current = true;
+          handlingTeamMoveBypass.current = true;
+          expeditionTransitionMoveBypass.current = true;
+          adminMoveOverride.current = true;
+          
+          await moveOrderItemToStage(fullSib, targetStageId, savedOpId, savedOpName);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao mover todos os subitens:', err);
+      alert('Ocorreu um erro ao tentar mover todos os subitens.');
+    } finally {
+      resetAllBypasses();
+      setLoading(false);
+    }
+  };
+
   const handleConfirmExpeditionMove = async () => {
     if (!linkedItemsWarningData) return;
     const { item, targetStageId } = linkedItemsWarningData;
     setIsLinkedItemsWarningOpen(false);
     setLinkedItemsWarningData(null);
     
+    const savedOpId = currentOperator.current?.id;
+    const savedOpName = currentOperator.current?.name;
+
     expeditionMoveBypass.current = true;
-    await moveOrderItemToStage(item, targetStageId);
+    await moveOrderItemToStage(item, targetStageId, savedOpId, savedOpName);
     expeditionMoveBypass.current = false;
   };
 
@@ -1830,6 +2225,96 @@ export default function PedidosPage() {
     setIsModalOpen(true);
   };
 
+  const executeDetailsSave = async (opId?: string | null, opName?: string | null) => {
+    if (!selectedItem) return;
+
+    const activeOpId = opId || currentOperator.current?.id || user?.id;
+
+    // 1. Atualizar campos do item de pedido
+    const itemPayload = {
+      name: formArtName,
+      product_id: formProduct || null,
+      measure: formMeasure,
+      print_run: Number(formPrintRun),
+      boxes_count: Number(formBoxes),
+      packaging_type: formPackagingType,
+      status: formStatus,
+      stage_id: formStageId || null,
+      production_sector: formSector,
+      machine_id: formMachineId || null,
+      handling_team_id: formHandlingTeamId || null,
+      physical_location: formPhysicalLocation,
+      over_short_quantity: Number(formOverShortQuantity),
+      notes: formNotes
+    };
+
+    // 2. Atualizar campos do pedido macro
+    let orderPayload: any = {};
+    if (user?.role === 'Financeiro') {
+      orderPayload = {
+        first_payment_date: formFirstPaymentDate || null,
+        installments_total: Number(formInstallmentsTotal),
+        installments_paid: Number(formInstallmentsPaid),
+        production_start_date: formProductionStartDate || null,
+        internal_notes: formInternalNotes
+      };
+    } else if (user?.role === 'Produção' || user?.role === 'Fábrica' || user?.role === 'Estoque' || user?.role === 'Expedição') {
+      orderPayload = {
+        internal_notes: formInternalNotes
+      };
+    } else {
+      orderPayload = {
+        customer_id: formCustomer,
+        seller_name: formSeller,
+        freight_value: Number(formFreight),
+        pv_number: formPvNumber,
+        op_number: formOpNumber || null,
+        shipping_type: formShippingType,
+        first_payment_date: formFirstPaymentDate || null,
+        installments_total: Number(formInstallmentsTotal),
+        installments_paid: Number(formInstallmentsPaid),
+        production_start_date: formProductionStartDate || null,
+        internal_notes: formInternalNotes
+      };
+    }
+
+    const [itemRes, orderRes] = await Promise.all([
+      updateOrderItem(selectedItem.id, itemPayload),
+      updateOrder(selectedItem.order_id, orderPayload)
+    ]);
+
+    if (itemRes.error) {
+      alert('Erro ao atualizar item: ' + itemRes.error.message);
+    } else if (orderRes.error) {
+      alert('Erro ao atualizar pedido: ' + orderRes.error.message);
+    } else {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
+      // Log de transição se houver mudança de setor ou de máquina
+      const sectorChanged = selectedItem.production_sector !== formSector;
+      const machineChanged = selectedItem.machine_id !== formMachineId;
+      if (sectorChanged || machineChanged) {
+        await logSectorTransition(selectedItem.id, formSector, formMachineId || null, tenantId, activeOpId);
+      }
+
+      // Log de transição de Observações Gerais
+      const notesChanged = selectedItem.notes !== formNotes;
+      if (notesChanged) {
+        await logNotesTransition(selectedItem.id, 'OBSERVACOES', selectedItem.notes || '', formNotes || '', tenantId, activeOpId);
+      }
+
+      // Log de transição de Anotações Internas
+      const oldInternalNotes = selectedItem.order?.internal_notes || '';
+      const internalNotesChanged = oldInternalNotes !== formInternalNotes;
+      if (internalNotesChanged) {
+        await logNotesTransition(selectedItem.id, 'ANOTACOES_INTERNAS', oldInternalNotes, formInternalNotes || '', tenantId, activeOpId);
+      }
+
+      setIsModalOpen(false);
+      fetchAllData();
+    }
+  };
+
   // Submit do formulário de pedidos
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1897,77 +2382,21 @@ export default function PedidosPage() {
     } else {
       // Editando
       if (selectedItem) {
-        // 1. Atualizar campos do item de pedido
-        const itemPayload = {
-          name: formArtName,
-          product_id: formProduct || null,
-          measure: formMeasure,
-          print_run: Number(formPrintRun),
-          boxes_count: Number(formBoxes),
-          packaging_type: formPackagingType,
-          status: formStatus,
-          stage_id: formStageId || null,
-          production_sector: formSector,
-          machine_id: formMachineId || null,
-          handling_team_id: formHandlingTeamId || null,
-          physical_location: formPhysicalLocation,
-          over_short_quantity: Number(formOverShortQuantity),
-          notes: formNotes
-        };
+        // Se for operador de produção/fábrica e alterou máquina, setor, observações ou anotações internas, exige autenticação secundária
+        const isFactoryUser = user?.role === 'Produção' || user?.role === 'Fábrica' || user?.is_factory_account;
+        const sectorChanged = selectedItem.production_sector !== formSector;
+        const machineChanged = selectedItem.machine_id !== formMachineId;
+        const notesChanged = selectedItem.notes !== formNotes;
+        const internalNotesChanged = (selectedItem.order?.internal_notes || '') !== formInternalNotes;
+        const activeOpId = currentOperator.current?.id;
 
-        // 2. Atualizar campos do pedido macro
-        let orderPayload: any = {};
-        if (user?.role === 'Financeiro') {
-          orderPayload = {
-            first_payment_date: formFirstPaymentDate || null,
-            installments_total: Number(formInstallmentsTotal),
-            installments_paid: Number(formInstallmentsPaid),
-            production_start_date: formProductionStartDate || null,
-            internal_notes: formInternalNotes
-          };
-        } else if (user?.role === 'Produção' || user?.role === 'Estoque' || user?.role === 'Expedição') {
-          orderPayload = {
-            internal_notes: formInternalNotes
-          };
-        } else {
-          // Admin ou Comercial
-          orderPayload = {
-            customer_id: formCustomer,
-            seller_name: formSeller,
-            freight_value: Number(formFreight),
-            pv_number: formPvNumber,
-            op_number: formOpNumber || null,
-            shipping_type: formShippingType,
-            first_payment_date: formFirstPaymentDate || null,
-            installments_total: Number(formInstallmentsTotal),
-            installments_paid: Number(formInstallmentsPaid),
-            production_start_date: formProductionStartDate || null,
-            internal_notes: formInternalNotes
-          };
+        if (isFactoryUser && (sectorChanged || machineChanged || notesChanged || internalNotesChanged) && !activeOpId) {
+          authActionType.current = 'save_details';
+          setIsOpAuthOpen(true);
+          return;
         }
 
-        const [itemRes, orderRes] = await Promise.all([
-          updateOrderItem(selectedItem.id, itemPayload),
-          updateOrder(selectedItem.order_id, orderPayload)
-        ]);
-
-        if (itemRes.error) {
-          alert('Erro ao atualizar item: ' + itemRes.error.message);
-        } else if (orderRes.error) {
-          alert('Erro ao atualizar pedido: ' + orderRes.error.message);
-        } else {
-          // Log de transição se houver mudança de setor ou de máquina
-          const sectorChanged = selectedItem.production_sector !== formSector;
-          const machineChanged = selectedItem.machine_id !== formMachineId;
-          
-          if (sectorChanged || machineChanged) {
-            const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-            await logSectorTransition(selectedItem.id, formSector, formMachineId || null, tenantId);
-          }
-
-          setIsModalOpen(false);
-          fetchAllData();
-        }
+        await executeDetailsSave(activeOpId);
       } else if (selectedOrder) {
         // Fallback caso estejamos editando um pedido legado sem item correspondente
         let updatePayload: any = {};
@@ -2031,7 +2460,11 @@ export default function PedidosPage() {
 
   const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
   const isVendedor = user?.role === 'Comercial' && !isSupervisor;
-  const hideMonetaryValues = user?.role !== 'Administrador';
+  const hideMonetaryValues = user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isSupervisor);
+
+  const cleanPvForMatch = (pv: string) => {
+    return (pv || '').split('/')[0].trim().toLowerCase();
+  };
 
   // Lógica de Filtros
   const filteredOrders = orders.filter(order => {
@@ -2042,7 +2475,10 @@ export default function PedidosPage() {
     }
     const matchCustomer = filterCustomer ? (order.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? order.seller_name.toLowerCase().includes(filterSeller.toLowerCase()) : true;
-    const matchSearchOrder = filterSearchOrder ? order.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(order.order_number).includes(filterSearchOrder) : true;
+    const matchSearchOrder = filterSearchOrder ? (
+      cleanPvForMatch(order.pv_number || '') === `pv-${filterSearchOrder.toLowerCase()}` ||
+      cleanPvForMatch(order.pv_number || '') === filterSearchOrder.toLowerCase()
+    ) : true;
     const matchContaAzulStatus = filterContaAzulStatus ? order.conta_azul_status === filterContaAzulStatus : true;
     return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
@@ -2072,7 +2508,12 @@ export default function PedidosPage() {
 
     const matchCustomer = filterCustomer ? (parentOrder.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? parentOrder.seller_name?.toLowerCase().includes(filterSeller.toLowerCase()) : true;
-    const matchSearchOrder = filterSearchOrder ? parentOrder?.pv_number?.toLowerCase().includes(filterSearchOrder.toLowerCase()) || String(parentOrder?.order_number).includes(filterSearchOrder) || item.friendly_id?.toLowerCase().includes(filterSearchOrder.toLowerCase()) : true;
+    const matchSearchOrder = filterSearchOrder ? (
+      cleanPvForMatch(parentOrder.pv_number || '') === `pv-${filterSearchOrder.toLowerCase()}` ||
+      cleanPvForMatch(parentOrder.pv_number || '') === filterSearchOrder.toLowerCase() ||
+      cleanPvForMatch(item.friendly_id || '') === `pv-${filterSearchOrder.toLowerCase()}` ||
+      cleanPvForMatch(item.friendly_id || '') === filterSearchOrder.toLowerCase()
+    ) : true;
     const matchContaAzulStatus = filterContaAzulStatus ? parentOrder.conta_azul_status === filterContaAzulStatus : true;
     return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
@@ -2095,8 +2536,8 @@ export default function PedidosPage() {
 
   const visibleStages = stages.filter(stage => {
     if (!user) return true;
-    if (user.role === 'Produção') {
-      return ['Em produção', 'Manuseio', 'Em revisão', 'Expedição', 'Atrasado'].includes(stage.name);
+    if (user.role === 'Produção' || user.role === 'Fábrica') {
+      return stage.name !== 'Pedidos';
     }
     if (user.role === 'Estoque') {
       return ['Estoque'].includes(stage.name);
@@ -2113,11 +2554,10 @@ export default function PedidosPage() {
     if (modalType === 'create') return false;
     if (user?.role === 'Administrador' || user?.role === 'Comercial') return false;
     
-    // Se o usuário for Produção:
-    if (user?.role === 'Produção') {
-      // Ele só pode editar se o campo for machine_id e a etapa for 'Em produção'
-      const itemStage = stages.find(s => s.id === selectedItem?.stage_id);
-      if (itemStage?.name === 'Em produção' && field === 'machine_id') {
+    // Se o usuário for Produção ou Fábrica:
+    if (user?.role === 'Produção' || user?.role === 'Fábrica') {
+      // Eles podem alterar o Setor de Produção Física, a Máquina Vinculada, Observações e Anotações Internas
+      if (field === 'sector' || field === 'machine_id' || field === 'notes' || field === 'internalNotes') {
         return false;
       }
       return true;
@@ -2169,9 +2609,117 @@ export default function PedidosPage() {
           </p>
         </div>
         
-        <div className="page-header-actions">
-          {/* Alternador de Modo de Visualização */}
-          <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px' }}>
+        {!['Produção', 'Fábrica'].includes(user?.role || '') && (
+          <div className="page-header-actions">
+            <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.65rem',
+            backgroundColor: 'var(--surface-hover)',
+            padding: '0.25rem 0.5rem',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border)',
+            flexFlow: 'row nowrap'
+          }}>
+            {/* Opção 1: Importar por Período */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem', whiteSpace: 'nowrap' }}>Importar por Período:</span>
+              <input 
+                type="date" 
+                value={importStartDate} 
+                onChange={(e) => setImportStartDate(e.target.value)}
+                disabled={importing}
+                style={{
+                  padding: '0.25rem 0.4rem',
+                  fontSize: '0.75rem',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--text)',
+                  outline: 'none',
+                  width: '115px'
+                }}
+              />
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
+              <input 
+                type="date" 
+                value={importEndDate} 
+                onChange={(e) => setImportEndDate(e.target.value)}
+                disabled={importing}
+                style={{
+                  padding: '0.25rem 0.4rem',
+                  fontSize: '0.75rem',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--text)',
+                  outline: 'none',
+                  width: '115px'
+                }}
+              />
+              <button 
+                onClick={handleImportOrders} 
+                disabled={importing}
+                className="btn btn-secondary" 
+                style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+              >
+                <RefreshCw size={12} className={importing ? 'spinner' : ''} />
+                <span>{importing ? 'Sincronizando...' : 'Sincronizar'}</span>
+              </button>
+            </div>
+
+            {/* Divisor Vertical */}
+            <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)', alignSelf: 'center' }} />
+
+            {/* Opção 2: Importar Pedido */}
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
+                <Download size={12} />
+                Importar Pedido:
+              </span>
+              <input 
+                type="text" 
+                placeholder="Ex: 406"
+                value={pullOrderNumber} 
+                onChange={(e) => setPullOrderNumber(e.target.value)}
+                disabled={importing}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSyncOrderByNumber(pullOrderNumber);
+                  }
+                }}
+                style={{
+                  padding: '0.25rem 0.4rem',
+                  fontSize: '0.75rem',
+                  width: '70px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--text)',
+                  outline: 'none'
+                }}
+              />
+              <button 
+                onClick={() => handleSyncOrderByNumber(pullOrderNumber)} 
+                disabled={importing || !pullOrderNumber.trim()}
+                className="btn btn-secondary" 
+                style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+              >
+                <Download size={12} />
+                <span>Importar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </header>
+
+      {/* BARRA DE FILTROS */}
+      <div className="filter-bar">
+        {/* Alternador de Modo de Visualização */}
+        <div className="form-group" style={{ flexGrow: 0, minWidth: 'auto' }}>
+          <label className="form-label">Visualização</label>
+          <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '36px', alignItems: 'center' }}>
             <button
               onClick={() => setViewMode('kanban')}
               className="btn"
@@ -2182,6 +2730,7 @@ export default function PedidosPage() {
                 padding: '0.4rem 0.8rem',
                 fontSize: '0.8rem',
                 border: 'none',
+                height: '100%',
                 borderRadius: 'var(--radius-sm)',
                 backgroundColor: viewMode === 'kanban' ? 'var(--surface)' : 'transparent',
                 color: viewMode === 'kanban' ? 'var(--primary)' : 'var(--text-muted)',
@@ -2202,6 +2751,7 @@ export default function PedidosPage() {
                 padding: '0.4rem 0.8rem',
                 fontSize: '0.8rem',
                 border: 'none',
+                height: '100%',
                 borderRadius: 'var(--radius-sm)',
                 backgroundColor: viewMode === 'list' ? 'var(--surface)' : 'transparent',
                 color: viewMode === 'list' ? 'var(--primary)' : 'var(--text-muted)',
@@ -2213,62 +2763,8 @@ export default function PedidosPage() {
               <span>Lista</span>
             </button>
           </div>
-
-          <div className="period-bar" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: 'var(--surface-hover)', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem' }}>Período:</span>
-            <input 
-              type="date" 
-              value={importStartDate} 
-              onChange={(e) => setImportStartDate(e.target.value)}
-              disabled={importing}
-              style={{
-                padding: '0.3rem 0.5rem',
-                fontSize: '0.8rem',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'var(--surface)',
-                color: 'var(--text)',
-                outline: 'none'
-              }}
-            />
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
-            <input 
-              type="date" 
-              value={importEndDate} 
-              onChange={(e) => setImportEndDate(e.target.value)}
-              disabled={importing}
-              style={{
-                padding: '0.3rem 0.5rem',
-                fontSize: '0.8rem',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'var(--surface)',
-                color: 'var(--text)',
-                outline: 'none'
-              }}
-            />
-            <button 
-              onClick={handleImportOrders} 
-              disabled={importing}
-              className="btn btn-secondary" 
-              style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
-            >
-              <RefreshCw size={14} className={importing ? 'spinner' : ''} />
-              <span>{importing ? 'Importando...' : 'Importar Conta Azul'}</span>
-            </button>
-          </div>
-
-          {canCreate && (
-            <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <Plus size={16} />
-              <span>Novo Pedido</span>
-            </button>
-          )}
         </div>
-      </header>
 
-      {/* BARRA DE FILTROS */}
-      <div className="filter-bar">
         <div className="form-group">
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             Pesquisar Pedido (PV/OP)
@@ -2448,7 +2944,7 @@ export default function PedidosPage() {
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
-                          maxWidth: '90px'
+                          maxWidth: '180px'
                         }}
                         title={stage.name}
                       >
@@ -2775,7 +3271,27 @@ export default function PedidosPage() {
                               </span>
                             )}
 
-                            {checkIsDelayed(item, stages) && (
+                            {parentOrder.conta_azul_status === 'Em andamento' ? (
+                              <span 
+                                className="badge" 
+                                style={{ 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center',
+                                  gap: '0.15rem', 
+                                  fontSize: '0.6rem', 
+                                  padding: '1px 4.5px',
+                                  backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                                  color: '#eab308',
+                                  border: '1px solid rgba(234, 179, 8, 0.3)',
+                                  fontWeight: 700,
+                                  borderRadius: '3px'
+                                }}
+                                title="Orçamento em andamento no Conta Azul!"
+                              >
+                                <Clock size={8} />
+                                Orçamento em andamento
+                              </span>
+                            ) : checkIsDelayed(item, stages) ? (
                               <span 
                                 className="badge" 
                                 style={{ 
@@ -2794,14 +3310,14 @@ export default function PedidosPage() {
                                 <AlertTriangle size={8} />
                                 ATRASADO
                               </span>
-                            )}
+                            ) : null}
                           </div>
 
                           {/* Exibição do Prazo Extraído */}
                           {(() => {
                             const deadline = parseDeadlineFromNotes(item.notes || parentOrder.notes);
                             if (!deadline) return null;
-                            const isOverdue = deadline.getTime() < Date.now() && stage.name !== 'Concluído';
+                            const isOverdue = deadline.getTime() < Date.now() && stage.name !== 'Concluído' && parentOrder.conta_azul_status !== 'Em andamento';
                             
                             return (
                               <div style={{ 
@@ -2815,6 +3331,9 @@ export default function PedidosPage() {
                               }}>
                                 Prazo: {deadline.toLocaleDateString('pt-BR')}
                                 {isOverdue && <span style={{ fontSize: '0.6rem', color: 'var(--danger)' }}>(Atrasado)</span>}
+                                {parentOrder.conta_azul_status === 'Em andamento' && (
+                                  <span style={{ fontSize: '0.6rem', color: '#eab308', fontWeight: 700 }}>(Orçamento em andamento)</span>
+                                )}
                               </div>
                             );
                           })()}
@@ -2949,7 +3468,7 @@ export default function PedidosPage() {
                                           <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '85px' }} title={sib.name}>
                                             {sib.name}
                                           </span>
-                                          <span style={{ fontWeight: 600, color: sibStage?.color || 'var(--text-muted)' }}>
+                                          <span style={{ fontWeight: 600, color: sibStage?.color || 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                                             {sibStage?.name || 'A produzir'}
                                           </span>
                                         </div>
@@ -3219,7 +3738,7 @@ export default function PedidosPage() {
                 Alerta: Crédito ou Estoque de Personalizados
               </h3>
               <button 
-                onClick={() => setIsSuggestionModalOpen(false)} 
+                onClick={() => { setIsSuggestionModalOpen(false); resetAllBypasses(); }} 
                 className="btn btn-secondary" 
                 style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
               >
@@ -3300,7 +3819,7 @@ export default function PedidosPage() {
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button 
                   type="button" 
-                  onClick={() => setIsSuggestionModalOpen(false)} 
+                  onClick={() => { setIsSuggestionModalOpen(false); resetAllBypasses(); }} 
                   className="btn btn-secondary"
                 >
                   Cancelar Movimentação
@@ -3408,6 +3927,7 @@ export default function PedidosPage() {
                 onClick={() => {
                   setIsExpeditionTransitionModalOpen(false);
                   setExpeditionTransitionItem(null);
+                  resetAllBypasses();
                 }}
               >
                 Cancelar
@@ -3523,7 +4043,8 @@ export default function PedidosPage() {
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
-            padding: '1.5rem', maxWidth: '500px', width: '100%',
+            padding: '1.5rem', maxWidth: '650px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease'
           }}>
@@ -3535,8 +4056,45 @@ export default function PedidosPage() {
             </div>
 
             <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: '1.25rem' }}>
-              Insira o tipo de frete, o peso total e as dimensões da embalagem do pedido <strong>{freightItem.friendly_id}</strong> para viabilizar o cálculo do frete.
+              Insira o tipo de frete, o peso total e as dimensões da embalagem para viabilizar o cálculo do frete.
             </p>
+
+            {/* PAINEL DE RESUMO DO PEDIDO */}
+            {(() => {
+              const parentOrder = orders.find(o => o.id === freightItem.order_id) || freightItem.order;
+              const customerObj = customers.find(c => c.id === parentOrder?.customer_id);
+              return (
+                <div style={{
+                  backgroundColor: 'rgba(37, 99, 235, 0.04)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.85rem 1rem',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.825rem',
+                  lineHeight: 1.4,
+                  color: 'var(--text)'
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem 1rem' }}>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 600 }}>Número do Pedido</span>
+                      <strong style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>PV-{parentOrder?.pv_number || 'Sem PV'}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 600 }}>Tiragem</span>
+                      <strong>{freightItem.print_run ? `${freightItem.print_run.toLocaleString('pt-BR')} un` : '-'}</strong>
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 600 }}>Cliente</span>
+                      <strong style={{ color: 'var(--text)' }}>{customerObj?.name || parentOrder?.customer?.name || 'Cliente Não Identificado'}</strong>
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 600 }}>Produto / Arte</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 500 }}>{freightItem.name}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
               <div className="form-group" style={{ margin: 0 }}>
@@ -3661,6 +4219,69 @@ export default function PedidosPage() {
                   />
                 </div>
               </div>
+
+              {/* LISTA DE CHECKBOXES PARA AGRUPAR ITENS IRMÃOS NO MESMO FRETE */}
+              {(() => {
+                const siblingItems = orderItems.filter(
+                  (oi: any) => oi.order_id === freightItem.order_id && oi.id !== freightItem.id
+                );
+                if (siblingItems.length === 0) return null;
+                return (
+                  <div style={{
+                    marginTop: '1.25rem',
+                    padding: '0.85rem 1rem',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px dashed var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                  }}>
+                    <label className="form-label" style={{ fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text)' }}>
+                      📦 Juntar outros itens deste pedido na mesma caixa/frete:
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '120px', overflowY: 'auto', paddingRight: '0.25rem' }}>
+                      {siblingItems.map((sib: any) => {
+                        const sibStage = stages.find(s => s.id === sib.stage_id);
+                        const hasStarted = sibStage && sibStage.name !== 'Pedidos';
+                        const isChecked = selectedFreightSiblings.includes(sib.id);
+                        return (
+                          <label 
+                            key={sib.id} 
+                            style={{ 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              gap: '0.5rem', 
+                              fontSize: '0.8rem', 
+                              cursor: hasStarted ? 'pointer' : 'not-allowed', 
+                              color: hasStarted ? 'var(--text)' : 'var(--text-muted)',
+                              opacity: hasStarted ? 1 : 0.6,
+                              userSelect: 'none' 
+                            }}
+                            title={hasStarted ? '' : 'Este item ainda está na etapa inicial de Pedidos e sua produção não foi iniciada.'}
+                          >
+                            <input 
+                              type="checkbox"
+                              checked={isChecked && hasStarted}
+                              disabled={!hasStarted}
+                              onChange={(e) => {
+                                if (!hasStarted) return;
+                                if (e.target.checked) {
+                                  setSelectedFreightSiblings(prev => [...prev, sib.id]);
+                                } else {
+                                  setSelectedFreightSiblings(prev => prev.filter(id => id !== sib.id));
+                                }
+                              }}
+                              style={{ width: '14px', height: '14px', cursor: hasStarted ? 'pointer' : 'not-allowed' }}
+                            />
+                            <span>
+                              <strong>{sib.friendly_id}</strong> - {sib.name} (Qtd: {sib.print_run})
+                              {!hasStarted && <span style={{ color: '#ef4444', marginLeft: '0.5rem', fontSize: '0.72rem', fontWeight: 600 }}>(Produção Não Iniciada)</span>}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
@@ -3672,6 +4293,7 @@ export default function PedidosPage() {
                   setIsFreightModalOpen(false);
                   setFreightItem(null);
                   setFreightTargetStageId('');
+                  resetAllBypasses();
                 }}
               >
                 Cancelar
@@ -3733,6 +4355,16 @@ export default function PedidosPage() {
                       alert('Erro ao atualizar o item do pedido: ' + itemErr.message);
                     }
 
+                    // Se houver subitens irmãos selecionados, copia os dados das caixas para eles também
+                    if (selectedFreightSiblings.length > 0) {
+                      await Promise.all(selectedFreightSiblings.map(sibId =>
+                        updateOrderItem(sibId, {
+                          boxes_count: boxes,
+                          quantity_per_box: qtyPerBox
+                        })
+                      ));
+                    }
+
                     // 3. Atualizar o estado das ordens e itens localmente em memória
                     setOrders(prev => prev.map(o => o.id === freightItem.order_id ? {
                       ...o,
@@ -3745,16 +4377,33 @@ export default function PedidosPage() {
                       quantity_per_box: qtyPerBox
                     } : o));
 
-                    setOrderItems(prev => prev.map(i => i.id === freightItem.id ? {
-                      ...i,
-                      boxes_count: boxes,
-                      quantity_per_box: qtyPerBox
-                    } : i));
+                    setOrderItems(prev => prev.map(i => {
+                      if (i.id === freightItem.id || selectedFreightSiblings.includes(i.id)) {
+                        return {
+                          ...i,
+                          boxes_count: boxes,
+                          quantity_per_box: qtyPerBox
+                        };
+                      }
+                      return i;
+                    }));
+
+                    const savedOpId = currentOperator.current?.id;
+                    const savedOpName = currentOperator.current?.name;
 
                     // 4. Avançar para os modais subsequentes (Bypass de frete ativado)
                     freightBypass.current = true;
                     setIsFreightModalOpen(false);
-                    await moveOrderItemToStage(freightItem, freightTargetStageId);
+                    await moveOrderItemToStage(freightItem, freightTargetStageId, savedOpId, savedOpName);
+
+                    // Mover os subitens vinculados agrupados no mesmo frete
+                    for (const sibId of selectedFreightSiblings) {
+                      const fullSib = orderItems.find(oi => oi.id === sibId);
+                      if (fullSib) {
+                        freightBypass.current = true;
+                        await moveOrderItemToStage(fullSib, freightTargetStageId, savedOpId, savedOpName);
+                      }
+                    }
 
                     // 5. Limpar estados de formulário
                     setFreightItem(null);
@@ -3766,6 +4415,7 @@ export default function PedidosPage() {
                     setFreightBoxesCount('');
                     setFreightQtyPerBox('');
                     setSelectedShippingType('');
+                    setSelectedFreightSiblings([]);
                   } catch (err) {
                     console.error('Erro no salvamento técnico de frete:', err);
                     alert('Ocorreu um erro no processamento das informações de frete.');
@@ -3893,6 +4543,7 @@ export default function PedidosPage() {
                   setIsProductionAlertModalOpen(false);
                   setProductionAlertData(null);
                   setProductionAlertItem(null);
+                  resetAllBypasses();
                 }}
               >
                 Voltar / Cancelar
@@ -4058,6 +4709,7 @@ export default function PedidosPage() {
                   setConferencyData(null);
                   setConferencyItem(null);
                   setConferencyChecked(false);
+                  resetAllBypasses();
                 }}
               >
                 Voltar / Cancelar
@@ -4234,6 +4886,7 @@ export default function PedidosPage() {
                   setIsHandlingTeamModalOpen(false);
                   setHandlingTeamModalItem(null);
                   setSelectedHandlingTeamId('');
+                  resetAllBypasses();
                 }}
               >
                 Cancelar
@@ -4312,7 +4965,8 @@ export default function PedidosPage() {
                         fontWeight: 700,
                         backgroundColor: (sibStage?.color || '#888') + '22',
                         color: sibStage?.color || 'var(--text-muted)',
-                        border: `1px solid ${(sibStage?.color || '#888')}55`
+                        border: `1px solid ${(sibStage?.color || '#888')}55`,
+                        whiteSpace: 'nowrap'
                       }}>
                         {sibStage?.name || 'A produzir'}
                       </span>
@@ -4326,7 +4980,30 @@ export default function PedidosPage() {
               Deseja prosseguir com o envio de <strong>{linkedItemsWarningData.item.friendly_id}</strong> para a Expedição?
             </p>
 
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <button 
+                type="button" 
+                onClick={handleConfirmExpeditionMoveAll} 
+                className="btn btn-primary"
+                style={{ fontSize: '0.85rem', width: '100%', padding: '0.6rem 1rem' }}
+              >
+                Movimentar todos
+              </button>
+              <button 
+                type="button" 
+                onClick={handleConfirmExpeditionMove} 
+                className="btn btn-outline"
+                style={{ 
+                  fontSize: '0.85rem', 
+                  width: '100%', 
+                  padding: '0.6rem 1rem',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text)',
+                  backgroundColor: 'transparent'
+                }}
+              >
+                Movimentar somente este
+              </button>
               <button 
                 type="button" 
                 onClick={() => {
@@ -4334,17 +5011,9 @@ export default function PedidosPage() {
                   setLinkedItemsWarningData(null);
                 }} 
                 className="btn btn-secondary"
-                style={{ fontSize: '0.8rem' }}
+                style={{ fontSize: '0.85rem', width: '100%', padding: '0.6rem 1rem' }}
               >
-                Cancelar Movimentação
-              </button>
-              <button 
-                type="button" 
-                onClick={handleConfirmExpeditionMove} 
-                className="btn btn-primary"
-                style={{ fontSize: '0.8rem' }}
-              >
-                Sim, Enviar para Expedição
+                Cancelar movimentação
               </button>
             </div>
           </div>
@@ -4371,7 +5040,11 @@ export default function PedidosPage() {
               Sincronização Conta Azul
             </h2>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '1.5rem', fontWeight: 500 }}>
-              Período: {importStartDate ? new Date(importStartDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Início'} a {importEndDate ? new Date(importEndDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Fim'}
+              {isSyncingSingle ? (
+                `Pedido: ${syncingOrderNumber ? `PV-${syncingOrderNumber}` : (selectedOrder?.pv_number || 'Sem número')}`
+              ) : (
+                `Período: ${importStartDate ? new Date(importStartDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Início'} a ${importEndDate ? new Date(importEndDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Fim'}`
+              )}
             </div>
 
             {/* Progresso */}
@@ -4418,10 +5091,16 @@ export default function PedidosPage() {
                     <h4 style={{ margin: '0 0 0.5rem 0', color: '#2ed573', fontSize: '0.9rem', fontWeight: 700 }}>
                       Sincronizado com Sucesso
                     </h4>
-                    <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <li>Pedidos importados: <strong>{syncResult.imported}</strong></li>
-                      <li>Pedidos atualizados: <strong>{syncResult.updated}</strong></li>
-                    </ul>
+                    {isSyncingSingle ? (
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        O pedido foi sincronizado e suas parcelas e status financeiro foram atualizados.
+                      </p>
+                    ) : (
+                      <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <li>Pedidos importados: <strong>{syncResult.imported}</strong></li>
+                        <li>Pedidos atualizados: <strong>{syncResult.updated}</strong></li>
+                      </ul>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -4453,7 +5132,10 @@ export default function PedidosPage() {
                 </>
               ) : (
                 <button
-                  onClick={() => setIsSyncModalOpen(false)}
+                  onClick={() => {
+                    setIsSyncModalOpen(false);
+                    setSyncingOrderNumber('');
+                  }}
                   className="btn btn-secondary"
                   style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem' }}
                 >
@@ -4495,7 +5177,7 @@ export default function PedidosPage() {
                   )}
                 </p>
               </div>
-              <button onClick={() => setIsPackagingModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: 'var(--text-muted)' }}>✕</button>
+              <button onClick={() => { setIsPackagingModalOpen(false); resetAllBypasses(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: 'var(--text-muted)' }}>✕</button>
             </div>
 
             {/* Resumo do item */}
@@ -4601,7 +5283,7 @@ export default function PedidosPage() {
 
               {/* Rodapé do modal */}
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setIsPackagingModalOpen(false)}>
+                 <button type="button" className="btn btn-secondary" onClick={() => { setIsPackagingModalOpen(false); resetAllBypasses(); }}>
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={savingPackaging}>
@@ -4646,7 +5328,7 @@ export default function PedidosPage() {
                 Conferência de Sobras & Faltas
               </h3>
               <button 
-                onClick={() => setIsAdjustmentModalOpen(false)} 
+                onClick={() => { setIsAdjustmentModalOpen(false); resetAllBypasses(); }} 
                 className="btn btn-secondary" 
                 style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
               >
@@ -4744,9 +5426,9 @@ export default function PedidosPage() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button 
+                 <button 
                   type="button" 
-                  onClick={() => setIsAdjustmentModalOpen(false)} 
+                  onClick={() => { setIsAdjustmentModalOpen(false); resetAllBypasses(); }} 
                   className="btn btn-secondary"
                 >
                   Cancelar
@@ -5878,11 +6560,12 @@ export default function PedidosPage() {
                                   R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                               )}
-                              <td style={{ padding: '0.5rem 0.75rem' }}>
+                              <td style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap' }}>
                                 <span style={{ 
                                   color: itemStage?.color || 'var(--text-muted)',
                                   fontWeight: 700,
-                                  fontSize: '0.72rem'
+                                  fontSize: '0.72rem',
+                                  whiteSpace: 'nowrap'
                                 }}>
                                   {itemStage?.name || 'A produzir'}
                                 </span>
@@ -5941,9 +6624,31 @@ export default function PedidosPage() {
 
                 {/* Seção: Financeiro */}
                 <section>
-                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span style={{ width: '3px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px', display: 'inline-block' }} />
-                    Faturamento / Controle de Pagamento
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ width: '3px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px', display: 'inline-block' }} />
+                      Faturamento / Controle de Pagamento
+                    </div>
+                    {order.conta_azul_id && (
+                      <button
+                        type="button"
+                        onClick={() => handleSyncSingleOrder(order.id)}
+                        disabled={syncingSingleOrder}
+                        className="btn btn-secondary"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.68rem',
+                          height: '24px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <RefreshCw size={11} className={syncingSingleOrder ? 'spinner' : ''} />
+                        <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Pedido'}</span>
+                      </button>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.6rem' }}>
                     <div style={{
@@ -5977,50 +6682,169 @@ export default function PedidosPage() {
                   </div>
 
                   {/* Tabela de parcelas a receber */}
-                  {!hideMonetaryValues && (() => {
+                  {(() => {
                     const orderTransactions = financialTransactions.filter(t => t.order_id === order.id);
+
                     if (orderTransactions.length === 0) {
                       return (
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '0.5rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                          Sem parcelas detalhadas sincronizadas. Status resumido: {order.installments_paid} de {order.installments_total} parcelas quitadas.
+                        <div style={{
+                          padding: '1rem 1.25rem',
+                          backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          borderRadius: 'var(--radius-md)',
+                          color: '#ef4444',
+                          fontSize: '0.78rem',
+                          lineHeight: '1.5',
+                          marginTop: '0.5rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.25rem'
+                        }}>
+                          <span style={{ fontWeight: 700 }}>⚠️ Sem parcelas financeiras sincronizadas</span>
+                          <span>
+                            Este pedido ainda não possui parcelas financeiras sincronizadas no banco local do portal. 
+                            Certifique-se de que a sua integração com o Conta Azul em <em>Configurações do Portal</em> está conectada e clique no botão <strong>Sincronizar Pedido</strong> acima para buscar e gravar as parcelas reais em tempo real.
+                          </span>
                         </div>
                       );
                     }
+
+                    // 1. Definir parcelas reais ordenadas cronologicamente
+                    const sortedTransactions = [...orderTransactions].sort((a, b) => {
+                      if (!a.due_date) return 1;
+                      if (!b.due_date) return -1;
+                      return a.due_date.localeCompare(b.due_date);
+                    });
+
+                    const finalInstallments = sortedTransactions.map((t: any, index: number) => {
+                      const statusUpper = (t.status || 'PENDENTE').toUpperCase();
+                      const isPaid = ['CONCILIADO', 'QUITADO', 'BAIXADO'].includes(statusUpper);
+                      
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+
+                      const dueDate = t.due_date ? new Date(t.due_date + 'T00:00:00') : null;
+                      
+                      const valor = Number(t.amount || 0);
+                      const recebido = t.received_amount !== undefined && t.received_amount !== null ? Number(t.received_amount) : (isPaid ? valor : 0);
+                      const emAberto = t.open_amount !== undefined && t.open_amount !== null ? Number(t.open_amount) : (isPaid ? 0 : valor);
+
+                      let label = 'A vencer';
+                      let color = '#f59e0b';
+                      let bg = 'rgba(245,158,11,0.1)';
+
+                      if (recebido > 0 && emAberto > 0) {
+                        label = 'Recebido Parcial';
+                        color = '#3b82f6';
+                        bg = 'rgba(59, 130, 246, 0.1)';
+                      } else if (isPaid || emAberto === 0) {
+                        label = 'Paga';
+                        color = '#10b981';
+                        bg = 'rgba(16,185,129,0.1)';
+                      } else if (dueDate) {
+                        dueDate.setHours(0, 0, 0, 0);
+                        if (dueDate.getTime() < today.getTime()) {
+                          label = 'Atrasada';
+                          color = '#ef4444';
+                          bg = 'rgba(239,68,68,0.1)';
+                        }
+                      }
+
+                      let parcelaNum = `${index + 1}/${sortedTransactions.length}`;
+                      const desc = t.description || '';
+                      const match = desc.match(/(\d+)\s*\/\s*(\d+)/);
+                      if (match) {
+                        parcelaNum = match[0];
+                      }
+
+                      let formaPagamento = 'Pix';
+                      if (desc.includes('-')) {
+                        formaPagamento = desc.split('-').slice(1).join('-').trim();
+                      } else {
+                        formaPagamento = order.payment_condition || 'Pix';
+                      }
+
+                      return {
+                        vencimento: t.due_date || '',
+                        parcelaNum,
+                        formaPagamento,
+                        conta: 'Conta Banco',
+                        valor,
+                        recebido,
+                        emAberto,
+                        statusLabel: label,
+                        statusColor: color,
+                        statusBg: bg
+                      };
+                    });
+
+                    // 2. Somar os totais para os resumos
+                    const totalRecebido = finalInstallments.reduce((acc, inst) => acc + inst.recebido, 0);
+                    const totalAReceber = finalInstallments.filter(inst => {
+                      if (inst.statusLabel === 'A vencer') return true;
+                      if (inst.statusLabel === 'Recebido Parcial') {
+                        const dueTime = new Date(inst.vencimento + 'T12:00:00').getTime();
+                        const todayTime = new Date().setHours(0,0,0,0);
+                        return dueTime >= todayTime;
+                      }
+                      return false;
+                    }).reduce((acc, inst) => acc + inst.emAberto, 0);
+
+                    const totalEmAtraso = finalInstallments.filter(inst => {
+                      if (inst.statusLabel === 'Atrasada') return true;
+                      if (inst.statusLabel === 'Recebido Parcial') {
+                        const dueTime = new Date(inst.vencimento + 'T12:00:00').getTime();
+                        const todayTime = new Date().setHours(0,0,0,0);
+                        return dueTime < todayTime;
+                      }
+                      return false;
+                    }).reduce((acc, inst) => acc + inst.emAberto, 0);
+
+                    const totalEmAberto = totalAReceber + totalEmAtraso;
+
                     return (
-                      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', marginTop: '0.5rem' }}>
-                        <div style={{ padding: '0.4rem 0.6rem', fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                          Contas a Receber (Conta Azul)
-                        </div>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
-                          <thead>
-                            <tr style={{ backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
-                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Vencimento</th>
-                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Descrição</th>
-                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor</th>
-                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Situação</th>
-                              <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Observações</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                          {orderTransactions.map((t: any) => {
-                              const statusUpper = (t.status || 'PENDENTE').toUpperCase();
-                              const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
-                                'CONCILIADO': { label: 'Conciliado', color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
-                                'QUITADO':    { label: 'Quitado',    color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
-                                'BAIXADO':    { label: 'Baixado',    color: '#3b82f6', bg: 'rgba(59,130,246,0.1)' },
-                                'ATRASADO':   { label: 'Atrasado',   color: '#ef4444', bg: 'rgba(239,68,68,0.1)'  },
-                                'PENDENTE':   { label: 'Pendente',   color: '#f97316', bg: 'rgba(249,115,22,0.1)' },
-                              };
-                              const cfg = statusConfig[statusUpper] || statusConfig['PENDENTE'];
-                              return (
-                                <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ marginTop: '0.75rem' }}>
+                        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                          <div style={{ padding: '0.4rem 0.6rem', fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                            Controle de Parcelas (Contas a Receber)
+                          </div>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
+                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Vencimento</th>
+                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Parcela</th>
+                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Forma de pagamento</th>
+                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Conta</th>
+                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor R$</th>}
+                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Recebido R$</th>}
+                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Em aberto R$</th>}
+                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Situação</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {finalInstallments.map((inst, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
                                   <td style={{ padding: '0.4rem 0.6rem' }}>
-                                    {t.due_date ? new Date(t.due_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                                    {inst.vencimento ? new Date(inst.vencimento + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
                                   </td>
-                                  <td style={{ padding: '0.4rem 0.6rem' }}>{t.description || 'Parcela'}</td>
-                                  <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>
-                                    R$ {(t.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                  </td>
+                                  <td style={{ padding: '0.4rem 0.6rem' }}>{inst.parcelaNum}</td>
+                                  <td style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>{inst.formaPagamento}</td>
+                                  <td style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>{inst.conta}</td>
+                                  {!hideMonetaryValues && (
+                                    <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600 }}>
+                                      R$ {inst.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                  )}
+                                  {!hideMonetaryValues && (
+                                    <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600, color: inst.recebido > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                                      R$ {inst.recebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                  )}
+                                  {!hideMonetaryValues && (
+                                    <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600, color: inst.emAberto > 0 ? (inst.statusLabel === 'Atrasada' ? '#ef4444' : '#3b82f6') : 'var(--text-muted)' }}>
+                                      R$ {inst.emAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                  )}
                                   <td style={{ padding: '0.4rem 0.6rem' }}>
                                     <span style={{
                                       display: 'inline-block',
@@ -6028,20 +6852,64 @@ export default function PedidosPage() {
                                       borderRadius: '4px',
                                       fontSize: '0.72rem',
                                       fontWeight: 700,
-                                      color: cfg.color,
-                                      backgroundColor: cfg.bg,
+                                      color: inst.statusColor,
+                                      backgroundColor: inst.statusBg,
                                     }}>
-                                      {cfg.label}
+                                      {inst.statusLabel}
                                     </span>
                                   </td>
-                                  <td style={{ padding: '0.4rem 0.6rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                    {t.notes || '—'}
-                                  </td>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Bloco de resumos financeiros do Conta Azul */}
+                        {!hideMonetaryValues && (
+                          <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {/* Recebido */}
+                            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--background)' }}>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>Recebido</span>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total recebido (R$)</span>
+                                <span style={{ fontSize: '1.1rem', fontWeight: 800, color: '#10b981' }}>
+                                  R$ {totalRecebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Em aberto */}
+                            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'var(--background)' }}>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>Em aberto</span>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                                <div style={{ display: 'flex', gap: '1.5rem' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total a receber (R$)</span>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text)' }}>
+                                      R$ {totalAReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 300 }}>+</div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total em atraso (R$)</span>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#ef4444' }}>
+                                      R$ {totalEmAtraso.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+                                  <div style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 300 }}>=</div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total em aberto (R$)</span>
+                                    <span style={{ fontSize: '1.2rem', fontWeight: 800, color: '#3b82f6' }}>
+                                      R$ {totalEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -6655,6 +7523,95 @@ export default function PedidosPage() {
         </div>
       )}
 
+      {/* MODAL DE ALERTA: PEDIDO EM ANDAMENTO NO CONTA AZUL */}
+      {isOrderInProgressModalOpen && inProgressItem && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '1.75rem', maxWidth: '520px', width: '90%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+              <AlertTriangle size={26} style={{ color: 'var(--warning)' }} />
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0 }}>
+                Pedido Não Aprovado no Conta Azul
+              </h2>
+            </div>
+
+            <div style={{ fontSize: '0.9rem', lineHeight: 1.5, marginBottom: '1.5rem' }}>
+              <p style={{ margin: '0 0 1rem 0' }}>
+                O pedido <strong>PV-{inProgressItem.order?.pv_number || inProgressItem.order_id}</strong> ainda consta com o status <strong>"Em andamento"</strong> (Aguardando Aprovação/Faturamento) no Conta Azul.
+              </p>
+              
+              <div style={{
+                backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                border: '1px dashed rgba(245, 158, 11, 0.3)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.85rem',
+                marginBottom: '1rem',
+                fontSize: '0.8rem',
+                color: 'var(--text-muted)'
+              }}>
+                ℹ️ <strong>Importante:</strong> Iniciar a produção ou separação de estoque de pedidos ainda não aprovados comercialmente/financeiramente pode gerar retrabalho ou desperdício de matéria-prima.
+              </div>
+
+              <p style={{ margin: '0' }}>
+                Caso o status do pedido tenha sido atualizado recentemente no Conta Azul, clique em <strong>Sincronizar Pedido Agora</strong> para buscar a aprovação em tempo real. Caso contrário, se tiver autorização, você pode optar por <strong>Iniciar Mesmo Assim</strong>.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <button 
+                onClick={handleSyncInProgressOrder}
+                disabled={inProgressSyncing}
+                className="btn btn-primary"
+                style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', height: '42px', fontWeight: 600 }}
+              >
+                <RefreshCw size={16} className={inProgressSyncing ? 'spinner' : ''} />
+                <span>{inProgressSyncing ? 'Buscando dados no Conta Azul...' : 'Sincronizar Pedido Agora'}</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button 
+                  onClick={handleForceStartInProgressOrder}
+                  disabled={inProgressSyncing}
+                  className="btn btn-secondary"
+                  style={{ flex: 1, height: '38px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}
+                >
+                  Iniciar Mesmo Assim
+                </button>
+                <button 
+                  onClick={handleCancelInProgressOrder}
+                  disabled={inProgressSyncing}
+                  className="btn btn-secondary"
+                  style={{ flex: 1, height: '38px', fontSize: '0.85rem', fontWeight: 600, border: '1px solid var(--border)', backgroundColor: 'transparent' }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <OperatorAuthModal 
+        isOpen={isOpAuthOpen}
+        tenantId={user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'}
+        onSuccess={handleOpAuthSuccess}
+        onClose={() => {
+          setIsOpAuthOpen(false);
+          resetAllBypasses();
+        }}
+        actionDescription={pendingKanbanMove ? `Mover item para outra etapa do Kanban` : 'Movimentação Kanban'}
+        targetStageId={pendingKanbanMove?.targetStageId}
+        currentStageId={pendingKanbanMove?.item?.stage_id}
+      />
     </div>
   );
 }

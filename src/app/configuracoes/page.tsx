@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import Link from 'next/link';
+import { supabase } from '@/services/supabase';
 import { 
   getContaAzulConfig, 
   updateContaAzulConfig, 
@@ -22,7 +23,13 @@ import {
   updatePackagingMaterialType,
   deletePackagingMaterialType,
   getPackagingSettings,
-  savePackagingSettings
+  savePackagingSettings,
+  getOrderStages,
+  saveProfileStagePermission,
+  createOrderStage,
+  updateOrderStage,
+  deleteOrderStage,
+  getProfilesWithPermissions
 } from '@/services/supabase';
 import { 
   ShieldAlert, 
@@ -35,13 +42,16 @@ import {
   Edit3,
   Settings,
   Users,
-  Package
+  Package,
+  ArrowUp,
+  ArrowDown,
+  Sliders
 } from 'lucide-react';
 
 export default function ConfiguracoesPage() {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<'integracao' | 'producao' | 'embalagem' | 'sistema'>('integracao');
+  const [activeTab, setActiveTab] = useState<'integracao' | 'producao' | 'embalagem' | 'sistema' | 'operadores'>('integracao');
   
   // States
   const [clientId, setClientId] = useState('');
@@ -80,6 +90,24 @@ export default function ConfiguracoesPage() {
   const [packagingAssociationRule, setPackagingAssociationRule] = useState<'FIRST_ITEM' | 'LARGEST_QUANTITY' | 'MANUAL'>('FIRST_ITEM');
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // States de Operadores de Produção (Auditoria)
+  const [operatorsList, setOperatorsList] = useState<any[]>([]);
+  const [operatorName, setOperatorName] = useState('');
+  const [operatorEmail, setOperatorEmail] = useState('');
+  const [operatorPin, setOperatorPin] = useState('');
+  const [operatorPassword, setOperatorPassword] = useState('');
+  const [submittingOperator, setSubmittingOperator] = useState(false);
+  const [stages, setStages] = useState<any[]>([]);
+  const [savingPermission, setSavingPermission] = useState<string | null>(null);
+  const [selectedOperatorForPermissions, setSelectedOperatorForPermissions] = useState<any | null>(null);
+  const [selectedStage, setSelectedStage] = useState<any | null>(null);
+  const [stageName, setStageName] = useState('');
+  const [stageColor, setStageColor] = useState('#3b82f6');
+  const [submittingStage, setSubmittingStage] = useState(false);
+  const [profilesList, setProfilesList] = useState<any[]>([]);
+  const [factoryAccountId, setFactoryAccountId] = useState<string>('');
+  const [savingFactoryAccount, setSavingFactoryAccount] = useState(false);
+
   // Loading & Action States
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -91,14 +119,17 @@ export default function ConfiguracoesPage() {
     setLoading(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes] = await Promise.all([
+      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes, operatorsRes, stagesRes, profilesRes] = await Promise.all([
         getContaAzulConfig(),
         getIntegrationLogs(),
         getSyncQueue(),
         getProductionMachines(tenantId),
         getHandlingTeams(tenantId),
         getPackagingMaterialTypes(tenantId),
-        getPackagingSettings(tenantId)
+        getPackagingSettings(tenantId),
+        fetch(`/api/operators?tenantId=${tenantId}`).then(res => res.json()),
+        getOrderStages(tenantId),
+        getProfilesWithPermissions(tenantId)
       ]);
 
       const data = configRes.data;
@@ -114,6 +145,20 @@ export default function ConfiguracoesPage() {
       setMachines(machinesRes.data || []);
       setHandlingTeams(teamsRes.data || []);
       setPackagingMaterials(pmtRes.data || []);
+      setOperatorsList(operatorsRes.data || []);
+      setStages(stagesRes.data || []);
+
+      const allProfiles = profilesRes.data || [];
+      // Filtra perfis com papel de 'Administrador', 'Produção', 'Fábrica' ou 'Vendedor'
+      const filteredProfiles = allProfiles.filter((p: any) => p.role === 'Administrador' || p.role === 'Produção' || p.role === 'Fábrica' || p.role === 'Vendedor');
+      const mappedProfiles = filteredProfiles.map((p: any) => ({
+        ...p,
+        name: p.full_name || p.name || 'Sem nome'
+      }));
+      setProfilesList(mappedProfiles);
+
+      const activeFactory = allProfiles.find((p: any) => p.is_factory_account === true);
+      setFactoryAccountId(activeFactory ? activeFactory.id : '');
       
       if (settingsRes.data) {
         setPackagingKeywords(settingsRes.data.keywords || 'caixa,fundo,divisoria,saco,embalagem,pacote');
@@ -125,6 +170,16 @@ export default function ConfiguracoesPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam && ['integracao', 'producao', 'embalagem', 'sistema', 'operadores'].includes(tabParam)) {
+        setActiveTab(tabParam as any);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (user?.role === 'Administrador') {
@@ -397,6 +452,235 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  // Operações de Operadores de Produção (Administração)
+  const handleSaveOperator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!operatorName.trim() || !operatorEmail.trim() || !operatorPin.trim() || !operatorPassword.trim()) {
+      alert('Nome, Email, PIN e Senha são obrigatórios.');
+      return;
+    }
+
+    if (!/^\d{4,6}$/.test(operatorPin)) {
+      alert('O PIN deve conter entre 4 e 6 dígitos numéricos.');
+      return;
+    }
+
+    if (operatorPassword.length < 6) {
+      alert('A senha deve conter no mínimo 6 caracteres.');
+      return;
+    }
+
+    setSubmittingOperator(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const res = await fetch('/api/operators', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: operatorName.trim(),
+          email: operatorEmail.trim(),
+          pin: operatorPin.trim(),
+          password: operatorPassword.trim(),
+          tenantId
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao criar operador.');
+
+      alert('Operador cadastrado com sucesso!');
+      setOperatorName('');
+      setOperatorEmail('');
+      setOperatorPin('');
+      setOperatorPassword('');
+      fetchConfigAndLogs(); // Atualizar tabela
+    } catch (err: any) {
+      alert('Erro ao salvar operador: ' + err.message);
+    } finally {
+      setSubmittingOperator(false);
+    }
+  };
+
+  const handleToggleOperatorStatus = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'ATIVO' ? 'INATIVO' : 'ATIVO';
+    try {
+      const res = await fetch('/api/operators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status: newStatus })
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao alterar status do operador.');
+
+      fetchConfigAndLogs();
+    } catch (err: any) {
+      alert('Erro ao atualizar status: ' + err.message);
+    }
+  };
+
+  const handleToggleForcePassword = async (id: string, currentForce: boolean) => {
+    try {
+      const res = await fetch('/api/operators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, force_password_change: !currentForce })
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao forçar troca de senha.');
+
+      fetchConfigAndLogs();
+    } catch (err: any) {
+      alert('Erro ao atualizar: ' + err.message);
+    }
+  };
+
+  const handleToggleOperatorStagePermission = async (profileId: string, stageId: string, type: 'enter' | 'exit', currentPermissions: any[]) => {
+    setSavingPermission(profileId);
+    
+    const stagePerm = currentPermissions.find((p: any) => p.stage_id === stageId);
+    let canEnter = stagePerm ? stagePerm.can_enter : false;
+    let canExit = stagePerm ? stagePerm.can_exit : false;
+    
+    if (type === 'enter') {
+      canEnter = !canEnter;
+    } else {
+      canExit = !canExit;
+    }
+    
+    const { error } = await saveProfileStagePermission(profileId, stageId, canEnter, canExit);
+    if (error) {
+      alert('Erro ao atualizar permissão: ' + error.message);
+    } else {
+      fetchConfigAndLogs();
+    }
+    setSavingPermission(null);
+  };
+
+  const handleSaveStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stageName.trim()) return;
+
+    setSubmittingStage(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      if (selectedStage) {
+        const { error } = await updateOrderStage(selectedStage.id, {
+          name: stageName.trim(),
+          color: stageColor
+        });
+        if (error) throw error;
+        setSelectedStage(null);
+        setStageName('');
+        setStageColor('#3b82f6');
+      } else {
+        const maxSequence = stages.reduce((max, s) => s.sequence > max ? s.sequence : max, 0);
+        const { error } = await createOrderStage({
+          tenant_id: tenantId,
+          name: stageName.trim(),
+          color: stageColor,
+          sequence: maxSequence + 1
+        });
+        if (error) throw error;
+        setStageName('');
+        setStageColor('#3b82f6');
+      }
+      fetchConfigAndLogs();
+    } catch (err: any) {
+      alert('Erro ao salvar etapa: ' + err.message);
+    } finally {
+      setSubmittingStage(false);
+    }
+  };
+
+  const handleMoveStage = async (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= stages.length) return;
+
+    const stage1 = stages[index];
+    const stage2 = stages[newIndex];
+
+    const tempSeq = stage1.sequence;
+    stage1.sequence = stage2.sequence;
+    stage2.sequence = tempSeq;
+
+    setLoading(true);
+    try {
+      await Promise.all([
+        updateOrderStage(stage1.id, { sequence: stage1.sequence }),
+        updateOrderStage(stage2.id, { sequence: stage2.sequence })
+      ]);
+      fetchConfigAndLogs();
+    } catch (err: any) {
+      console.error('Erro ao reordenar etapas:', err);
+      alert('Erro ao reordenar etapas de produção.');
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteStage = async (stage: any) => {
+    if (confirm(`Deseja realmente excluir a etapa "${stage.name}"?`)) {
+      setLoading(true);
+      try {
+        const { error } = await deleteOrderStage(stage.id);
+        if (error) throw error;
+        if (selectedStage?.id === stage.id) {
+          setSelectedStage(null);
+          setStageName('');
+          setStageColor('#3b82f6');
+        }
+        fetchConfigAndLogs();
+      } catch (err: any) {
+        alert('Erro ao excluir etapa: ' + err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleUpdateOperatorRole = async (profileId: string, newRole: 'Administrador' | 'Produção' | 'Fábrica' | 'Vendedor') => {
+    setSavingFactoryAccount(true);
+    try {
+      const isFactory = newRole === 'Fábrica';
+
+      const res = await fetch('/api/operators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: profileId,
+          role: isFactory ? 'Fábrica' : newRole,
+          is_factory_account: isFactory
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao atualizar perfil.');
+
+      alert('Perfil do usuário atualizado com sucesso!');
+      
+      // Atualiza o perfil no modal reativamente
+      const updatedOp = profilesList.find(p => p.id === profileId);
+      if (updatedOp) {
+        setSelectedOperatorForPermissions({
+          ...updatedOp,
+          role: isFactory ? 'Fábrica' : newRole,
+          is_factory_account: isFactory
+        });
+      }
+
+      fetchConfigAndLogs();
+    } catch (err: any) {
+      alert('Erro ao atualizar perfil: ' + err.message);
+    } finally {
+      setSavingFactoryAccount(false);
+    }
+  };
+
+  const activeOp = selectedOperatorForPermissions 
+    ? (profilesList.find(o => o.id === selectedOperatorForPermissions.id) || selectedOperatorForPermissions)
+    : null;
+
   const isConnected = config?.access_token && new Date(config.expires_at).getTime() > Date.now();
 
   if (loading) {
@@ -471,6 +755,13 @@ export default function ConfiguracoesPage() {
         >
           <Cpu size={16} />
           <span>Produção & Fábrica</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('operadores')} 
+          className={`tab-btn ${activeTab === 'operadores' ? 'active' : ''}`}
+        >
+          <Users size={16} />
+          <span>Operadores de Produção</span>
         </button>
         <button 
           onClick={() => setActiveTab('embalagem')} 
@@ -735,6 +1026,172 @@ export default function ConfiguracoesPage() {
       {/* TAB CONTENT: PRODUCAO */}
       {activeTab === 'producao' && (
         <>
+          {/* SEÇÃO DE GERENCIAMENTO DE ETAPAS DO KANBAN */}
+          <div className="grid-responsive-1-2" style={{ gap: '1.5rem', marginBottom: '2.5rem' }}>
+            {/* Formulário de Etapa */}
+            <div className="card">
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Sliders size={18} style={{ color: 'var(--primary)' }} />
+                {selectedStage ? 'Editar Etapa do Kanban' : 'Nova Etapa do Kanban'}
+              </h3>
+              
+              <form onSubmit={handleSaveStage} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Nome da Etapa *</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    required
+                    placeholder="Ex: Layout e Faca, Acabamento..."
+                    value={stageName}
+                    onChange={(e) => setStageName(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Cor no Kanban</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <input 
+                      type="color"
+                      style={{ width: '40px', height: '38px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '2px', cursor: 'pointer' }}
+                      value={stageColor}
+                      onChange={(e) => setStageColor(e.target.value)}
+                    />
+                    <input 
+                      type="text" 
+                      className="form-input"
+                      style={{ flex: 1 }}
+                      placeholder="#3b82f6"
+                      value={stageColor}
+                      onChange={(e) => setStageColor(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={submittingStage}>
+                    {selectedStage ? 'Salvar Alterações' : 'Criar Etapa'}
+                  </button>
+                  {selectedStage && (
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setSelectedStage(null);
+                        setStageName('');
+                        setStageColor('#3b82f6');
+                      }} 
+                      className="btn btn-secondary"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            {/* Tabela de Etapas Ativas */}
+            <div className="card">
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Sliders size={18} style={{ color: 'var(--primary)' }} />
+                Etapas Ativas ({stages.length})
+              </h3>
+
+              <div className="table-responsive">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '80px' }}>Ordem</th>
+                      <th>Nome da Etapa</th>
+                      <th>Cor Visual</th>
+                      <th style={{ textAlign: 'right' }}>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stages.map((stage, index) => (
+                      <tr 
+                        key={stage.id}
+                        style={{
+                          backgroundColor: selectedStage?.id === stage.id ? 'rgba(var(--primary-rgb), 0.04)' : 'transparent',
+                          transition: 'background-color 0.2s ease'
+                        }}
+                      >
+                        <td>
+                          <div style={{ display: 'flex', gap: '0.25rem' }}>
+                            <button 
+                              onClick={() => handleMoveStage(index, 'up')}
+                              disabled={index === 0 || loading}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem', display: 'flex', alignItems: 'center' }}
+                            >
+                              <ArrowUp size={14} />
+                            </button>
+                            <button 
+                              onClick={() => handleMoveStage(index, 'down')}
+                              disabled={index === stages.length - 1 || loading}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem', display: 'flex', alignItems: 'center' }}
+                            >
+                              <ArrowDown size={14} />
+                            </button>
+                          </div>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{stage.name}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span 
+                              style={{ 
+                                display: 'inline-block', 
+                                width: '14px', 
+                                height: '14px', 
+                                borderRadius: '50%', 
+                                backgroundColor: stage.color || '#3b82f6', 
+                                border: '1px solid var(--border)' 
+                              }} 
+                            />
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{stage.color}</span>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button 
+                              onClick={() => {
+                                setSelectedStage(stage);
+                                setStageName(stage.name);
+                                setStageColor(stage.color);
+                              }}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                            >
+                              <Edit3 size={12} />
+                              <span>Editar</span>
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteStage(stage)}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--danger)' }}
+                            >
+                              <Trash2 size={12} />
+                              <span>Excluir</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {stages.length === 0 && (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                          Nenhuma etapa ativa configurada.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ height: '1px', backgroundColor: 'var(--border)', marginBottom: '2.5rem' }} />
+
           {/* SEÇÃO DE GERENCIAMENTO DE MÁQUINAS E SETORES */}
           <div className="grid-responsive-1-2" style={{ gap: '1.5rem', marginBottom: '2rem' }}>
             
@@ -1005,6 +1462,252 @@ export default function ConfiguracoesPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* TAB CONTENT: OPERADORES DE PRODUÇÃO */}
+      {activeTab === 'operadores' && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Users size={20} style={{ color: 'var(--primary)' }} />
+                Controle de Usuários e Perfis ({profilesList.length})
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                Gerencie todos os colaboradores cadastrados. Clique no nome de qualquer usuário para configurar seu Perfil de Acesso (Administrador, Produção, Terminal de Fábrica) e suas liberações do processo.
+              </p>
+            </div>
+          </div>
+
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nome (Clique para Configurar)</th>
+                  <th>E-mail</th>
+                  <th>Perfil / Cargo</th>
+                  <th>Status</th>
+                  <th>Forçar Troca de Senha</th>
+                  <th style={{ textAlign: 'right' }}>Ações de Controle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {profilesList.map(op => (
+                  <tr key={op.id}>
+                    <td>
+                      <button 
+                        onClick={() => setSelectedOperatorForPermissions(op)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          font: 'inherit',
+                          fontWeight: 600,
+                          color: 'var(--primary)',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          textAlign: 'left'
+                        }}
+                      >
+                        {op.name}
+                      </button>
+                    </td>
+                    <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{op.email}</td>
+                    <td>
+                      <span className={`badge ${
+                        op.is_factory_account ? 'badge-warning' : 
+                        op.role === 'Administrador' ? 'badge-primary' : 'badge-success'
+                      }`}>
+                        {op.is_factory_account ? 'Terminal Fábrica' : op.role}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${op.status === 'ATIVO' ? 'badge-success' : 'badge-danger'}`}>
+                        {op.status}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${op.force_password_change ? 'badge-danger' : 'badge-success'}`}>
+                        {op.force_password_change ? 'Exigida' : 'Não'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => handleToggleOperatorStatus(op.id, op.status)}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.375rem 0.75rem', fontSize: '0.75rem', fontWeight: 600 }}
+                        >
+                          {op.status === 'ATIVO' ? 'Desativar' : 'Ativar'}
+                        </button>
+                        <button 
+                          onClick={() => handleToggleForcePassword(op.id, !!op.force_password_change)}
+                          className="btn btn-secondary"
+                          style={{ 
+                            padding: '0.375rem 0.75rem', 
+                            fontSize: '0.75rem', 
+                            fontWeight: 600,
+                            backgroundColor: op.force_password_change ? 'var(--success-bg)' : 'var(--danger-bg)',
+                            color: op.force_password_change ? 'var(--success)' : 'var(--danger)',
+                            border: op.force_password_change ? '1px solid var(--success)' : '1px solid var(--danger)'
+                          }}
+                        >
+                          {op.force_password_change ? 'Remover Exigência' : 'Exigir troca da senha'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {profilesList.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                      Nenhum usuário cadastrado no sistema.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE PERMISSÕES DO OPERADOR */}
+      {selectedOperatorForPermissions && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem',
+          backdropFilter: 'blur(3px)'
+        }}>
+          <div className="card" style={{
+            width: '100%',
+            maxWidth: '650px',
+            backgroundColor: 'var(--surface)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            padding: '2rem',
+            position: 'relative',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            <button
+              onClick={() => setSelectedOperatorForPermissions(null)}
+              style={{
+                position: 'absolute',
+                top: '1rem',
+                right: '1rem',
+                border: 'none',
+                background: 'none',
+                fontSize: '1.5rem',
+                cursor: 'pointer',
+                color: 'var(--text-muted)'
+              }}
+            >
+              &times;
+            </button>
+
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Users size={22} style={{ color: 'var(--primary)' }} />
+              Configurar Usuário: {selectedOperatorForPermissions.name}
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.825rem', marginBottom: '1.5rem' }}>
+              Configure a conta do usuário ou defina quais etapas do processo ele está liberado para movimentar na fábrica.
+            </p>
+
+            {/* SELETOR DE PERFIL/CARGO */}
+            <div style={{ marginBottom: '1.5rem', backgroundColor: 'var(--surface-subtle)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+              <label className="form-label" style={{ fontWeight: 700, display: 'block', marginBottom: '0.5rem' }}>Perfil / Nível de Acesso</label>
+              <select
+                className="form-select"
+                value={activeOp!.is_factory_account ? 'Fábrica' : activeOp!.role}
+                onChange={(e) => handleUpdateOperatorRole(activeOp!.id, e.target.value as any)}
+                disabled={savingFactoryAccount}
+                style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}
+              >
+                <option value="Administrador">Administrador (Acesso total)</option>
+                <option value="Produção">Produção (Operador individual)</option>
+                <option value="Fábrica">Terminal de Fábrica (Apenas Kanban & necessita PIN de operador)</option>
+                <option value="Vendedor">Vendedor (Apenas consulta e visualização)</option>
+              </select>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                Definir como "Terminal de Fábrica" bloqueia esta conta na visualização do Kanban de produção, exigindo PIN de um operador para qualquer movimento.
+              </span>
+            </div>
+
+            {/* TABELA DE PERMISSÕES DE ETAPAS */}
+            {activeOp!.role === 'Administrador' && !activeOp!.is_factory_account ? (
+              <div style={{ backgroundColor: 'rgba(var(--primary-rgb), 0.05)', color: 'var(--primary)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.85rem', fontWeight: 500 }}>
+                💡 Administradores têm permissão irrestrita de leitura e escrita em todas as etapas da fábrica por padrão.
+              </div>
+            ) : activeOp!.role === 'Vendedor' && !activeOp!.is_factory_account ? (
+              <div style={{ backgroundColor: 'rgba(var(--primary-rgb), 0.05)', color: 'var(--primary)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.85rem', fontWeight: 500 }}>
+                💡 Vendedores possuem acesso completo de consulta e leitura (Kanban, Clientes e Produtos), sem permissão de escrita ou movimentação de cartões.
+              </div>
+            ) : (
+              <div className="table-responsive" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                <table className="table" style={{ margin: 0 }}>
+                  <thead>
+                    <tr style={{ backgroundColor: 'var(--background)' }}>
+                      <th style={{ padding: '0.75rem 1rem' }}>Etapa do Processo</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>Entrada (Colocar)</th>
+                      <th style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>Saída (Tirar)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stages.map(stage => {
+                      const opPermissions = activeOp!.profile_stage_permissions || [];
+                      const stagePerm = opPermissions.find((p: any) => p.stage_id === stage.id);
+                      const canEnter = stagePerm ? stagePerm.can_enter : false;
+                      const canExit = stagePerm ? stagePerm.can_exit : false;
+
+                      return (
+                        <tr key={stage.id}>
+                          <td style={{ fontWeight: 600, padding: '0.75rem 1rem' }}>{stage.name}</td>
+                          <td style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>
+                            <input 
+                              type="checkbox"
+                              checked={canEnter}
+                              disabled={savingPermission === activeOp!.id}
+                              onChange={() => handleToggleOperatorStagePermission(activeOp!.id, stage.id, 'enter', opPermissions)}
+                              style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>
+                            <input 
+                              type="checkbox"
+                              checked={canExit}
+                              disabled={savingPermission === activeOp!.id}
+                              onChange={() => handleToggleOperatorStagePermission(activeOp!.id, stage.id, 'exit', opPermissions)}
+                              style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) }
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+              <button 
+                onClick={() => setSelectedOperatorForPermissions(null)}
+                className="btn btn-primary"
+                style={{ minWidth: '100px' }}
+              >
+                Concluído
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* TAB CONTENT: EMBALAGEM */}

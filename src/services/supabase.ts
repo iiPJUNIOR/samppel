@@ -223,7 +223,7 @@ export async function updateProduct(id: string, updates: any) {
   return { data, error };
 }
 
-export async function adjustStock(productId: string, quantity: number, type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', description: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+export async function adjustStock(productId: string, quantity: number, type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', description: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', operatorId?: string | null) {
   if (isMockMode) {
     mockProducts = mockProducts.map(p => {
       if (p.id === productId) {
@@ -243,7 +243,8 @@ export async function adjustStock(productId: string, quantity: number, type: 'EN
       product_id: productId,
       quantity,
       type,
-      description
+      description,
+      operator_id: operatorId || null
     }]);
   }
   return { error: null };
@@ -847,6 +848,7 @@ export interface OrderItem {
   applied_adjustment_id?: string | null;
   adjusted_quantity_math?: string | null;
   adjusted_production_quantity?: number | null;
+  last_operator_id?: string | null;
   created_at: string;
   updated_at: string;
   // joined fields
@@ -2069,7 +2071,7 @@ export async function getOrderItemSectorHistory(orderItemId: string, tenantId = 
   }
   const { data, error } = await getDbClient()
     .from('order_item_sector_history')
-    .select('*, machine:production_machines(*)')
+    .select('*, machine:production_machines(*), operator:profiles(*)')
     .eq('order_item_id', orderItemId)
     .eq('tenant_id', tenantId)
     .order('entered_at', { ascending: true });
@@ -2080,7 +2082,8 @@ export async function logSectorTransition(
   orderItemId: string,
   sector: string,
   machineId: string | null,
-  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+  operatorId?: string | null
 ) {
   if (isMockMode) {
     // 1. Fechar transição aberta anterior
@@ -2100,8 +2103,9 @@ export async function logSectorTransition(
       machine_id: machineId,
       entered_at: new Date().toISOString(),
       exited_at: null,
-      created_at: new Date().toISOString()
-    };
+      created_at: new Date().toISOString(),
+      operator_id: operatorId || null
+    } as any;
     mockOrderItemSectorHistory.push(newLog);
     return { data: newLog, error: null };
   }
@@ -2123,12 +2127,134 @@ export async function logSectorTransition(
       order_item_id: orderItemId,
       sector,
       machine_id: machineId,
-      entered_at: new Date().toISOString()
+      entered_at: new Date().toISOString(),
+      operator_id: operatorId || null
     }])
     .select()
     .single();
 
   return { data, error };
+}
+
+// --- OPERAÇÕES: OPERADORES DE PRODUÇÃO ---
+
+export interface ProductionOperator {
+  id: string;
+  tenant_id: string;
+  name: string;
+  pin_hash: string;
+  password_hash: string;
+  status: 'ATIVO' | 'INATIVO';
+  created_at: string;
+  updated_at: string;
+}
+
+let mockOperators: ProductionOperator[] = [
+  {
+    id: 'op-1',
+    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+    name: 'Operador Teste Alfa',
+    pin_hash: '$2a$10$sD8sL5fApe2V6eJb.sLHeOlyb.cQ9Nn9jD6lBskH0bJ/sSg0cKeve', // bcrypt para '1234'
+    password_hash: '$2a$10$sD8sL5fApe2V6eJb.sLHeOlyb.cQ9Nn9jD6lBskH0bJ/sSg0cKeve', // bcrypt para '123456'
+    status: 'ATIVO',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+];
+
+export async function getOperators(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    return { data: mockOperators.filter(o => o.tenant_id === tenantId), error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('profiles')
+    .select('id, full_name, email, status, created_at')
+    .eq('tenant_id', tenantId)
+    .eq('role', 'Produção')
+    .order('full_name', { ascending: true });
+
+  const mappedData = data ? data.map(p => ({
+    id: p.id,
+    name: p.full_name,
+    email: p.email,
+    status: p.status || 'ATIVO',
+    created_at: p.created_at
+  })) : null;
+
+  return { data: mappedData, error };
+}
+
+export async function getActiveOperators(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    return { data: mockOperators.filter(o => o.tenant_id === tenantId && o.status === 'ATIVO'), error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('profiles')
+    .select('id, full_name, status')
+    .eq('tenant_id', tenantId)
+    .eq('role', 'Produção')
+    .eq('status', 'ATIVO')
+    .order('full_name', { ascending: true });
+
+  const mappedData = data ? data.map(p => ({
+    id: p.id,
+    name: p.full_name,
+    status: p.status || 'ATIVO'
+  })) : null;
+
+  return { data: mappedData, error };
+}
+
+export async function createOperator(operator: any) {
+  const tenantId = operator.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+  if (isMockMode) {
+    const newOp = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+      ...operator,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    mockOperators.push(newOp);
+    return { data: newOp, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('profiles')
+    .insert([{ 
+      full_name: operator.name, 
+      email: operator.email,
+      role: 'Produção', 
+      tenant_id: tenantId, 
+      status: operator.status || 'ATIVO',
+      pin: operator.pin
+    }])
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function updateOperator(id: string, updates: any) {
+  if (isMockMode) {
+    mockOperators = mockOperators.map(o => o.id === id ? { ...o, ...updates, updated_at: new Date().toISOString() } : o);
+    const updated = mockOperators.find(o => o.id === id);
+    return { data: updated, error: null };
+  }
+  
+  const dbPayload: any = {};
+  if (updates.name !== undefined) dbPayload.full_name = updates.name;
+  if (updates.status !== undefined) dbPayload.status = updates.status;
+  if (updates.pin !== undefined) dbPayload.pin = updates.pin;
+
+  const { data, error } = await getDbClient()
+    .from('profiles')
+    .update(dbPayload)
+    .eq('id', id)
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function updateOperatorStatus(id: string, status: 'ATIVO' | 'INATIVO') {
+  return updateOperator(id, { status });
 }
 
 // --- OPERAÇÕES: EQUIPES DE MANUSEIO ---
@@ -2890,6 +3016,75 @@ export async function deleteShippingTypeConfig(id: string) {
     .eq('id', id);
 
   return { error };
+}
+
+// Histórico de transições de etapas do Kanban
+export async function getOrderItemStageHistory(orderItemId: string) {
+  if (isMockMode) {
+    return { data: [], error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('order_item_stage_history')
+    .select('*, from_stage:from_stage_id(*), to_stage:to_stage_id(*), changed_by:changed_by_profile_id(*)')
+    .eq('order_item_id', orderItemId)
+    .order('changed_at', { ascending: true });
+  return { data, error };
+}
+
+export async function getAllStageHistory(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    return { data: [], error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('order_item_stage_history')
+    .select('*, from_stage:from_stage_id(*), to_stage:to_stage_id(*)')
+    .eq('tenant_id', tenantId)
+    .order('changed_at', { ascending: true });
+  return { data, error };
+}
+
+// Histórico de alterações de notas/observações do item
+export async function logNotesTransition(
+  orderItemId: string,
+  notesType: 'OBSERVACOES' | 'ANOTACOES_INTERNAS',
+  oldContent: string | null,
+  newContent: string | null,
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+  operatorId?: string | null
+) {
+  if (isMockMode) {
+    return { data: null, error: null };
+  }
+
+  const { data, error } = await getDbClient()
+    .from('order_item_notes_history')
+    .insert([{
+      tenant_id: tenantId,
+      order_item_id: orderItemId,
+      notes_type: notesType,
+      old_content: oldContent,
+      new_content: newContent,
+      operator_id: operatorId || null
+    }])
+    .select()
+    .single();
+
+  return { data, error };
+}
+
+export async function getOrderItemNotesHistory(orderItemId: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    return { data: [], error: null };
+  }
+
+  const { data, error } = await getDbClient()
+    .from('order_item_notes_history')
+    .select('*, operator:profiles(*)')
+    .eq('order_item_id', orderItemId)
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: true });
+
+  return { data, error };
 }
 
 

@@ -49,13 +49,13 @@ ALTER TABLE packaging_settings ENABLE ROW LEVEL SECURITY;
 
 -- 5. Políticas RLS por tenant
 CREATE POLICY packaging_material_types_tenant_policy ON packaging_material_types
-    FOR ALL USING (tenant_id = auth.jwt()->'user_metadata'->>'tenant_id'::uuid);
+    FOR ALL USING (tenant_id = (auth.jwt()->'user_metadata'->>'tenant_id')::uuid);
 
 CREATE POLICY order_item_packaging_tenant_policy ON order_item_packaging
-    FOR ALL USING (tenant_id = auth.jwt()->'user_metadata'->>'tenant_id'::uuid);
+    FOR ALL USING (tenant_id = (auth.jwt()->'user_metadata'->>'tenant_id')::uuid);
 
 CREATE POLICY packaging_settings_tenant_policy ON packaging_settings
-    FOR ALL USING (tenant_id = auth.jwt()->'user_metadata'->>'tenant_id'::uuid);
+    FOR ALL USING (tenant_id = (auth.jwt()->'user_metadata'->>'tenant_id')::uuid);
 
 -- 6. Trigger de data de modificação para as novas tabelas
 CREATE TRIGGER update_packaging_material_types_modtime

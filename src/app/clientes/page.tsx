@@ -400,22 +400,24 @@ export default function ClientesPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <button
-            onClick={handleImportCustomers}
-            disabled={importing}
-            className="btn btn-secondary"
-            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
-          >
-            <RefreshCw size={14} className={importing ? 'spinner' : ''} />
-            <span>{importing ? 'Importando...' : 'Importar do Conta Azul'}</span>
-          </button>
+        {user?.role !== 'Vendedor' && (
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <button
+              onClick={handleImportCustomers}
+              disabled={importing}
+              className="btn btn-secondary"
+              style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
+            >
+              <RefreshCw size={14} className={importing ? 'spinner' : ''} />
+              <span>{importing ? 'Importando...' : 'Importar do Conta Azul'}</span>
+            </button>
 
-          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
-            <Plus size={14} />
-            <span>Novo Cliente</span>
-          </button>
-        </div>
+            <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
+              <Plus size={14} />
+              <span>Novo Cliente</span>
+            </button>
+          </div>
+        )}
       </header>
 
       {/* FILTER BAR */}
@@ -498,7 +500,7 @@ export default function ClientesPage() {
                   { key: 'phone', label: 'Telefone' },
                   { key: 'address', label: 'Endereço' },
                   { key: 'sync', label: 'Sincronização Conta Azul' },
-                  { key: 'actions', label: 'Ações' }
+                  ...(user?.role !== 'Vendedor' ? [{ key: 'actions', label: 'Ações' }] : [])
                 ].filter(col => visibleColumns[col.key] !== false).map((col) => (
                   <th key={col.key} style={getColStyle(col.key)}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
@@ -692,7 +694,7 @@ export default function ClientesPage() {
                       )}
 
                       {/* Ações */}
-                      {visibleColumns.actions !== false && (
+                      {user?.role !== 'Vendedor' && visibleColumns.actions !== false && (
                         <td style={getColStyle('actions')}>
                           <button
                             type="button"

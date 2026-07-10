@@ -11,10 +11,33 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoading) {
-      if (!user && pathname !== '/') {
-        router.push('/');
-      } else if (user && pathname === '/') {
-        router.push('/dashboard');
+      if (!user) {
+        if (pathname !== '/') {
+          router.push('/');
+        }
+      } else {
+        // Usuário autenticado
+        if (user.is_factory_account) {
+          if (pathname !== '/pedidos') {
+            router.push('/pedidos');
+          }
+        } else if (user.role === 'Produção') {
+          if (pathname !== '/operador-perfil') {
+            router.push('/operador-perfil');
+          }
+        } else if (user.role === 'Fábrica') {
+          if (pathname !== '/pedidos') {
+            router.push('/pedidos');
+          }
+        } else if (user.role === 'Vendedor') {
+          if (!['/pedidos', '/clientes', '/produtos'].includes(pathname) && !pathname.startsWith('/pedidos/') && !pathname.startsWith('/clientes/') && !pathname.startsWith('/produtos/')) {
+            router.push('/pedidos');
+          }
+        } else {
+          if (pathname === '/') {
+            router.push('/dashboard');
+          }
+        }
       }
     }
   }, [user, isLoading, pathname, router]);

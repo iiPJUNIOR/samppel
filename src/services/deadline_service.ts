@@ -48,6 +48,8 @@ export function parseDeadlineFromNotes(notes: string | null): Date | null {
  * Apenas colunas intermediárias (Produção, Manuseio, Embalagem, Expedição) são elegíveis para atraso automático.
  */
 export function isCardOverdue(item: any, stages: any[]): boolean {
+  if (item.order?.conta_azul_status === 'Em andamento') return false;
+  
   const notes = item.notes || item.order?.notes || null;
   const deadline = parseDeadlineFromNotes(notes);
   if (!deadline) return false;

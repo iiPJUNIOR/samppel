@@ -19,6 +19,7 @@ import {
   LogOut,
   Menu,
   X,
+  Coins,
 } from 'lucide-react';
 
 interface NavItem {
@@ -53,6 +54,12 @@ export default function Sidebar() {
     window.addEventListener('pedidos_view_mode_changed', handleModeChange);
     return () => window.removeEventListener('pedidos_view_mode_changed', handleModeChange);
   }, []);
+
+  useEffect(() => {
+    if (user?.is_factory_account) {
+      setIsCollapsed(true);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (isCollapsed) {
@@ -99,32 +106,44 @@ export default function Sidebar() {
       label: 'Dashboard',
       path: '/dashboard',
       icon: <LayoutDashboard size={17} />,
-      allowedRoles: ['Administrador', 'Comercial', 'Produção', 'Financeiro', 'Estoque', 'Expedição']
+      allowedRoles: ['Administrador']
     },
     {
       label: 'Pedidos',
       path: '/pedidos',
       icon: <ShoppingBag size={17} />,
-      allowedRoles: ['Administrador', 'Comercial', 'Produção', 'Financeiro', 'Estoque', 'Expedição']
+      allowedRoles: ['Administrador', 'Fábrica', 'Vendedor']
+    },
+    {
+      label: 'Saldos e Créditos',
+      path: '/pedidos/saldos',
+      icon: <Coins size={17} />,
+      allowedRoles: ['Administrador', 'Vendedor', 'Comercial']
     },
     {
       label: 'Clientes',
       path: '/clientes',
       icon: <Users size={17} />,
-      allowedRoles: ['Administrador', 'Comercial', 'Financeiro']
+      allowedRoles: ['Administrador', 'Vendedor']
     },
     {
       label: 'Produtos / Estoque',
       path: '/produtos',
       icon: <Package size={17} />,
-      allowedRoles: ['Administrador', 'Comercial', 'Produção', 'Estoque']
+      allowedRoles: ['Administrador']
     },
 
     {
       label: 'Relatórios',
       path: '/relatorios',
       icon: <Boxes size={17} />,
-      allowedRoles: ['Administrador', 'Comercial']
+      allowedRoles: ['Administrador']
+    },
+    {
+      label: 'Dados do Operador',
+      path: '/operador-perfil',
+      icon: <Users size={17} />,
+      allowedRoles: ['Administrador', 'Produção']
     },
     {
       label: 'Configurações',
@@ -136,7 +155,12 @@ export default function Sidebar() {
 
   if (!user) return null;
 
-  const visibleNavItems = navItems.filter(item => item.allowedRoles.includes(user.role));
+  const visibleNavItems = navItems.filter(item => {
+    if (user.is_factory_account) {
+      return item.path === '/pedidos';
+    }
+    return item.allowedRoles.includes(user.role);
+  });
 
   const initials = user.full_name
     ? user.full_name.split(' ').slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()
@@ -222,59 +246,7 @@ export default function Sidebar() {
         {/* ── Navigation ───────────────────────────── */}
         <nav className={styles.navSection}>
           {visibleNavItems.map((item) => {
-            if (item.path === '/pedidos') {
-              const isActive = pathname === '/pedidos' || pathname?.startsWith('/pedidos/');
-              const showConfig = user.role === 'Administrador';
-              const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
-              const showSaldos = user?.role === 'Administrador' || isSupervisor;
-
-              return (
-                <div key={item.path} className={styles.submenuContainer}>
-                  <button
-                    onClick={() => setIsPedidosOpen(!isPedidosOpen)}
-                    className={`${styles.navLink} ${styles.submenuTrigger} ${isActive ? styles.active : ''}`}
-                  >
-                    <div className={styles.navLinkContent}>
-                      {item.icon}
-                      <span>{item.label}</span>
-                    </div>
-                    <ChevronDown
-                      size={14}
-                      className={`${styles.chevron} ${isPedidosOpen ? styles.chevronOpen : ''}`}
-                    />
-                  </button>
-
-                  {isPedidosOpen && (
-                    <div className={styles.submenu}>
-                      <Link
-                        href="/pedidos"
-                        className={`${styles.submenuLink} ${pathname === '/pedidos' ? styles.submenuActive : ''}`}
-                      >
-                        Painel Kanban
-                      </Link>
-                      {showSaldos && (
-                        <Link
-                          href="/pedidos/saldos"
-                          className={`${styles.submenuLink} ${pathname === '/pedidos/saldos' ? styles.submenuActive : ''}`}
-                        >
-                          Saldos e Créditos
-                        </Link>
-                      )}
-                      {showConfig && (
-                        <Link
-                          href="/pedidos/configuracoes"
-                          className={`${styles.submenuLink} ${pathname === '/pedidos/configuracoes' ? styles.submenuActive : ''}`}
-                        >
-                          Configurações
-                        </Link>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
-            const isActive = pathname === item.path || pathname?.startsWith(item.path + '/');
+            const isActive = pathname === item.path || (item.path !== '/' && pathname?.startsWith(item.path + '/'));
             return (
               <Link
                 key={item.path}
@@ -300,18 +272,20 @@ export default function Sidebar() {
             </div>
           </div>
 
-          {user.actual_role === 'Administrador' ? (
+          {user.is_factory_account ? (
+            <span className={styles.roleBadge} style={{ backgroundColor: 'var(--warning-bg)', color: 'var(--warning)', borderColor: 'var(--warning)' }}>
+              Terminal Fábrica
+            </span>
+          ) : user.actual_role === 'Administrador' ? (
             <select
               value={user.role}
               onChange={(e) => changeActiveRole(e.target.value as UserRole)}
               className={styles.roleSelector}
             >
               <option value="Administrador">Administrador</option>
-              <option value="Comercial">Comercial</option>
               <option value="Produção">Produção</option>
-              <option value="Financeiro">Financeiro</option>
-              <option value="Estoque">Estoque</option>
-              <option value="Expedição">Expedição</option>
+              <option value="Fábrica">Fábrica</option>
+              <option value="Vendedor">Vendedor</option>
             </select>
           ) : (
             <span className={styles.roleBadge}>{user.role}</span>

@@ -1255,12 +1255,16 @@ export class ContaAzulService {
               if (!paymentReleasedDate) paymentReleasedDate = paymentDateStr;
             }
 
+            const dbStatus = (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
+              ? 'CONCILIADO'
+              : (realInstStatus === 'CANCELADO' ? 'CANCELADO' : 'PENDENTE');
+
             transactionsPayload.push({
               tenant_id: this.tenantId,
               order_id: orderId,
               type: 'RECEITA',
               amount: inst.valor || inst.value || 0,
-              status: realInstStatus,
+              status: dbStatus,
               description: `Parcela ${installmentNumber}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
               due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
               payment_date: (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
@@ -1504,7 +1508,94 @@ export class ContaAzulService {
     return 'RETIRADA';
   }
 
-  async importSingleOrder(saleId: string) {
+  async getSaleIdByNumber(orderNumber: string | number): Promise<string> {
+    const token = await this.getValidAccessToken();
+    const cleanNumber = String(orderNumber).replace(/\D/g, '');
+    if (!cleanNumber) {
+      throw new Error(`Número de pedido inválido: ${orderNumber}`);
+    }
+
+    const now = new Date();
+    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+    // Mapeamento de intervalos de data do presente para o passado
+    // Cada janela é estritamente limitada com data_inicio e data_fim para
+    // garantir que o número de correspondências parciais por lote seja pequeno.
+    const intervals = [
+      // Janela 1: Últimos 30 dias (cobre 95% dos casos de uso de importação manual)
+      {
+        start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        end: now,
+        name: 'Últimos 30 dias'
+      },
+      // Janela 2: De 30 a 90 dias atrás (cobre pedidos recentes criados nos meses anteriores)
+      {
+        start: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
+        end: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        name: 'De 30 a 90 dias atrás'
+      },
+      // Janela 3: De 90 a 365 dias atrás (cobre o último ano completo)
+      {
+        start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000),
+        end: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
+        name: 'Último ano'
+      },
+      // Janela 4: Histórico geral antigo (desde 2020)
+      {
+        start: new Date('2020-01-01'),
+        end: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000),
+        name: 'Histórico antigo (desde 2020)'
+      }
+    ];
+
+    for (const interval of intervals) {
+      let page = 1;
+      const size = 100;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=${size}&pagina=${page}&data_inicio=${formatDate(interval.start)}&data_fim=${formatDate(interval.end)}`;
+        const res = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+          throw new Error(`Erro ao buscar venda no Conta Azul (${interval.name}, pág ${page}): ${await res.text()}`);
+        }
+
+        const sales = await res.json();
+        const salesList = sales?.itens || (Array.isArray(sales) ? sales : (sales?.vendas || sales?.data || []));
+
+        if (salesList.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        const exactSale = salesList.find((s: any) => {
+          const numStr = String(s.numero || s.venda?.numero || s.number || '').trim();
+          return numStr === cleanNumber;
+        });
+
+        if (exactSale) {
+          const saleId = exactSale.id || exactSale.uuid || exactSale.venda?.id;
+          if (!saleId) {
+            throw new Error(`ID da venda de número ${cleanNumber} não disponível na API.`);
+          }
+          return saleId;
+        }
+
+        if (salesList.length < size) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      }
+    }
+
+    throw new Error(`Pedido de número ${cleanNumber} não foi encontrado no Conta Azul.`);
+  }
+
+  async importSingleOrder(saleId: string, onProgress?: (step: string, progress: number) => void) {
     const token = await this.getValidAccessToken();
     const dbClient = supabaseAdmin || supabase;
     if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
@@ -1696,6 +1787,7 @@ export class ContaAzulService {
     const opNumber = extractOpNumber(notesStr);
 
     const orderPayload: any = {
+      tenant_id: this.tenantId,
       customer_id: customerId,
       product_id: productId || null,
       pv_number: `PV-${saleDetail.venda?.numero || saleSummary.numero}`,
@@ -1729,16 +1821,22 @@ export class ContaAzulService {
 
     if (existingOrder) {
       orderId = existingOrder.id;
-      await dbClient
+      const { error: updErr } = await dbClient
         .from('orders')
         .update(orderPayload)
         .eq('id', orderId);
+      if (updErr) {
+        throw new Error(`Erro ao atualizar pedido no banco: ${updErr.message}`);
+      }
     } else {
-      const { data: newOrder } = await dbClient
+      const { data: newOrder, error: insErr } = await dbClient
         .from('orders')
         .insert([orderPayload])
         .select('id')
         .single();
+      if (insErr) {
+        throw new Error(`Erro ao inserir novo pedido no banco: ${insErr.message}`);
+      }
       if (newOrder) orderId = newOrder.id;
     }
 
@@ -1746,8 +1844,10 @@ export class ContaAzulService {
     if (orderId) {
       const { data: existingItems } = await dbClient
         .from('order_items')
-        .select('id, name')
+        .select('id, name, friendly_id, item_index')
         .eq('order_id', orderId);
+
+      const processedIds = new Set<string>();
 
       for (let i = 0; i < saleItems.length; i++) {
         const item = saleItems[i];
@@ -1766,20 +1866,56 @@ export class ContaAzulService {
           order_id: orderId,
           tenant_id: this.tenantId,
           item_index: i + 1,
-          name: item.descricao || item.nome || `Item ${i+1}`,
+          name: item.nome || item.descricao || `Item ${i+1}`,
           product_id: itemProdId || null,
-          print_run: item.quantidade || 1000,
+          print_run: Math.round(Number(item.quantidade) || 1000),
           boxes_count: 0,
           packaging_type: 'CAIXA' as const,
           notes: item.description || item.descricao || '',
           friendly_id: `PV-${saleDetail.venda?.numero || saleSummary.numero}/${i + 1}`
         };
 
-        const existingItem = existingItems?.find((ei: any) => ei.name === itemPayload.name);
+        const existingItem = existingItems?.find((ei: any) => 
+          !processedIds.has(ei.id) && (
+            (ei.friendly_id && ei.friendly_id === itemPayload.friendly_id) || 
+            (ei.item_index && ei.item_index === itemPayload.item_index) ||
+            ei.name === itemPayload.name
+          )
+        );
+
         if (existingItem) {
-          await dbClient.from('order_items').update(itemPayload).eq('id', existingItem.id);
+          processedIds.add(existingItem.id);
+          const { error: updItemErr } = await dbClient.from('order_items').update(itemPayload).eq('id', existingItem.id);
+          if (updItemErr) {
+            throw new Error(`Erro ao atualizar item do pedido no banco: ${updItemErr.message}`);
+          }
         } else {
-          await dbClient.from('order_items').insert([itemPayload]);
+          const { data: insItemData, error: insItemErr } = await dbClient
+            .from('order_items')
+            .insert([itemPayload])
+            .select('id')
+            .single();
+          if (insItemErr) {
+            throw new Error(`Erro ao inserir item do pedido no banco: ${insItemErr.message}`);
+          }
+          if (insItemData) {
+            processedIds.add(insItemData.id);
+          }
+        }
+      }
+
+      // Deletar os itens duplicados antigos órfãos que não foram processados nesta importação
+      if (existingItems && existingItems.length > 0) {
+        const idsToDelete = existingItems.map(ei => ei.id).filter(id => !processedIds.has(id));
+        if (idsToDelete.length > 0) {
+          const { error: delItemsErr } = await dbClient
+            .from('order_items')
+            .delete()
+            .eq('order_id', orderId)
+            .in('id', idsToDelete);
+          if (delItemsErr) {
+            console.error('Erro ao deletar itens de pedido duplicados/órfãos:', delItemsErr);
+          }
         }
       }
 
@@ -1833,12 +1969,16 @@ export class ContaAzulService {
           realInstStatus = (inst.situacao || '').toUpperCase() || 'PENDENTE';
         }
 
+        const dbStatus = (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
+          ? 'CONCILIADO'
+          : (realInstStatus === 'CANCELADO' ? 'CANCELADO' : 'PENDENTE');
+
         transactionsPayload.push({
           tenant_id: this.tenantId,
           order_id: orderId,
           type: 'RECEITA',
           amount: inst.valor || inst.value || 0,
-          status: realInstStatus,
+          status: dbStatus,
           description: `Parcela ${installmentNumber}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
           due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
           payment_date: (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
@@ -1849,7 +1989,10 @@ export class ContaAzulService {
       }
 
       if (transactionsPayload.length > 0) {
-        await dbClient.from('financial_transactions').insert(transactionsPayload);
+        const { error: finErr } = await dbClient.from('financial_transactions').insert(transactionsPayload);
+        if (finErr) {
+          throw new Error(`Erro ao salvar parcelas financeiras no banco: ${finErr.message}`);
+        }
       }
 
       if (totalPaidInstallments > 0) {

@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/services/supabase';
 
-export type UserRole = 'Administrador' | 'Comercial' | 'Produção' | 'Financeiro' | 'Estoque' | 'Expedição';
+export type UserRole = 'Administrador' | 'Comercial' | 'Produção' | 'Financeiro' | 'Estoque' | 'Expedição' | 'Fábrica' | 'Vendedor';
 
 export interface UserProfile {
   id: string;
@@ -12,6 +12,9 @@ export interface UserProfile {
   role: UserRole;
   actual_role?: UserRole;
   email: string;
+  force_password_change?: boolean;
+  pin?: string;
+  is_factory_account?: boolean;
 }
 
 interface AuthContextType {

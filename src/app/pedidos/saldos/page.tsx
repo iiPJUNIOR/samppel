@@ -24,9 +24,9 @@ import {
 export default function SaldosCreditosPage() {
   const { user } = useAuth();
   
-  // Controle de Permissão
+  // Controle de Permissão (Administrador, Comercial, Vendedor ou Supervisor têm acesso)
   const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
-  const isAuthorized = user?.role === 'Administrador' || isSupervisor;
+  const isAuthorized = user?.role === 'Administrador' || user?.role === 'Vendedor' || user?.role === 'Comercial' || isSupervisor;
 
   // Listas de dados
   const [credits, setCredits] = useState<any[]>([]);
@@ -59,8 +59,8 @@ export default function SaldosCreditosPage() {
       setCustomers(custRes.data || []);
       setProducts(prodRes.data || []);
       
-      // Filtrar créditos para conter apenas créditos de falta (PENDENCIA_ENTREGA)
-      const activeCredits = (creditsRes.data || []).filter((c: any) => c.credit_type === 'PENDENCIA_ENTREGA');
+      // Filtrar créditos para conter créditos de falta (PENDENCIA_ENTREGA) e cortesia (CORTESIA_SOBRA)
+      const activeCredits = (creditsRes.data || []).filter((c: any) => c.credit_type === 'PENDENCIA_ENTREGA' || c.credit_type === 'CORTESIA_SOBRA');
       setCredits(activeCredits);
       
       // Armazena estoques de personalizados
@@ -180,7 +180,7 @@ export default function SaldosCreditosPage() {
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Scale size={16} />
-          <span>Créditos por Falta ({credits.length})</span>
+          <span>Créditos e Saldos ({credits.length})</span>
         </button>
         
         <button 
@@ -277,8 +277,9 @@ export default function SaldosCreditosPage() {
                 <tr>
                   <th>Cliente</th>
                   <th>Produto de Referência</th>
-                  <th>Qtd. Original Faltante</th>
-                  <th>Crédito Disponível</th>
+                  <th>Tipo de Saldo</th>
+                  <th>Qtd. Original</th>
+                  <th>Saldo Disponível</th>
                   <th>Origem do Ajuste</th>
                   <th>Data do Evento</th>
                   <th>Notas / Justificativa</th>
@@ -286,11 +287,11 @@ export default function SaldosCreditosPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={7} />)
+                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={8} />)
                 ) : filteredCredits.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-                      Nenhum crédito de falta de entrega ativo encontrado.
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                      Nenhum saldo ou crédito de falta/cortesia ativo encontrado.
                     </td>
                   </tr>
                 ) : (
@@ -298,8 +299,19 @@ export default function SaldosCreditosPage() {
                     <tr key={c.id}>
                       <td style={{ fontWeight: 600 }}>{c.customer?.name || 'Cliente'}</td>
                       <td style={{ fontWeight: 500 }}>{c.product?.name || 'Produto'}</td>
+                      <td>
+                        {c.credit_type === 'PENDENCIA_ENTREGA' ? (
+                          <span className="badge" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px' }}>
+                            Falta (Itens na Casa)
+                          </span>
+                        ) : (
+                          <span className="badge" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px' }}>
+                            Cortesia (Cliente Deve)
+                          </span>
+                        )}
+                      </td>
                       <td>{c.original_quantity?.toLocaleString('pt-BR')} un</td>
-                      <td style={{ fontWeight: 700, color: 'hsl(346.8, 77.2%, 49.8%)' }}>
+                      <td style={{ fontWeight: 700, color: c.credit_type === 'PENDENCIA_ENTREGA' ? 'var(--success)' : 'hsl(346.8, 77.2%, 49.8%)' }}>
                         {c.remaining_quantity?.toLocaleString('pt-BR')} un
                       </td>
                       <td>

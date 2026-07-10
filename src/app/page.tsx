@@ -15,7 +15,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<UserRole>('Administrador');
+  const [role, setRole] = useState<UserRole>('Produção');
 
   const [showRoleSelector, setShowRoleSelector] = useState(false);
   const [tempProfile, setTempProfile] = useState<any>(null);
@@ -25,7 +25,13 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user && !showRoleSelector) {
-      router.push('/dashboard');
+      if (user.role === 'Produção') {
+        router.push('/operador-perfil');
+      } else if (user.role === 'Fábrica') {
+        router.push('/pedidos');
+      } else {
+        router.push('/dashboard');
+      }
     }
   }, [user, router, showRoleSelector]);
 
@@ -53,7 +59,13 @@ export default function LoginPage() {
           setTempProfile(data.profile);
           setShowRoleSelector(true);
         } else {
-          router.push('/dashboard');
+          if (data?.profile && data.profile.role === 'Produção') {
+            router.push('/operador-perfil');
+          } else if (data?.profile && data.profile.role === 'Fábrica') {
+            router.push('/pedidos');
+          } else {
+            router.push('/dashboard');
+          }
         }
       }
     } catch (err: any) {
@@ -636,23 +648,7 @@ export default function LoginPage() {
                     </div>
                   </div>
 
-                  {isSignUpMode && (
-                    <div className="lp-field">
-                      <label htmlFor="role">Cargo</label>
-                      <select
-                        id="role"
-                        className="lp-select"
-                        required
-                        value={role}
-                        onChange={(e) => setRole(e.target.value as UserRole)}
-                      >
-                        <option value="Administrador">Administrador</option>
-                        <option value="Comercial">Comercial</option>
-                        <option value="Produção">Produção</option>
-                        <option value="Financeiro">Financeiro</option>
-                      </select>
-                    </div>
-                  )}
+                  {/* Cargo selecionado automaticamente como Produção */}
 
                   <button type="submit" disabled={loading} className="lp-btn">
                     {loading ? (
