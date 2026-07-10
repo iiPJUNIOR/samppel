@@ -36,7 +36,9 @@ import {
   Gauge,
   Coins,
   History,
-  TrendingDown
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 
 const formatHoursToRealTime = (decimalHours: number | string): string => {
@@ -127,6 +129,7 @@ export default function RelatoriosPage() {
   const [traceOrderItems, setTraceOrderItems] = useState<any[]>([]);
   const [traceSelectedItemId, setTraceSelectedItemId] = useState<string>('all');
   const [traceSelectedOrder, setTraceSelectedOrder] = useState<any | null>(null);
+  const [traceSortOrder, setTraceSortOrder] = useState<'asc' | 'desc'>('asc');
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
 
@@ -235,6 +238,7 @@ export default function RelatoriosPage() {
     setTraceOrderItems([]);
     setTraceSelectedItemId('all');
     setTraceSelectedOrder(null);
+    setTraceSortOrder('asc');
 
     try {
       const cleanNum = traceSearchNumber.replace(/\D/g, '');
@@ -1307,29 +1311,64 @@ export default function RelatoriosPage() {
                 borderRadius: 'var(--radius-md)',
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'space-between',
                 flexWrap: 'wrap',
-                gap: '0.5rem',
+                gap: '0.75rem',
                 fontSize: '0.85rem'
               }}>
-                <span style={{ color: 'var(--text-muted)' }}>Histórico carregado do pedido:</span>
+                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Histórico carregado do pedido:</span>
+                  <button
+                    type="button"
+                    onClick={() => openOrderDetails(traceSelectedOrder)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'var(--primary)',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      fontSize: '0.85rem'
+                    }}
+                    title="Clique para abrir os detalhes deste pedido"
+                  >
+                    PV-{traceSelectedOrder.pv_number?.replace(/\D/g, '')}
+                  </button>
+                  <span style={{ color: 'var(--text-muted)' }}>&bull; Cliente: <strong>{customers.find(c => c.id === traceSelectedOrder.customer_id)?.name || 'Cliente Desconhecido'}</strong></span>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => openOrderDetails(traceSelectedOrder)}
+                  onClick={() => setTraceSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    color: 'var(--primary)',
-                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.3rem 0.60rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    color: 'var(--text)',
                     cursor: 'pointer',
-                    textDecoration: 'underline',
-                    fontSize: '0.85rem'
+                    transition: 'background-color 0.2s'
                   }}
-                  title="Clique para abrir os detalhes deste pedido"
+                  title={traceSortOrder === 'asc' ? 'Exibindo: Mais antigos primeiro (Ordem crescente). Clique para inverter.' : 'Exibindo: Mais recentes primeiro (Ordem decrescente). Clique para inverter.'}
                 >
-                  PV-{traceSelectedOrder.pv_number?.replace(/\D/g, '')}
+                  {traceSortOrder === 'asc' ? (
+                    <>
+                      <span>Antigos primeiro</span>
+                      <ArrowUpRight size={13} style={{ color: '#2ed573' }} />
+                    </>
+                  ) : (
+                    <>
+                      <span>Recentes primeiro</span>
+                      <ArrowDownRight size={13} style={{ color: 'var(--danger)' }} />
+                    </>
+                  )}
                 </button>
-                <span style={{ color: 'var(--text-muted)' }}>&bull; Cliente: <strong>{customers.find(c => c.id === traceSelectedOrder.customer_id)?.name || 'Cliente Desconhecido'}</strong></span>
               </div>
             )}
 
@@ -1383,12 +1422,14 @@ export default function RelatoriosPage() {
               let filteredEvents = [...traceTimeline];
               if (traceSelectedItemId !== 'all') {
                 filteredEvents = filteredEvents.filter(evt => evt.order_item_id === traceSelectedItemId);
-                // Ordenar cronologicamente crescente para ver o fluxo sequencial (mais antigo primeiro)
-                filteredEvents.sort((a, b) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime());
-              } else {
-                // Se for todos, ordenamos decrescente (mais recente no topo)
-                filteredEvents.sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
               }
+
+              // Ordenar com base no estado traceSortOrder (Antigos primeiro ou Recentes primeiro)
+              filteredEvents.sort((a, b) => {
+                const timeA = new Date(a.changed_at).getTime();
+                const timeB = new Date(b.changed_at).getTime();
+                return traceSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+              });
 
               if (filteredEvents.length === 0) return null;
 
@@ -1398,6 +1439,8 @@ export default function RelatoriosPage() {
                     const cleanFriendlyId = (traceOrderItems.length === 1 && evt.itemFriendlyId.endsWith('/1'))
                       ? evt.itemFriendlyId.substring(0, evt.itemFriendlyId.length - 2)
                       : evt.itemFriendlyId;
+
+                    const labelType = traceOrderItems.length > 1 ? 'Item' : 'Pedido';
 
                     return (
                       <div key={evt.id || idx} style={{ position: 'relative', marginBottom: '0.5rem' }}>
@@ -1419,7 +1462,7 @@ export default function RelatoriosPage() {
                         <div style={{ fontSize: '0.825rem', marginTop: '2px', color: 'var(--text)' }}>
                           {evt.eventType === 'sector_change' ? (
                             <>
-                              Item <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> teve o Setor de Produção Física alterado para{' '}
+                              {labelType} <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> teve o Setor de Produção Física alterado para{' '}
                               <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.sector}</span>
                               {evt.machineName && evt.machineName !== 'Sem Máquina' && (
                                 <>
@@ -1429,7 +1472,7 @@ export default function RelatoriosPage() {
                             </>
                           ) : (
                             <>
-                              Item <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> foi movido de{' '}
+                              {labelType} <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> foi movido de{' '}
                               <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.from_stage?.name || 'Início'}</span> para{' '}
                               <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.to_stage?.name || 'Final'}</span>
                             </>
