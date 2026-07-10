@@ -753,8 +753,9 @@ export default function PedidosPage() {
     // ---------------------------------------------------------------
     // RESOLVER OPERADOR AUTENTICADO DA MOVIMENTAÇÃO CORRENTE
     // ---------------------------------------------------------------
-    const activeOpId = operatorId || currentOperator.current?.id;
-    const activeOpName = operatorName || currentOperator.current?.name;
+    const isAdmin = user?.role === 'Administrador';
+    const activeOpId = operatorId || currentOperator.current?.id || (isAdmin ? user?.id : null);
+    const activeOpName = operatorName || currentOperator.current?.name || (isAdmin ? (user?.full_name || user?.email) : null);
 
     // Se o operatorId veio como parâmetro direto da autenticação bem-sucedida, salvamos na ref
     if (operatorId && operatorName) {
@@ -762,9 +763,9 @@ export default function PedidosPage() {
     }
 
     // ---------------------------------------------------------------
-    // REGRA DE AUTENTICAÇÃO SECUNDÁRIA DO OPERADOR (OBRIGATÓRIO PARA TODOS)
+    // REGRA DE AUTENTICAÇÃO SECUNDÁRIA DO OPERADOR (EXIGIDO APENAS PARA NÃO-ADMINS)
     // ---------------------------------------------------------------
-    if (!activeOpId) {
+    if (!isAdmin && !activeOpId) {
       setPendingKanbanMove({ item, targetStageId });
       setIsOpAuthOpen(true);
       return;
