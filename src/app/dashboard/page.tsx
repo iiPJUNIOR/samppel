@@ -53,29 +53,58 @@ export default function DashboardPage() {
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [updatingPayments, setUpdatingPayments] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncStep, setSyncStep] = useState('');
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncResult, setSyncResult] = useState<any | null>(null);
 
   const handleUpdatePayments = async () => {
     if (updatingPayments) return;
     setUpdatingPayments(true);
+    setSyncResult(null);
+    setSyncStep('Iniciando comunicação com o Conta Azul...');
+    setSyncProgress(5);
+    setIsSyncModalOpen(true);
+
     try {
-      // Sincronizar em lote todos os pedidos do modal
-      for (let i = 0; i < filteredOrders.length; i++) {
+      const total = filteredOrders.length;
+      let successCount = 0;
+
+      for (let i = 0; i < total; i++) {
         const o = filteredOrders[i];
-        const res = await fetch('/api/sync/import-single-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: o.id, userRole: user?.role })
-        });
-        if (!res.ok) {
-          console.warn(`Falha ao sincronizar faturamento do pedido ${o.pv_number}`);
+        const percent = Math.round(5 + ((i / total) * 90));
+        setSyncProgress(percent);
+        setSyncStep(`Atualizando faturamento PV-${o.pv_number?.replace(/\D/g, '')}...`);
+
+        try {
+          const res = await fetch('/api/sync/import-single-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: o.id, userRole: user?.role })
+          });
+          if (res.ok) {
+            successCount++;
+          } else {
+            console.warn(`Falha ao sincronizar faturamento do pedido ${o.pv_number}`);
+          }
+        } catch (err) {
+          console.error(`Erro ao sincronizar PV-${o.pv_number}:`, err);
         }
       }
-      alert('Sincronização de pagamentos concluída com sucesso!');
+
+      setSyncProgress(100);
+      setSyncStep('Atualização de pagamentos finalizada!');
+      setSyncResult({
+        success: true,
+        message: `Sucesso: ${successCount} de ${total} pagamentos atualizados com o Conta Azul.`
+      });
       await fetchData();
-      setIsListModalOpen(false);
     } catch (err) {
       console.error('Erro na sincronização de pagamentos:', err);
-      alert('Erro inesperado ao sincronizar pagamentos.');
+      setSyncResult({
+        success: false,
+        message: 'Erro inesperado durante a atualização dos pagamentos.'
+      });
     } finally {
       setUpdatingPayments(false);
     }
@@ -656,6 +685,121 @@ export default function DashboardPage() {
                 </table>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE STATUS DE ATUALIZAÇÃO CONTA AZUL (PAGAMENTOS EM LOTE) */}
+      {isSyncModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '2rem', maxWidth: '420px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', margin: 0 }}>
+              <RefreshCw 
+                size={20} 
+                style={{ 
+                  color: 'var(--primary)', 
+                  animation: updatingPayments ? 'spin 1.2s linear infinite' : 'none' 
+                }} 
+              />
+              Atualização de Pagamentos
+            </h2>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '1.5rem', fontWeight: 500 }}>
+              Conta Azul &bull; Em lote
+            </div>
+
+            {/* Progresso */}
+            <div style={{ margin: '1.5rem 0' }}>
+              <div style={{
+                height: '8px',
+                width: '100%',
+                backgroundColor: 'var(--border)',
+                borderRadius: '999px',
+                overflow: 'hidden',
+                position: 'relative',
+                marginBottom: '0.75rem'
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${syncProgress}%`,
+                  backgroundColor: syncResult && !syncResult.success ? 'var(--danger)' : 'var(--primary)',
+                  borderRadius: '999px',
+                  transition: 'width 0.3s ease-out'
+                }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 500, textAlign: 'left', flex: 1, paddingRight: '0.5rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={syncStep}>
+                  {syncStep}
+                </span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text)', fontWeight: 700 }}>
+                  {syncProgress}%
+                </span>
+              </div>
+            </div>
+
+            {/* Resultados / Erros */}
+            {syncResult && (
+              <div style={{
+                backgroundColor: syncResult.success ? 'rgba(46, 213, 115, 0.1)' : 'rgba(255, 71, 87, 0.1)',
+                border: `1px solid ${syncResult.success ? '#2ed573' : 'var(--danger)'}`,
+                borderRadius: 'var(--radius-md)',
+                padding: '1rem',
+                marginBottom: '1.5rem',
+                textAlign: 'left'
+              }}>
+                {syncResult.success ? (
+                  <div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: '#2ed573', fontSize: '0.9rem', fontWeight: 700 }}>
+                      Sincronizado com Sucesso
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {syncResult.message}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--danger)', fontSize: '0.9rem', fontWeight: 700 }}>
+                      Falha na Sincronização
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                      {syncResult.message}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Botão de Fechar */}
+            <button
+              disabled={updatingPayments}
+              onClick={() => {
+                setIsSyncModalOpen(false);
+                setIsListModalOpen(false);
+              }}
+              className="btn btn-secondary"
+              style={{
+                width: '100%',
+                padding: '0.6rem',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                borderRadius: 'var(--radius-md)',
+                cursor: updatingPayments ? 'not-allowed' : 'pointer',
+                opacity: updatingPayments ? 0.6 : 1,
+                border: '1px solid var(--border)',
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                color: 'var(--text)'
+              }}
+            >
+              {updatingPayments ? 'Aguarde finalização...' : 'Fechar'}
+            </button>
           </div>
         </div>
       )}
