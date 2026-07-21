@@ -430,11 +430,13 @@ export default function PedidosPage() {
     setBlockedPaymentTargetStageId('');
   };
 
-  // Estados de Notificação Toast e Drag/Drop Interativo
+  // Estados de Notificação Toast, Drag/Drop e Filtros Mobile
   const [toastNotification, setToastNotification] = useState<{ message: string; type: 'success' | 'info'; id: number } | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+
 
   const showToast = (message: string, type: 'success' | 'info' = 'success') => {
     setToastNotification({ message, type, id: Date.now() });
@@ -2791,263 +2793,305 @@ export default function PedidosPage() {
         
         {!['Produção', 'Fábrica'].includes(user?.role || '') && (
           <div className="page-header-actions">
-            <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.65rem',
-            backgroundColor: 'var(--surface-hover)',
-            padding: '0.25rem 0.5rem',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border)',
-            flexFlow: 'row nowrap'
-          }}>
-            {/* Opção 1: Importar por Período */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem', whiteSpace: 'nowrap' }}>Importar por Período:</span>
-              <input 
-                type="date" 
-                value={importStartDate} 
-                onChange={(e) => setImportStartDate(e.target.value)}
-                disabled={importing}
-                style={{
-                  padding: '0.25rem 0.4rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: 'var(--surface)',
-                  color: 'var(--text)',
-                  outline: 'none',
-                  width: '115px'
-                }}
-              />
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
-              <input 
-                type="date" 
-                value={importEndDate} 
-                onChange={(e) => setImportEndDate(e.target.value)}
-                disabled={importing}
-                style={{
-                  padding: '0.25rem 0.4rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: 'var(--surface)',
-                  color: 'var(--text)',
-                  outline: 'none',
-                  width: '115px'
-                }}
-              />
-              <button 
-                onClick={handleImportOrders} 
-                disabled={importing}
-                className="btn btn-secondary" 
-                style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-              >
-                <RefreshCw size={12} className={importing ? 'spinner' : ''} />
-                <span>{importing ? 'Sincronizando...' : 'Sincronizar'}</span>
-              </button>
-            </div>
+            <div className="import-action-bar">
+              {/* Opção 1: Importar por Período */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem', whiteSpace: 'nowrap' }}>Importar Período:</span>
+                <input 
+                  type="date" 
+                  value={importStartDate} 
+                  onChange={(e) => setImportStartDate(e.target.value)}
+                  disabled={importing}
+                  style={{
+                    padding: '0.25rem 0.4rem',
+                    fontSize: '0.75rem',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--surface)',
+                    color: 'var(--text)',
+                    outline: 'none',
+                    width: '110px'
+                  }}
+                />
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
+                <input 
+                  type="date" 
+                  value={importEndDate} 
+                  onChange={(e) => setImportEndDate(e.target.value)}
+                  disabled={importing}
+                  style={{
+                    padding: '0.25rem 0.4rem',
+                    fontSize: '0.75rem',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--surface)',
+                    color: 'var(--text)',
+                    outline: 'none',
+                    width: '110px'
+                  }}
+                />
+                <button 
+                  onClick={handleImportOrders} 
+                  disabled={importing}
+                  className="btn btn-secondary" 
+                  style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                >
+                  <RefreshCw size={12} className={importing ? 'spinner' : ''} />
+                  <span>{importing ? 'Sincronizando...' : 'Sincronizar'}</span>
+                </button>
+              </div>
 
-            {/* Divisor Vertical */}
-            <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)', alignSelf: 'center' }} />
+              {/* Divisor Vertical */}
+              <div className="import-divider-vertical" style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)', alignSelf: 'center' }} />
 
-            {/* Opção 2: Importar Pedido */}
-            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
-                <Download size={12} />
-                Importar Pedido:
-              </span>
-              <input 
-                type="text" 
-                placeholder="Ex: 406"
-                value={pullOrderNumber} 
-                onChange={(e) => setPullOrderNumber(e.target.value)}
-                disabled={importing}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleSyncOrderByNumber(pullOrderNumber);
-                  }
-                }}
-                style={{
-                  padding: '0.25rem 0.4rem',
-                  fontSize: '0.75rem',
-                  width: '70px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: 'var(--surface)',
-                  color: 'var(--text)',
-                  outline: 'none'
-                }}
-              />
-              <button 
-                onClick={() => handleSyncOrderByNumber(pullOrderNumber)} 
-                disabled={importing || !pullOrderNumber.trim()}
-                className="btn btn-secondary" 
-                style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-              >
-                <Download size={12} />
-                <span>Importar</span>
-              </button>
+              {/* Opção 2: Importar Pedido por Número */}
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
+                  <Download size={12} />
+                  Importar Nº:
+                </span>
+                <input 
+                  type="text" 
+                  placeholder="Ex: 406"
+                  value={pullOrderNumber} 
+                  onChange={(e) => setPullOrderNumber(e.target.value)}
+                  disabled={importing}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSyncOrderByNumber(pullOrderNumber);
+                    }
+                  }}
+                  style={{
+                    padding: '0.25rem 0.4rem',
+                    fontSize: '0.75rem',
+                    width: '75px',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--surface)',
+                    color: 'var(--text)',
+                    outline: 'none'
+                  }}
+                />
+                <button 
+                  onClick={() => handleSyncOrderByNumber(pullOrderNumber)} 
+                  disabled={importing || !pullOrderNumber.trim()}
+                  className="btn btn-secondary" 
+                  style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                >
+                  <Download size={12} />
+                  <span>Importar</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
       </header>
 
-      {/* BARRA DE FILTROS */}
-      <div className="filter-bar">
-        {/* Alternador de Modo de Visualização */}
-        <div className="form-group" style={{ flexGrow: 0, minWidth: 'auto' }}>
-          <label className="form-label">Visualização</label>
-          <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '36px', alignItems: 'center' }}>
-            <button
-              onClick={() => setViewMode('kanban')}
-              className="btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                padding: '0.4rem 0.8rem',
-                fontSize: '0.8rem',
-                border: 'none',
-                height: '100%',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: viewMode === 'kanban' ? 'var(--surface)' : 'transparent',
-                color: viewMode === 'kanban' ? 'var(--primary)' : 'var(--text-muted)',
-                boxShadow: viewMode === 'kanban' ? 'var(--shadow-sm)' : 'none',
-                fontWeight: viewMode === 'kanban' ? 600 : 500
-              }}
-            >
-              <LayoutGrid size={14} />
-              <span>Painel Kanban</span>
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className="btn"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                padding: '0.4rem 0.8rem',
-                fontSize: '0.8rem',
-                border: 'none',
-                height: '100%',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: viewMode === 'list' ? 'var(--surface)' : 'transparent',
-                color: viewMode === 'list' ? 'var(--primary)' : 'var(--text-muted)',
-                boxShadow: viewMode === 'list' ? 'var(--shadow-sm)' : 'none',
-                fontWeight: viewMode === 'list' ? 600 : 500
-              }}
-            >
-              <List size={14} />
-              <span>Lista</span>
-            </button>
+      {/* BARRA DE FILTROS RESPONSIVA */}
+      {(() => {
+        const activeFiltersCount = [
+          filterCustomer,
+          filterSeller,
+          filterContaAzulStatus,
+          filterPedidosRelease,
+          filterStage
+        ].filter(Boolean).length;
+
+        return (
+          <div className="filter-bar">
+            {/* Linha Superior (Sempre Visível): Busca PV + Toggle Kanban/Lista + Botão Filtros Mobile */}
+            <div style={{ display: 'flex', gap: '0.5rem', width: '100%', alignItems: 'center', flexWrap: 'wrap' }}>
+              
+              {/* Alternador de Modo de Visualização */}
+              <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '36px', alignItems: 'center' }}>
+                <button
+                  onClick={() => setViewMode('kanban')}
+                  className="btn"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.35rem 0.65rem',
+                    fontSize: '0.78rem',
+                    border: 'none',
+                    height: '100%',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: viewMode === 'kanban' ? 'var(--surface)' : 'transparent',
+                    color: viewMode === 'kanban' ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: viewMode === 'kanban' ? 'var(--shadow-sm)' : 'none',
+                    fontWeight: viewMode === 'kanban' ? 600 : 500
+                  }}
+                >
+                  <LayoutGrid size={14} />
+                  <span>Kanban</span>
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className="btn"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.35rem 0.65rem',
+                    fontSize: '0.78rem',
+                    border: 'none',
+                    height: '100%',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: viewMode === 'list' ? 'var(--surface)' : 'transparent',
+                    color: viewMode === 'list' ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: viewMode === 'list' ? 'var(--shadow-sm)' : 'none',
+                    fontWeight: viewMode === 'list' ? 600 : 500
+                  }}
+                >
+                  <List size={14} />
+                  <span>Lista</span>
+                </button>
+              </div>
+
+              {/* Busca de Pedidos por PV / OP */}
+              <div style={{ flex: 1, minWidth: '160px' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Pesquisar PV/OP..."
+                  value={filterSearchOrder}
+                  onChange={(e) => setFilterSearchOrder(e.target.value)}
+                  style={{ height: '36px', fontSize: '0.825rem', padding: '0.4rem 0.75rem' }}
+                />
+              </div>
+
+              {/* Botão de Filtros no Celular */}
+              <button
+                onClick={() => setIsMobileFiltersOpen(!isMobileFiltersOpen)}
+                className="btn btn-secondary mobile-only-flex"
+                style={{
+                  height: '36px',
+                  padding: '0.35rem 0.65rem',
+                  fontSize: '0.78rem',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  fontWeight: 600,
+                  backgroundColor: isMobileFiltersOpen || activeFiltersCount > 0 ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                  borderColor: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--border)',
+                  color: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--text)'
+                }}
+              >
+                <Filter size={14} />
+                <span>Filtros</span>
+                {activeFiltersCount > 0 && (
+                  <span style={{
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    borderRadius: '99px',
+                    padding: '1px 6px',
+                    lineHeight: 1
+                  }}>
+                    {activeFiltersCount}
+                  </span>
+                )}
+              </button>
+
+            </div>
+
+            {/* Grupo de Filtros Expandível (Desktop Inline / Mobile Collapsible) */}
+            <div className={`filter-bar-expandable ${isMobileFiltersOpen ? 'is-open' : ''}`}>
+              <div className="form-group">
+                <label className="form-label">Cliente</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Cliente..."
+                  value={filterCustomer}
+                  onChange={(e) => setFilterCustomer(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Vendedora</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Vendedora..."
+                  value={filterSeller}
+                  onChange={(e) => setFilterSeller(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Situação</label>
+                <select
+                  className="form-select"
+                  value={filterContaAzulStatus}
+                  onChange={(e) => setFilterContaAzulStatus(e.target.value)}
+                >
+                  <option value="">Todas</option>
+                  <option value="Aprovado">Aprovado</option>
+                  <option value="Cancelado">Cancelado</option>
+                  <option value="Em andamento">Em andamento</option>
+                  <option value="Faturado">Faturado</option>
+                  <option value="Recusado">Recusado</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Liberação</label>
+                <select
+                  className="form-select"
+                  value={filterPedidosRelease}
+                  onChange={(e) => setFilterPedidosRelease(e.target.value)}
+                >
+                  <option value="">Todas</option>
+                  <option value="liberados">Liberados</option>
+                  <option value="bloqueados">Bloqueados</option>
+                  <option value="autorizados">Com Autorização</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Etapa</label>
+                <select
+                  className="form-select"
+                  value={filterStage}
+                  onChange={(e) => setFilterStage(e.target.value)}
+                >
+                  <option value="">Todas as Etapas</option>
+                  {stages.map(s => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {activeFiltersCount > 0 && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.6rem', alignSelf: 'flex-end' }}
+                  onClick={() => {
+                    setFilterCustomer('');
+                    setFilterSeller('');
+                    setFilterSearchOrder('');
+                    setFilterContaAzulStatus('');
+                    setFilterPedidosRelease('');
+                    setFilterStage('');
+                    if (typeof window !== 'undefined') {
+                      localStorage.removeItem('pedidos_filter_customer');
+                      localStorage.removeItem('pedidos_filter_seller');
+                      localStorage.removeItem('pedidos_filter_search');
+                      localStorage.removeItem('pedidos_filter_conta_azul');
+                      localStorage.removeItem('pedidos_filter_release');
+                      localStorage.removeItem('pedidos_filter_stage');
+                    }
+                  }}
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        );
+      })()}
 
-        <div className="form-group">
-          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            Pesquisar Pedido (PV/OP)
-          </label>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Nº do pedido ou PV..."
-            value={filterSearchOrder}
-            onChange={(e) => setFilterSearchOrder(e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Filtrar por Cliente</label>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Nome do cliente..."
-            value={filterCustomer}
-            onChange={(e) => setFilterCustomer(e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Filtrar por Vendedora</label>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Nome da vendedora"
-            value={filterSeller}
-            onChange={(e) => setFilterSeller(e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Situação Conta Azul</label>
-          <select
-            className="form-select"
-            value={filterContaAzulStatus}
-            onChange={(e) => setFilterContaAzulStatus(e.target.value)}
-          >
-            <option value="">Todas as Situações</option>
-            <option value="Aprovado">Aprovado</option>
-            <option value="Cancelado">Cancelado</option>
-            <option value="Em andamento">Em andamento</option>
-            <option value="Faturado">Faturado</option>
-            <option value="Recusado">Recusado</option>
-          </select>
-        </div>
-
-        {/* Filtro Específico da Fase Pedidos / Liberação */}
-        <div className="form-group">
-          <label className="form-label">Fase Pedidos / Liberação</label>
-          <select
-            className="form-select"
-            value={filterPedidosRelease}
-            onChange={(e) => setFilterPedidosRelease(e.target.value)}
-          >
-            <option value="">Todas as Liberações</option>
-            <option value="liberados">Apenas Liberados</option>
-            <option value="bloqueados">Apenas Bloqueados</option>
-            <option value="autorizados">Com Autorização</option>
-          </select>
-        </div>
-
-        {/* Filtro por Etapa do Kanban */}
-        <div className="form-group">
-          <label className="form-label">Etapa do Kanban</label>
-          <select
-            className="form-select"
-            value={filterStage}
-            onChange={(e) => setFilterStage(e.target.value)}
-          >
-            <option value="">Todas as Etapas</option>
-            {stages.map(s => (
-              <option key={s.id} value={s.name}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          className="btn btn-secondary"
-          onClick={() => {
-            setFilterCustomer('');
-            setFilterSeller('');
-            setFilterSearchOrder('');
-            setFilterContaAzulStatus('');
-            setFilterPedidosRelease('');
-            setFilterStage('');
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('pedidos_filter_customer');
-              localStorage.removeItem('pedidos_filter_seller');
-              localStorage.removeItem('pedidos_filter_search');
-              localStorage.removeItem('pedidos_filter_conta_azul');
-              localStorage.removeItem('pedidos_filter_release');
-              localStorage.removeItem('pedidos_filter_stage');
-            }
-          }}
-        >
-          Limpar Filtros
-        </button>
-      </div>
 
       {loading && orders.length === 0 ? (
         <div className="card" style={{ padding: '3rem', display: 'flex', justifyContent: 'center' }}>
