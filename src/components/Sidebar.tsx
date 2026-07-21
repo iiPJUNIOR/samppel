@@ -190,7 +190,7 @@ export default function Sidebar() {
           alt="Samppel Embalagens"
           width={130}
           height={38}
-          style={{ objectFit: 'contain' }}
+          style={{ width: 'auto', height: 'auto', objectFit: 'contain' }}
           priority
         />
         <button
@@ -228,9 +228,10 @@ export default function Sidebar() {
             alt="Samppel Embalagens"
             width={160}
             height={52}
-            style={{ objectFit: 'contain', objectPosition: 'left' }}
+            style={{ width: 'auto', height: 'auto', objectFit: 'contain', objectPosition: 'left' }}
             priority
           />
+
           {showVisualToggle && (
             <button
               type="button"

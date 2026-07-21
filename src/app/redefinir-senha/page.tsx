@@ -97,7 +97,7 @@ export default function RedefinirSenhaPage() {
             alt="Samppel Embalagens"
             width={180}
             height={60}
-            style={{ objectFit: 'contain', margin: '0 auto' }}
+            style={{ width: 'auto', height: 'auto', objectFit: 'contain', margin: '0 auto' }}
             priority
           />
         </div>

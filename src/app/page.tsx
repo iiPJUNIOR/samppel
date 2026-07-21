@@ -548,7 +548,7 @@ export default function LoginPage() {
               width={210}
               height={80}
               className="lp-logo"
-              style={{ objectFit: 'contain', objectPosition: 'left' }}
+              style={{ width: 'auto', height: 'auto', objectFit: 'contain', objectPosition: 'left' }}
               priority
             />
           </div>
