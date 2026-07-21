@@ -782,12 +782,13 @@ body.sidebar-collapsed .kanban-board-container {
 @media (max-width: 768px) {
   .modal-overlay-glass {
     align-items: flex-end !important;
+    padding: 0 !important;
   }
 
   .trello-modal-container {
     width: 100% !important;
     max-width: 100% !important;
-    max-height: 88vh !important;
+    max-height: 82vh !important;
     border-bottom-left-radius: 0 !important;
     border-bottom-right-radius: 0 !important;
     border-top-left-radius: 16px !important;
@@ -796,21 +797,49 @@ body.sidebar-collapsed .kanban-board-container {
   }
 
   .trello-cover-banner {
-    min-height: 70px !important;
-    padding: 0.75rem 1rem !important;
+    min-height: 52px !important;
+    padding: 0.5rem 0.85rem !important;
+  }
+
+  .trello-cover-banner h2 {
+    font-size: 0.95rem !important;
   }
 
   .trello-modal-body-grid {
     grid-template-columns: 1fr !important;
-    padding: 1rem !important;
-    gap: 1rem !important;
+    padding: 0.65rem !important;
+    gap: 0.65rem !important;
+  }
+
+  .trello-main-content {
+    gap: 0.65rem !important;
   }
 
   .trello-sidebar-actions {
     border-top: 1px solid var(--border);
-    padding-top: 1rem;
+    padding-top: 0.65rem !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.4rem !important;
+  }
+
+  .trello-sidebar-actions button {
+    font-size: 0.72rem !important;
+    padding: 0.45rem 0.5rem !important;
+  }
+
+  .trello-sidebar-actions > div:last-child {
+    grid-column: span 2;
+  }
+
+  /* Manter 2 colunas nos blocos de informações no modal mobile para evitar rolagem longa */
+  .trello-modal-container .grid-responsive-2,
+  .trello-modal-container .grid-responsive-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.35rem !important;
   }
 }
+
 
 @keyframes slideUpBottomSheet {
   from {
