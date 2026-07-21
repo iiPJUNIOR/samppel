@@ -45,13 +45,18 @@ import {
   Package,
   ArrowUp,
   ArrowDown,
-  Sliders
+  Sliders,
+  UserPlus,
+  Mail,
+  Send,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 
 export default function ConfiguracoesPage() {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<'integracao' | 'producao' | 'embalagem' | 'sistema' | 'operadores'>('integracao');
+  const [activeTab, setActiveTab] = useState<'integracao' | 'producao' | 'embalagem' | 'sistema' | 'operadores' | 'convites'>('integracao');
   
   // States
   const [clientId, setClientId] = useState('');
@@ -108,6 +113,122 @@ export default function ConfiguracoesPage() {
   const [factoryAccountId, setFactoryAccountId] = useState<string>('');
   const [savingFactoryAccount, setSavingFactoryAccount] = useState(false);
 
+  // States de Convites de Usuários
+  const [invitesList, setInvitesList] = useState<any[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFullName, setInviteFullName] = useState('');
+  const [inviteRole, setInviteRole] = useState<'Administrador' | 'Produção' | 'Fábrica' | 'Vendedor'>('Vendedor');
+  const [submittingInvite, setSubmittingInvite] = useState(false);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [fetchingInvites, setFetchingInvites] = useState(false);
+
+  const fetchInvites = async () => {
+    setFetchingInvites(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const res = await fetch(`/api/admin/invite?tenantId=${tenantId}`);
+      const json = await res.json();
+      if (json.data) setInvitesList(json.data);
+    } catch (err) {
+      console.error('Erro ao buscar convites:', err);
+    } finally {
+      setFetchingInvites(false);
+    }
+  };
+
+  const handleSendInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+
+    setSubmittingInvite(true);
+    setInviteSuccess(null);
+    setInviteError(null);
+
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const res = await fetch('/api/admin/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          full_name: inviteFullName.trim(),
+          role: inviteRole,
+          tenantId
+        })
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Erro ao enviar convite.');
+      }
+
+      setInviteSuccess(`Convite enviado com sucesso para ${inviteEmail}!`);
+      setInviteEmail('');
+      setInviteFullName('');
+      setInviteRole('Vendedor');
+      fetchInvites();
+    } catch (err: any) {
+      setInviteError(err.message || 'Falha ao enviar convite.');
+    } finally {
+      setSubmittingInvite(false);
+    }
+  };
+
+  const handleCancelInvite = async (id: string) => {
+    if (!confirm('Deseja realmente cancelar e excluir este convite de usuário?')) return;
+
+    try {
+      const res = await fetch(`/api/admin/invite?id=${id}`, {
+        method: 'DELETE'
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao cancelar convite.');
+
+      fetchInvites();
+    } catch (err: any) {
+      alert('Erro ao cancelar convite: ' + err.message);
+    }
+  };
+
+  const handleResendInvite = async (inv: any) => {
+    setInviteSuccess(null);
+    setInviteError(null);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const res = await fetch('/api/admin/invite', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: inv.id,
+          email: inv.email,
+          full_name: inv.full_name,
+          role: inv.role,
+          tenantId
+        })
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) throw new Error(json.error || 'Erro ao reenviar convite.');
+
+      setInviteSuccess(`Novo link renovado e e-mail de convite reenviado para ${inv.email}!`);
+      fetchInvites();
+    } catch (err: any) {
+      alert('Erro ao reenviar convite: ' + err.message);
+    }
+  };
+
+
+  const isInviteExpired = (createdAt: string) => {
+    if (!createdAt) return false;
+    const sentTime = new Date(createdAt).getTime();
+    const hoursDiff = (Date.now() - sentTime) / (1000 * 60 * 60);
+    return hoursDiff >= 24;
+  };
+
+
   // Loading & Action States
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -118,7 +239,9 @@ export default function ConfiguracoesPage() {
   const fetchConfigAndLogs = async () => {
     setLoading(true);
     try {
+      fetchInvites();
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
       const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes, operatorsRes, stagesRes, profilesRes] = await Promise.all([
         getContaAzulConfig(),
         getIntegrationLogs(),
@@ -769,6 +892,16 @@ export default function ConfiguracoesPage() {
         >
           <Package size={16} />
           <span>Regras de Embalagem</span>
+        </button>
+        <button 
+          onClick={() => {
+            setActiveTab('convites');
+            fetchInvites();
+          }} 
+          className={`tab-btn ${activeTab === 'convites' ? 'active' : ''}`}
+        >
+          <UserPlus size={16} />
+          <span>Convites de Usuários</span>
         </button>
         <button 
           onClick={() => setActiveTab('sistema')} 
@@ -1925,6 +2058,232 @@ export default function ConfiguracoesPage() {
           </div>
         </>
       )}
+
+      {/* TAB CONTENT: CONVITES DE USUÁRIOS */}
+      {activeTab === 'convites' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          
+          {/* GRID: FORMULÁRIO DE CONVITE + LISTA DE CONVITES */}
+          <div className="grid-responsive-2" style={{ gap: '1.5rem', alignItems: 'flex-start' }}>
+            
+            {/* FORMULÁRIO DE NOVO CONVITE */}
+            <div className="card">
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <UserPlus size={18} style={{ color: 'var(--primary)' }} />
+                <span>Convidar Novo Usuário</span>
+              </h3>
+
+              {inviteSuccess && (
+                <div style={{ padding: '0.75rem 1rem', background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '8px', color: 'var(--success)', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <CheckCircle2 size={16} />
+                  <span>{inviteSuccess}</span>
+                </div>
+              )}
+
+              {inviteError && (
+                <div style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertCircle size={16} />
+                  <span>{inviteError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSendInvite} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem', color: 'var(--text)' }}>
+                    Endereço de E-mail *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="ex: usuario@samppel.com.br"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '0.9rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem', color: 'var(--text)' }}>
+                    Nome Completo (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ex: João Silva"
+                    value={inviteFullName}
+                    onChange={(e) => setInviteFullName(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '0.9rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem', color: 'var(--text)' }}>
+                    Papel / Perfil no Portal *
+                  </label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e: any) => setInviteRole(e.target.value)}
+                    style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '0.9rem' }}
+                  >
+                    <option value="Administrador">Outros Administradores</option>
+                    <option value="Produção">Produção</option>
+                    <option value="Fábrica">Fábrica</option>
+                    <option value="Vendedor">Vendedor</option>
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submittingInvite}
+                  className="btn btn-primary"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
+                    marginTop: '0.5rem',
+                    cursor: submittingInvite ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  <Send size={16} />
+                  <span>{submittingInvite ? 'Enviando convite...' : 'Disparar Convite por E-mail'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* TABELA DE CONVITES ENVIADOS / PENDENTES */}
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Mail size={18} style={{ color: 'var(--primary)' }} />
+                  <span>Convites Enviados</span>
+                  <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', borderRadius: '12px', background: 'var(--surface-subtle)', color: 'var(--text-muted)' }}>
+                    {invitesList.length}
+                  </span>
+                </h3>
+                <button
+                  onClick={fetchInvites}
+                  disabled={fetchingInvites}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <RefreshCw size={14} className={fetchingInvites ? 'spin' : ''} />
+                  <span>Atualizar</span>
+                </button>
+              </div>
+
+              {invitesList.length === 0 ? (
+                <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem', background: 'var(--surface-subtle)', borderRadius: '8px' }}>
+                  Nenhum convite pendente encontrado. Use o formulário para convidar novos usuários.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.6rem 0.75rem' }}>Usuário / E-mail</th>
+                        <th style={{ padding: '0.6rem 0.75rem' }}>Papel</th>
+                        <th style={{ padding: '0.6rem 0.75rem' }}>Status</th>
+                        <th style={{ padding: '0.6rem 0.75rem' }}>Data</th>
+                        <th style={{ padding: '0.6rem 0.75rem', textAlign: 'right' }}>Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invitesList.map((inv) => (
+                        <tr key={inv.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '0.75rem' }}>
+                            <div style={{ fontWeight: 600, color: 'var(--text)' }}>{inv.full_name || 'Sem nome'}</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{inv.email}</div>
+                          </td>
+                          <td style={{ padding: '0.75rem' }}>
+                            <span style={{ padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, background: 'var(--surface-subtle)', color: 'var(--text)' }}>
+                              {inv.role}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem' }}>
+                            {isInviteExpired(inv.created_at) ? (
+                              <span style={{
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '12px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                background: 'rgba(239, 68, 68, 0.15)',
+                                color: 'var(--danger)'
+                              }}>
+                                • EXPIRADO (24h+)
+                              </span>
+                            ) : (
+                              <span style={{
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '12px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                background: 'rgba(59, 130, 246, 0.15)',
+                                color: 'var(--primary)'
+                              }}>
+                                • PENDENTE
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                            {inv.created_at ? new Date(inv.created_at).toLocaleDateString('pt-BR') : '-'}
+                          </td>
+                          <td style={{ padding: '0.75rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button
+                              onClick={() => handleResendInvite(inv)}
+                              title="Reenviar e-mail de convite e renovar o link de acesso"
+                              style={{
+                                background: 'rgba(59, 130, 246, 0.1)',
+                                border: '1px solid rgba(59, 130, 246, 0.3)',
+                                color: 'var(--primary)',
+                                cursor: 'pointer',
+                                padding: '0.35rem 0.65rem',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                marginRight: '0.4rem'
+                              }}
+                            >
+                              <RefreshCw size={13} />
+                              <span>Reenviar</span>
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvite(inv.id)}
+                              title="Cancelar convite"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--danger)',
+                                cursor: 'pointer',
+                                padding: '0.3rem',
+                                borderRadius: '4px',
+                                verticalAlign: 'middle'
+                              }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

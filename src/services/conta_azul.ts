@@ -1066,13 +1066,22 @@ export class ContaAzulService {
         const sellerName = saleDetail.vendedor?.nome || 'Vendas Samppel';
 
         const condicao = saleDetail.venda?.condicao_pagamento;
-        const installments = condicao?.parcelas;
-        const installmentsTotal = installments?.length || 1;
+        let installments = condicao?.parcelas || [];
         
         // Pix e vendas À vista são liquidadas imediatamente
         const isPaidAVista = condicao?.pagamento_a_vista === true || 
                              condicao?.opcao_condicao_pagamento === 'À vista';
+
+        if (installments.length === 0 && isPaidAVista) {
+          installments = [{
+            valor: saleDetail.venda?.composicao_valor?.valor_liquido || 0,
+            data_vencimento: saleDetail.venda?.data_compromisso || new Date().toISOString().split('T')[0],
+            forma_pagamento: condicao?.tipo_pagamento || 'Pix',
+            numero: 1
+          }];
+        }
         
+        const installmentsTotal = installments.length || 1;
         const installmentsPaid = (localStatus === 'Pago' || isPaidAVista) ? installmentsTotal : 0;
         const firstPaymentDate = (localStatus === 'Pago' || isPaidAVista)
           ? (installments?.[0]?.data_vencimento || saleSummary.data || new Date().toISOString().split('T')[0])

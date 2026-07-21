@@ -652,35 +652,42 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredOrders.map(o => (
-                      <tr 
-                        key={o.id}
-                        onClick={() => openOrderDetails(o)}
-                        style={{ cursor: 'pointer', transition: 'background-color 0.15s ease' }}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--surface-hover)'}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                      >
-                        <td style={{ padding: '0.75rem', fontWeight: 600 }}>
-                          <div>{o.pv_number}</div>
-                          {o.op_number && <div style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 500 }}>{o.op_number}</div>}
-                        </td>
-                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
-                          {o.customer?.name || 'Cliente Desconhecido'}
-                        </td>
-                        <td style={{ padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                          {o.art_name}
-                        </td>
-                        <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                          <span className="badge" style={{
-                            backgroundColor: (statusColors[o.status] || 'var(--primary)') + '15',
-                            color: statusColors[o.status] || 'var(--primary)',
-                            border: `1px solid ${(statusColors[o.status] || 'var(--primary)')}30`
-                          }}>
-                            {o.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredOrders.map(o => {
+                       const isReleased = !!o.first_payment_date;
+                       return (
+                         <tr 
+                           key={o.id}
+                           onClick={() => openOrderDetails(o)}
+                           style={{ 
+                             cursor: 'pointer', 
+                             transition: 'background-color 0.15s ease',
+                             backgroundColor: isReleased ? 'transparent' : 'var(--danger-bg)'
+                           }}
+                           onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--surface-hover)'}
+                           onMouseLeave={e => e.currentTarget.style.backgroundColor = isReleased ? 'transparent' : 'var(--danger-bg)'}
+                         >
+                           <td style={{ padding: '0.75rem', fontWeight: 600 }}>
+                             <div>{o.pv_number}</div>
+                             {o.op_number && <div style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 500 }}>{o.op_number}</div>}
+                           </td>
+                           <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
+                             {o.customer?.name || 'Cliente Desconhecido'}
+                           </td>
+                           <td style={{ padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                             {o.art_name}
+                           </td>
+                           <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                             <span className="badge" style={{
+                               backgroundColor: (statusColors[o.status] || 'var(--primary)') + '15',
+                               color: statusColors[o.status] || 'var(--primary)',
+                               border: `1px solid ${(statusColors[o.status] || 'var(--primary)')}30`
+                             }}>
+                               {o.status}
+                             </span>
+                           </td>
+                         </tr>
+                       );
+                     })}
                   </tbody>
                 </table>
               </div>
@@ -855,6 +862,24 @@ export default function DashboardPage() {
 
             {/* Conteúdo */}
             <div style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {!selectedOrderDetails.first_payment_date && (
+                <div style={{
+                  backgroundColor: 'var(--danger-bg)',
+                  border: '1px solid var(--danger)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 1rem',
+                  color: 'var(--danger)',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  marginBottom: '0.25rem'
+                }}>
+                  <AlertTriangle size={16} />
+                  <span>Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal).</span>
+                </div>
+              )}
               
               {/* Grid Informações Principais */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>

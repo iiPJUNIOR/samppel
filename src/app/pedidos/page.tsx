@@ -216,16 +216,50 @@ export default function PedidosPage() {
     window.dispatchEvent(new Event('pedidos_view_mode_changed'));
   }, [viewMode]);
 
-  const [filterCustomer, setFilterCustomer] = useState('');
-  const [filterSeller, setFilterSeller] = useState('');
+  const [filterCustomer, setFilterCustomer] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_customer') || '';
+    return '';
+  });
+  const [filterSeller, setFilterSeller] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_seller') || '';
+    return '';
+  });
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSector, setFilterSector] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [filterHandlingTeam, setFilterHandlingTeam] = useState('');
-  const [filterSearchOrder, setFilterSearchOrder] = useState('');
-  const [filterContaAzulStatus, setFilterContaAzulStatus] = useState('');
+  const [filterSearchOrder, setFilterSearchOrder] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_search') || '';
+    return '';
+  });
+  const [filterContaAzulStatus, setFilterContaAzulStatus] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_conta_azul') || '';
+    return '';
+  });
+  // Filtro específico para a Fase Pedidos / Status de Liberação (liberados, bloqueados, autorizados)
+  const [filterPedidosRelease, setFilterPedidosRelease] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_release') || '';
+    return '';
+  });
+  // Filtro de Etapa do Kanban
+  const [filterStage, setFilterStage] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_stage') || '';
+    return '';
+  });
+
   const [pullOrderNumber, setPullOrderNumber] = useState('');
   const [syncingOrderNumber, setSyncingOrderNumber] = useState('');
+
+  // Sincronizar e salvar todos os filtros no localStorage conforme forem alterados
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('pedidos_filter_customer', filterCustomer);
+    localStorage.setItem('pedidos_filter_seller', filterSeller);
+    localStorage.setItem('pedidos_filter_search', filterSearchOrder);
+    localStorage.setItem('pedidos_filter_conta_azul', filterContaAzulStatus);
+    localStorage.setItem('pedidos_filter_release', filterPedidosRelease);
+    localStorage.setItem('pedidos_filter_stage', filterStage);
+  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage]);
 
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
@@ -1748,6 +1782,46 @@ export default function PedidosPage() {
   // Handlers para HTML5 Drag and Drop
   const handleDragStart = (e: React.DragEvent, item: any) => {
     e.dataTransfer.setData('text/plain', item.id);
+    
+    const dragTarget = e.currentTarget as HTMLElement;
+    if (!dragTarget) return;
+
+    // Criar elemento clone com 280px de largura e 100% opaco para drag preview em 4K e Full HD
+    const clone = dragTarget.cloneNode(true) as HTMLElement;
+    const computedStyle = window.getComputedStyle(dragTarget);
+
+    clone.style.position = 'absolute';
+    clone.style.top = '-9999px';
+    clone.style.left = '-9999px';
+    clone.style.width = '280px';
+    clone.style.minWidth = '280px';
+    clone.style.maxWidth = '280px';
+    clone.style.opacity = '1';
+    clone.style.boxSizing = 'border-box';
+    clone.style.backgroundColor = computedStyle.backgroundColor || '#ffffff';
+    clone.style.border = computedStyle.border;
+    clone.style.borderLeft = computedStyle.borderLeft;
+    clone.style.borderRadius = computedStyle.borderRadius;
+    clone.style.boxShadow = '0 10px 25px rgba(0, 0, 0, 0.2)';
+    clone.style.pointerEvents = 'none';
+    clone.style.transform = 'none';
+    clone.style.zIndex = '999999';
+
+    document.body.appendChild(clone);
+
+    const rect = dragTarget.getBoundingClientRect();
+    const offsetX = Math.min(Math.max(e.clientX - rect.left, 20), 260);
+    const offsetY = Math.min(Math.max(e.clientY - rect.top, 10), 50);
+
+    if (e.dataTransfer.setDragImage) {
+      e.dataTransfer.setDragImage(clone, offsetX, offsetY);
+    }
+
+    setTimeout(() => {
+      if (clone && clone.parentNode) {
+        clone.parentNode.removeChild(clone);
+      }
+    }, 0);
   };
 
   const handleDrop = async (e: React.DragEvent, targetStageId: string) => {
@@ -2516,7 +2590,26 @@ export default function PedidosPage() {
       cleanPvForMatch(item.friendly_id || '') === filterSearchOrder.toLowerCase()
     ) : true;
     const matchContaAzulStatus = filterContaAzulStatus ? parentOrder.conta_azul_status === filterContaAzulStatus : true;
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
+
+    // Filtro para a Fase "Pedidos" / Liberação
+    let matchPedidosRelease = true;
+    if (filterPedidosRelease) {
+      const isReleased = !!parentOrder.first_payment_date;
+      const hasAuth = !!extractAuthorization(item.notes || parentOrder.notes);
+      if (filterPedidosRelease === 'liberados') matchPedidosRelease = isReleased;
+      else if (filterPedidosRelease === 'bloqueados') matchPedidosRelease = !isReleased;
+      else if (filterPedidosRelease === 'autorizados') matchPedidosRelease = hasAuth;
+    }
+
+    // Filtro de Etapa do Kanban
+    let matchStage = true;
+    if (filterStage) {
+      const currentStage = stages.find(s => s.id === item.stage_id);
+      const stageName = currentStage?.name || 'Pedidos';
+      matchStage = stageName.toLowerCase() === filterStage.toLowerCase();
+    }
+
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage;
   });
 
   const getFreightBadgeStyle = (shippingType: string) => {
@@ -2817,6 +2910,36 @@ export default function PedidosPage() {
           </select>
         </div>
 
+        {/* Filtro Específico da Fase Pedidos / Liberação */}
+        <div className="form-group">
+          <label className="form-label">Fase Pedidos / Liberação</label>
+          <select
+            className="form-select"
+            value={filterPedidosRelease}
+            onChange={(e) => setFilterPedidosRelease(e.target.value)}
+          >
+            <option value="">Todas as Liberações</option>
+            <option value="liberados">Apenas Liberados</option>
+            <option value="bloqueados">Apenas Bloqueados</option>
+            <option value="autorizados">Com Autorização</option>
+          </select>
+        </div>
+
+        {/* Filtro por Etapa do Kanban */}
+        <div className="form-group">
+          <label className="form-label">Etapa do Kanban</label>
+          <select
+            className="form-select"
+            value={filterStage}
+            onChange={(e) => setFilterStage(e.target.value)}
+          >
+            <option value="">Todas as Etapas</option>
+            {stages.map(s => (
+              <option key={s.id} value={s.name}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+
         <button
           className="btn btn-secondary"
           onClick={() => {
@@ -2824,6 +2947,16 @@ export default function PedidosPage() {
             setFilterSeller('');
             setFilterSearchOrder('');
             setFilterContaAzulStatus('');
+            setFilterPedidosRelease('');
+            setFilterStage('');
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('pedidos_filter_customer');
+              localStorage.removeItem('pedidos_filter_seller');
+              localStorage.removeItem('pedidos_filter_search');
+              localStorage.removeItem('pedidos_filter_conta_azul');
+              localStorage.removeItem('pedidos_filter_release');
+              localStorage.removeItem('pedidos_filter_stage');
+            }
           }}
         >
           Limpar Filtros
@@ -2913,9 +3046,9 @@ export default function PedidosPage() {
                   handleDrop(e, stage.id);
                 }}
                 style={{
-                  flex: isEmpty ? '0 0 140px' : '0 0 280px',
-                  minWidth: isEmpty ? '140px' : '280px',
-                  width: isEmpty ? '140px' : '280px',
+                  flex: isEmpty ? '0 0 140px' : '1 1 280px',
+                  minWidth: isEmpty ? '140px' : '260px',
+                  maxWidth: isEmpty ? '140px' : '450px',
                   backgroundColor: isEmpty ? 'hsla(0, 0%, 50%, 0.02)' : 'var(--background)',
                   border: isVirtual 
                     ? '2px dashed var(--danger)' 
@@ -2983,6 +3116,79 @@ export default function PedidosPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Quick filter chips para a coluna "Pedidos" */}
+                  {(isFirstColumn || stage.name === 'Pedidos') && (
+                    <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button
+                        onClick={() => setFilterPedidosRelease('')}
+                        style={{
+                          fontSize: '0.6rem',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          border: filterPedidosRelease === '' ? '1px solid var(--primary)' : '1px solid var(--border)',
+                          backgroundColor: filterPedidosRelease === '' ? 'var(--surface)' : 'transparent',
+                          color: filterPedidosRelease === '' ? 'var(--primary)' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          fontWeight: filterPedidosRelease === '' ? 700 : 500,
+                          lineHeight: '1.2'
+                        }}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        onClick={() => setFilterPedidosRelease('liberados')}
+                        style={{
+                          fontSize: '0.6rem',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          border: filterPedidosRelease === 'liberados' ? '1px solid #10b981' : '1px solid var(--border)',
+                          backgroundColor: filterPedidosRelease === 'liberados' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                          color: filterPedidosRelease === 'liberados' ? '#10b981' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          fontWeight: filterPedidosRelease === 'liberados' ? 700 : 500,
+                          lineHeight: '1.2'
+                        }}
+                        title="Filtrar apenas pedidos liberados para produção"
+                      >
+                        Liberados
+                      </button>
+                      <button
+                        onClick={() => setFilterPedidosRelease('bloqueados')}
+                        style={{
+                          fontSize: '0.6rem',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          border: filterPedidosRelease === 'bloqueados' ? '1px solid #ef4444' : '1px solid var(--border)',
+                          backgroundColor: filterPedidosRelease === 'bloqueados' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                          color: filterPedidosRelease === 'bloqueados' ? '#ef4444' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          fontWeight: filterPedidosRelease === 'bloqueados' ? 700 : 500,
+                          lineHeight: '1.2'
+                        }}
+                        title="Filtrar apenas pedidos bloqueados aguardando pagamento/sinal"
+                      >
+                        Bloqueados
+                      </button>
+                      <button
+                        onClick={() => setFilterPedidosRelease('autorizados')}
+                        style={{
+                          fontSize: '0.6rem',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          border: filterPedidosRelease === 'autorizados' ? '1px solid #8b5cf6' : '1px solid var(--border)',
+                          backgroundColor: filterPedidosRelease === 'autorizados' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                          color: filterPedidosRelease === 'autorizados' ? '#8b5cf6' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          fontWeight: filterPedidosRelease === 'autorizados' ? 700 : 500,
+                          lineHeight: '1.2'
+                        }}
+                        title="Filtrar apenas pedidos com número de autorização (AUT)"
+                      >
+                        Autorizados
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Lista de Cards da Etapa */}
@@ -3021,25 +3227,31 @@ export default function PedidosPage() {
                             if (!isButton) handleOpenDetail(item);
                           }}
                           style={{
-                            backgroundColor: 'var(--surface)',
-                            border: '1px solid var(--border)',
+                            backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
+                            border: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
                             borderLeft: `3px solid ${stage.color}`,
                             borderRadius: 'var(--radius-sm)',
                             padding: '0.5rem',
                             cursor: 'pointer',
-                            boxShadow: 'var(--shadow-sm)',
+                            boxShadow: isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)',
                             display: 'flex',
                             flexDirection: 'column',
                             gap: '0.35rem',
-                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease',
                           }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.transform = 'translateY(-1px)';
-                            e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+                            e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-md)' : '0 4px 6px rgba(239, 68, 68, 0.15)';
+                            if (!isReleased) {
+                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
+                            }
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.transform = 'none';
-                            e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                            e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)';
+                            if (!isReleased) {
+                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                            }
                           }}
                         >
                           {/* PV e OP */}
@@ -3048,6 +3260,11 @@ export default function PedidosPage() {
                               <span style={{ fontWeight: 700, fontSize: '0.725rem', color: 'var(--text)' }}>
                                 {item.friendly_id || '---'}
                               </span>
+                              {!isReleased && (
+                                <span title="Pedido Bloqueado (Aguardando Pagamento/Sinal)" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                  <AlertTriangle size={11} color="var(--danger)" style={{ flexShrink: 0 }} />
+                                </span>
+                              )}
                               {hasOverdueInstallments(item.order_id) && (
                                 <span 
                                   className="blinking-dot" 
@@ -3562,7 +3779,7 @@ export default function PedidosPage() {
                     const overShort = order.over_short_quantity || 0;
                     
                     return (
-                      <tr key={order.id}>
+                      <tr key={order.id} style={{ backgroundColor: isReleased ? undefined : 'var(--danger-bg)' }}>
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
                             <span>{order.pv_number || '---'}</span>
@@ -6431,6 +6648,24 @@ export default function PedidosPage() {
 
               {/* Corpo com scroll */}
               <div style={{ overflowY: 'auto', flex: 1, padding: '1.25rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                {!isReleased && (
+                  <div style={{
+                    backgroundColor: 'var(--danger-bg)',
+                    border: '1px solid var(--danger)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.75rem 1rem',
+                    color: 'var(--danger)',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginBottom: '0.25rem'
+                  }}>
+                    <AlertTriangle size={16} />
+                    <span>Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal).</span>
+                  </div>
+                )}
 
                 {/* Linha superior: Pedido + Cliente lado a lado */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', alignItems: 'start' }}>

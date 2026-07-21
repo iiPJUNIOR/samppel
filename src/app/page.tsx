@@ -4,13 +4,15 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import Image from 'next/image';
-import { ArrowRight, Eye, EyeOff, Loader2, AlertCircle, ChevronRight } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Loader2, AlertCircle, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
   const { user, signIn, signUp, changeActiveRole } = useAuth();
 
   const [isSignUpMode, setIsSignUpMode] = useState(false);
+  const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -22,6 +24,38 @@ export default function LoginPage() {
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setResetSuccess(null);
+
+    if (!email.trim()) {
+      setError('Por favor, informe o seu endereço de e-mail.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { supabase } = await import('@/services/supabase');
+      if (!supabase) throw new Error('Cliente Supabase não está configurado.');
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const redirectTo = `${appUrl}/redefinir-senha`;
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo
+      });
+
+      if (resetError) throw resetError;
+
+      setResetSuccess(`E-mail de recuperação enviado para ${email}! Verifique sua caixa de entrada e pasta de spam.`);
+    } catch (err: any) {
+      setError(err.message || 'Falha ao enviar e-mail de recuperação.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (user && !showRoleSelector) {
@@ -577,6 +611,61 @@ export default function LoginPage() {
                   ← Voltar para o login
                 </button>
               </>
+            ) : isForgotPasswordMode ? (
+              /* ── Recuperar Senha ─────────────────────── */
+              <>
+                <p className="lp-form-title">Recuperar senha</p>
+                <p className="lp-form-sub">
+                  Informe o seu e-mail cadastrado para receber o link de redefinição de senha.
+                </p>
+
+                {resetSuccess && (
+                  <div style={{ padding: '0.85rem', background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '8px', color: '#166534', fontSize: '0.85rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', lineHeight: '1.5' }}>
+                    <CheckCircle2 size={18} style={{ color: '#22c55e', flexShrink: 0, marginTop: '2px' }} />
+                    <span>{resetSuccess}</span>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="lp-error">
+                    <AlertCircle size={16} />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <form autoComplete="off" onSubmit={handleForgotPassword}>
+                  <div className="lp-field">
+                    <label htmlFor="reset-email">E-mail</label>
+                    <input
+                      id="reset-email"
+                      className="lp-input"
+                      type="email"
+                      placeholder="voce@samppel.com.br"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <button type="submit" disabled={loading} className="lp-btn">
+                    {loading ? (
+                      <><Loader2 size={18} className="spinner" /> Enviando e-mail...</>
+                    ) : (
+                      'Enviar E-mail de Recuperação'
+                    )}
+                  </button>
+                </form>
+
+                <div className="lp-footer" style={{ justifyContent: 'center', marginTop: '1.5rem' }}>
+                  <button
+                    type="button"
+                    className="lp-link"
+                    onClick={() => { setIsForgotPasswordMode(false); setError(null); setResetSuccess(null); }}
+                  >
+                    ← Voltar para o Login
+                  </button>
+                </div>
+              </>
             ) : (
               /* ── Login / Cadastro ─────────────────────── */
               <>
@@ -648,8 +737,6 @@ export default function LoginPage() {
                     </div>
                   </div>
 
-                  {/* Cargo selecionado automaticamente como Produção */}
-
                   <button type="submit" disabled={loading} className="lp-btn">
                     {loading ? (
                       <><Loader2 size={18} className="spinner" /> Processando...</>
@@ -660,16 +747,13 @@ export default function LoginPage() {
                 </form>
 
                 <div className="lp-footer">
-                  <a
-                    href="#"
+                  <button
+                    type="button"
                     className="lp-link"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      alert('Entre em contato com o administrador do sistema para redefinir sua senha.');
-                    }}
+                    onClick={() => { setIsForgotPasswordMode(true); setError(null); setResetSuccess(null); }}
                   >
                     Esqueceu a senha?
-                  </a>
+                  </button>
                   <button
                     type="button"
                     className="lp-link"
@@ -695,6 +779,7 @@ export default function LoginPage() {
                 </a>
               </>
             )}
+
           </div>
         </div>
       </div>
