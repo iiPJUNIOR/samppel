@@ -691,4 +691,240 @@ body.sidebar-collapsed .kanban-board-container {
   min-height: calc(100vh - 120px) !important;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   TRELLO-STYLE MODAL & GLASSMORPHISM
+   ═══════════════════════════════════════════════════════════════ */
+
+.modal-overlay-glass {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99990;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.trello-modal-container {
+  background-color: var(--surface);
+  border-radius: var(--radius-lg, 12px);
+  width: 92%;
+  max-width: 840px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  animation: scaleUpModal 0.2s ease-out;
+  color: var(--text);
+}
+
+@keyframes scaleUpModal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.trello-cover-banner {
+  width: 100%;
+  min-height: 80px;
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 1rem 1.5rem;
+  color: var(--text);
+}
+
+.trello-cover-banner-actions {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.trello-modal-body-grid {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.trello-main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.trello-sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ── BOTTOM SHEET FOR MOBILE (<= 768px) ────────────────────────── */
+@media (max-width: 768px) {
+  .modal-overlay-glass {
+    align-items: flex-end !important;
+  }
+
+  .trello-modal-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 88vh !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-top-left-radius: 16px !important;
+    border-top-right-radius: 16px !important;
+    animation: slideUpBottomSheet 0.25s ease-out !important;
+  }
+
+  .trello-cover-banner {
+    min-height: 70px !important;
+    padding: 0.75rem 1rem !important;
+  }
+
+  .trello-modal-body-grid {
+    grid-template-columns: 1fr !important;
+    padding: 1rem !important;
+    gap: 1rem !important;
+  }
+
+  .trello-sidebar-actions {
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+  }
+}
+
+@keyframes slideUpBottomSheet {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.bottom-sheet-handle {
+  width: 36px;
+  height: 4px;
+  background-color: var(--border);
+  border-radius: 2px;
+  margin: 0 auto 0.4rem auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DRAG & DROP CLEAN PLACEHOLDER (NO SHADOWS, NO EMOJIS)
+   ═══════════════════════════════════════════════════════════════ */
+
+.kanban-card-dragging {
+  opacity: 0.3 !important;
+  border: 1px dashed var(--primary) !important;
+}
+
+.kanban-drop-placeholder {
+  border: 1.5px dashed var(--primary);
+  background-color: rgba(var(--primary-rgb, 59, 130, 246), 0.06);
+  border-radius: var(--radius-sm);
+  height: 52px;
+  margin: 0.35rem 0;
+  animation: expandGap 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+@keyframes expandGap {
+  from {
+    height: 0px;
+    margin: 0;
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  to {
+    height: 52px;
+    margin: 0.35rem 0;
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   TOAST NOTIFICATION (CLEAN, NO HEAVY SHADOWS)
+   ═══════════════════════════════════════════════════════════════ */
+
+.toast-container-floating {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.toast-card-item {
+  pointer-events: auto;
+  background-color: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 260px;
+  max-width: 400px;
+  animation: toastSlideUp 0.25s ease-out;
+  font-size: 0.825rem;
+  font-weight: 600;
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+
 

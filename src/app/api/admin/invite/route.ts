@@ -61,8 +61,12 @@ export async function POST(request: NextRequest) {
     const tId = tenantId || defaultTenantId;
     const name = full_name || email.split('@')[0];
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://portalsamppel.vercel.app';
+    const host = request.headers.get('host');
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const origin = request.headers.get('origin') || (host ? `${protocol}://${host}` : null);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || origin || 'https://portalsamppel.vercel.app';
     const redirectTo = `${appUrl}`;
+
 
     // 1. Envia o convite por e-mail via Supabase Auth Admin
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
@@ -128,8 +132,12 @@ export async function PUT(request: NextRequest) {
     }
 
     const tId = tenantId || defaultTenantId;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://portalsamppel.vercel.app';
+    const host = request.headers.get('host');
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const origin = request.headers.get('origin') || (host ? `${protocol}://${host}` : null);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || origin || 'https://portalsamppel.vercel.app';
     const redirectTo = `${appUrl}`;
+
 
     // Se o usuário já existia em estado pendente, removemos o registro anterior para renovar a chave/token de convite limpo
     if (id) {

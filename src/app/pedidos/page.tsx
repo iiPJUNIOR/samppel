@@ -430,6 +430,20 @@ export default function PedidosPage() {
     setBlockedPaymentTargetStageId('');
   };
 
+  // Estados de Notificação Toast e Drag/Drop Interativo
+  const [toastNotification, setToastNotification] = useState<{ message: string; type: 'success' | 'info'; id: number } | null>(null);
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'info' = 'success') => {
+    setToastNotification({ message, type, id: Date.now() });
+    setTimeout(() => {
+      setToastNotification(null);
+    }, 3500);
+  };
+
+
 
   // Estados de Tipo de Frete e CRUD
   const [shippingTypes, setShippingTypes] = useState<ShippingTypeConfig[]>([]);
@@ -1226,9 +1240,12 @@ export default function PedidosPage() {
         } catch {}
 
         setRecentlyMovedItemId(item.id);
+        showToast(`${item.friendly_id || item.order?.pv_number || 'Pedido'} movimentado para "${targetStage.name}"`);
+
         setTimeout(() => {
           setRecentlyMovedItemId(null);
         }, 1500);
+
       }
     } catch (e) {
       console.error('Erro ao mover item:', e);
@@ -1811,12 +1828,13 @@ export default function PedidosPage() {
 
   // Handlers para HTML5 Drag and Drop
   const handleDragStart = (e: React.DragEvent, item: any) => {
+    setDraggedItemId(item.id);
     e.dataTransfer.setData('text/plain', item.id);
     
     const dragTarget = e.currentTarget as HTMLElement;
     if (!dragTarget) return;
 
-    // Criar elemento clone com 280px de largura e 100% opaco para drag preview em 4K e Full HD
+    // Criar elemento clone limpo sem rotação ou sombras pesadas
     const clone = dragTarget.cloneNode(true) as HTMLElement;
     const computedStyle = window.getComputedStyle(dragTarget);
 
@@ -1826,16 +1844,17 @@ export default function PedidosPage() {
     clone.style.width = '280px';
     clone.style.minWidth = '280px';
     clone.style.maxWidth = '280px';
-    clone.style.opacity = '1';
+    clone.style.opacity = '0.9';
     clone.style.boxSizing = 'border-box';
-    clone.style.backgroundColor = computedStyle.backgroundColor || '#ffffff';
-    clone.style.border = computedStyle.border;
+    clone.style.backgroundColor = computedStyle.backgroundColor || 'var(--surface)';
+    clone.style.border = '1px solid var(--primary)';
     clone.style.borderLeft = computedStyle.borderLeft;
     clone.style.borderRadius = computedStyle.borderRadius;
-    clone.style.boxShadow = '0 10px 25px rgba(0, 0, 0, 0.2)';
-    clone.style.pointerEvents = 'none';
+    clone.style.boxShadow = 'none';
     clone.style.transform = 'none';
+    clone.style.pointerEvents = 'none';
     clone.style.zIndex = '999999';
+
 
     document.body.appendChild(clone);
 
@@ -1854,8 +1873,44 @@ export default function PedidosPage() {
     }, 0);
   };
 
+  const handleDragOverColumn = (e: React.DragEvent, stageId: string) => {
+    e.preventDefault();
+    if (dragOverStageId !== stageId) {
+      setDragOverStageId(stageId);
+    }
+  };
+
+  const handleCardDragOver = (e: React.DragEvent, stageId: string, index: number, itemId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverStageId(stageId);
+
+    if (draggedItemId === itemId) return;
+
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+
+    if (e.clientY < midY) {
+      setDragOverIndex(index);
+    } else {
+      setDragOverIndex(index + 1);
+    }
+  };
+
+
+  const handleDragEnd = () => {
+    setDraggedItemId(null);
+    setDragOverStageId(null);
+    setDragOverIndex(null);
+  };
+
   const handleDrop = async (e: React.DragEvent, targetStageId: string) => {
     e.preventDefault();
+    setDraggedItemId(null);
+    setDragOverStageId(null);
+    setDragOverIndex(null);
+
     const itemId = e.dataTransfer.getData('text/plain');
     if (!itemId) return;
 
@@ -1864,6 +1919,7 @@ export default function PedidosPage() {
 
     await moveOrderItemToStage(itemToMove, targetStageId);
   };
+
 
   // Abrir modal para Criação
   const handleOpenCreate = () => {
@@ -3019,11 +3075,12 @@ export default function PedidosPage() {
             if (columns.length > 0) {
               columns.push({
                 id: 'virtual-delayed',
-                name: 'Atrasados ⚠️',
+                name: 'Atrasados',
                 color: '#ef4444',
                 isVirtual: true,
                 originalIdx: -1
               } as any);
+
             }
             return columns.map((stage) => {
               const isVirtual = stage.isVirtual;
@@ -3070,11 +3127,19 @@ export default function PedidosPage() {
             return (
               <div
                 key={stage.id}
-                onDragOver={(e) => e.preventDefault()}
+                onDragOver={(e) => {
+                  if (isVirtual) return;
+                  handleDragOverColumn(e, stage.id);
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                  if (dragOverStageId === stage.id) setDragOverStageId(null);
+                }}
                 onDrop={(e) => {
                   if (isVirtual) return;
                   handleDrop(e, stage.id);
                 }}
+
                 style={{
                   flex: isEmpty ? '0 0 140px' : '1 1 280px',
                   minWidth: isEmpty ? '140px' : '260px',
@@ -3224,6 +3289,7 @@ export default function PedidosPage() {
                 {/* Lista de Cards da Etapa */}
                 <div 
                   className="no-scrollbar"
+                  onDragOver={(e) => handleDragOverColumn(e, stage.id)}
                   style={{ 
                     display: 'flex', 
                     flexDirection: 'column', 
@@ -3234,28 +3300,46 @@ export default function PedidosPage() {
                   }}
                 >
                   {stageItems.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', padding: '1.5rem 0', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
-                      Vazio
-                    </div>
+                    <>
+                      {dragOverStageId === stage.id && draggedItemId && (
+                        <div className="kanban-drop-placeholder">
+                          Encaixar nesta etapa
+                        </div>
+                      )}
+                      <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', padding: '1.5rem 0', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                        Vazio
+                      </div>
+                    </>
                   ) : (
-                    stageItems.map((item) => {
+                    stageItems.map((item, idx) => {
                       const parentOrder = item.order || {};
                       const isReleased = !!parentOrder.first_payment_date;
                       const overShort = item.over_short_quantity || 0;
                       const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type);
+                      const isBeingDragged = draggedItemId === item.id;
+                      const showPlaceholderBefore = dragOverStageId === stage.id && dragOverIndex === idx && !isBeingDragged;
                       
                       return (
-                        <div 
-                          key={item.id}
-                          className={recentlyMovedItemId === item.id ? 'pulse-glow' : ''}
-                          draggable={true}
-                          onDragStart={(e) => handleDragStart(e, item)}
-                          onClick={(e) => {
-                            // Abre detalhes apenas em clique direto (não durante drag)
-                            const target = e.target as HTMLElement;
-                            const isButton = target.closest('button');
+                        <React.Fragment key={item.id}>
+                          {showPlaceholderBefore && (
+                            <div className="kanban-drop-placeholder">
+                              Encaixar nesta etapa
+                            </div>
+                          )}
+                          <div 
+                            className={`${recentlyMovedItemId === item.id ? 'pulse-glow' : ''} ${isBeingDragged ? 'kanban-card-dragging' : ''}`}
+                            draggable={true}
+                            onDragStart={(e) => handleDragStart(e, item)}
+                            onDragOver={(e) => handleCardDragOver(e, stage.id, idx, item.id)}
+                            onDragEnd={handleDragEnd}
+                            onClick={(e) => {
+                              // Abre detalhes apenas em clique direto (não durante drag)
+                              const target = e.target as HTMLElement;
+                              const isButton = target.closest('button');
+
                             if (!isButton) handleOpenDetail(item);
                           }}
+
                           style={{
                             backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
                             border: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
@@ -3767,11 +3851,23 @@ export default function PedidosPage() {
                           </div>
 
                         </div>
-                      );
-                    })
-                  )}
-                </div>
+                      </React.Fragment>
+                    );
+                  })
+                )}
+
+                {dragOverStageId === stage.id &&
+                 draggedItemId &&
+                 stageItems.length > 0 &&
+                 (dragOverIndex === stageItems.length || dragOverIndex === null) &&
+                 !stageItems.some((i, idx) => i.id === draggedItemId && (dragOverIndex === idx || dragOverIndex === idx + 1)) && (
+                  <div className="kanban-drop-placeholder">
+                    Encaixar nesta etapa
+                  </div>
+                )}
               </div>
+            </div>
+
             );
           })
           })()}
@@ -6600,491 +6696,302 @@ export default function PedidosPage() {
 
         return (
           <div
+            className="modal-overlay-glass"
             onClick={(e) => { if (e.target === e.currentTarget) setIsDetailModalOpen(false); }}
-            style={{
-              position: 'fixed', inset: 0,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              zIndex: 1100, padding: '1.5rem 2rem',
-              backdropFilter: 'blur(4px)'
-            }}
           >
-            <div style={{
-              backgroundColor: 'var(--surface)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border)',
-              boxShadow: 'var(--shadow-premium)',
-              width: '100%',
-              maxWidth: '860px',
-              maxHeight: '92vh',
-              display: 'flex',
-              flexDirection: 'column',
-              animation: 'fadeIn 0.2s ease',
-              overflow: 'hidden'
-            }}>
+            <div className="trello-modal-container">
+              
+              {/* Puxador para Celular (Bottom Sheet Handle) */}
+              <div className="bottom-sheet-handle" />
 
-              {/* Header */}
-              <div style={{
-                padding: '1.1rem 1.5rem',
-                borderBottom: '1px solid var(--border)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                background: `linear-gradient(135deg, ${currentStage?.color || 'var(--primary)'}18 0%, transparent 100%)`,
-                borderLeft: `4px solid ${currentStage?.color || 'var(--primary)'}`
-              }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)' }}>
-                      {detailItem.friendly_id || '---'}
-                    </span>
-                    {currentStage && (
-                      <span style={{
-                        fontSize: '0.7rem', fontWeight: 700,
-                        backgroundColor: currentStage.color + '22',
-                        color: currentStage.color,
-                        padding: '2px 8px', borderRadius: '99px',
-                        border: `1px solid ${currentStage.color}55`
-                      }}>
-                        {currentStage.name}
-                      </span>
-                    )}
-                    {isOverdue && (
-                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700 }}>Atrasado</span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    {detailItem.name} · {customer.name || 'Cliente'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {/* Capa de Banner do Modal (Trello Cover Banner) */}
+              <div 
+                className="trello-cover-banner"
+                style={{
+                  background: !isReleased
+                    ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+                    : currentStage?.name === 'Concluído'
+                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                    : `linear-gradient(135deg, ${currentStage?.color || 'var(--primary)'} 0%, #2563eb 100%)`
+                }}
+              >
+                <div className="trello-cover-banner-actions">
                   {(!user?.role || user.role !== 'Produção' || currentStage?.name === 'Em produção') && (
                     <button
                       onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}
-                      className="btn btn-primary"
-                      style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                      className="btn"
+                      style={{
+                        backgroundColor: 'rgba(255,255,255,0.2)',
+                        color: '#ffffff',
+                        border: '1px solid rgba(255,255,255,0.3)',
+                        fontSize: '0.75rem',
+                        padding: '0.35rem 0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
+                        borderRadius: '6px',
+                        backdropFilter: 'blur(4px)'
+                      }}
                     >
-                      <Edit3 size={12} /> Editar
+                      <Edit3 size={13} /> Editar
                     </button>
                   )}
                   <button
                     onClick={() => setIsDetailModalOpen(false)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: 'var(--text-muted)', lineHeight: 1 }}
+                    style={{
+                      background: 'rgba(0,0,0,0.2)',
+                      border: 'none',
+                      color: '#ffffff',
+                      borderRadius: '50%',
+                      width: '32px',
+                      height: '32px',
+                      cursor: 'pointer',
+                      fontSize: '1.25rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      lineHeight: 1
+                    }}
                   >
                     &times;
                   </button>
                 </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#ffffff' }}>
+                    {detailItem.friendly_id || order.pv_number || '---'}
+                  </h2>
+                  {currentStage && (
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 700,
+                      backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                      color: '#ffffff',
+                      padding: '2px 9px', borderRadius: '99px',
+                      border: '1px solid rgba(255, 255, 255, 0.4)',
+                      backdropFilter: 'blur(4px)'
+                    }}>
+                      {currentStage.name}
+                    </span>
+                  )}
+                  {isOverdue && (
+                    <span style={{ fontSize: '0.7rem', backgroundColor: '#ef4444', color: '#ffffff', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>
+                      ATRASADO
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ fontSize: '0.825rem', opacity: 0.9, marginTop: '2px' }}>
+                  {detailItem.name} · <strong>{customer.name || 'Cliente'}</strong>
+                </div>
               </div>
 
-              {/* Corpo com scroll */}
-              <div style={{ overflowY: 'auto', flex: 1, padding: '1.25rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-                {!isReleased && (
-                  <div style={{
-                    backgroundColor: 'var(--danger-bg)',
-                    border: '1px solid var(--danger)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '0.75rem 1rem',
-                    color: 'var(--danger)',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginBottom: '0.25rem'
-                  }}>
-                    <AlertTriangle size={16} />
-                    <span>Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal).</span>
-                  </div>
-                )}
-
-                {/* Linha superior: Pedido + Cliente lado a lado */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', alignItems: 'start' }}>
-                <section>
-                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span style={{ width: '3px', height: '12px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
-                    Pedido
-                  </div>
-                  <div className="grid-responsive-2" style={{ gap: '0.5rem' }}>
-                    {[
-                      { label: 'PV', value: order.pv_number || '—' },
-                      { label: 'OP', value: order.op_number || '—' },
-                      { label: 'Produto/Serviço', value: detailItem.name || '—' },
-                      { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
-                      { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—' },
-                      { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
-                    ].map(({ label, value }) => (
-                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                {/* Seção: Cliente (ao lado de Pedido no grid) */}
-                <section>
-                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span style={{ width: '3px', height: '12px', backgroundColor: '#a855f7', borderRadius: '2px', display: 'inline-block' }} />
-                    Cliente
-                  </div>
-                  <div className="grid-responsive-2" style={{ gap: '0.5rem' }}>
-                    {(() => {
-                      const formattedDoc = formatDocument(customer.document);
-                      const formattedEmail = customer.email ? customer.email.toLowerCase() : '';
-                      const formattedPhone = formatPhone(customer.phone);
-                      return [
-                        { label: 'Nome', value: customer.name || '—', copyText: customer.name },
-                        { label: 'CNPJ/CPF', value: formattedDoc || '—', copyText: formattedDoc },
-                        { label: 'E-mail', value: formattedEmail || '—', copyText: formattedEmail, style: { textTransform: 'lowercase' } },
-                        { label: 'Telefone', value: formattedPhone || '—', copyText: formattedPhone },
-                      ].map(({ label, value, copyText, style }) => (
-                        <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-                          <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500, wordBreak: 'break-all', ...style }}>
-                            {value}
-                            {copyText && copyText !== '—' && <CopyButton text={copyText} />}
-                          </span>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </section>
-                </div>{/* fim grid Pedido+Cliente */}
-
-                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-
-                {/* Seção: Produção */}
-                <section>
-                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span style={{ width: '3px', height: '12px', backgroundColor: '#3b82f6', borderRadius: '2px', display: 'inline-block' }} />
-                    Especificações deste Item / Card
-                  </div>
-                  <div className="grid-responsive-3" style={{ gap: '0.5rem' }}>
-                    {[
-                      { label: 'Tiragem', value: (detailItem.print_run || 0).toLocaleString('pt-BR') + ' un' },
-                      { label: 'Caixas', value: `${detailItem.boxes_count || 0} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` },
-                      { label: 'Medida', value: detailItem.measure || '—' },
-                      { label: 'Setor', value: detailItem.production_sector || '—' },
-                      { label: 'Máquina Vinculada', value: machineName },
-                      { label: 'Localização', value: detailItem.physical_location || 'Salão' },
-                      { label: 'Sobra/Falta Produção', value: detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : detailItem.over_short_quantity < 0 ? `${detailItem.over_short_quantity}` : '—' },
-                      { label: 'Falta na Entrega', value: detailItem.shortage_quantity ? `${detailItem.shortage_quantity} un` : '—' },
-                      { label: 'Cortesia/Brinde', value: detailItem.courtesy_quantity ? `${detailItem.courtesy_quantity} un` : '—' },
-                    ].map(({ label, value }) => (
-                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-
-                {/* Seção: Itens / Produtos do Pedido */}
-                <section>
-                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <span style={{ width: '3px', height: '12px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
-                    Itens / Produtos do Pedido
-                  </div>
-                  <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', textAlign: 'left', minWidth: '450px' }}>
-                      <thead>
-                        <tr style={{ backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Item</th>
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Produto</th>
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Qtd</th>
-                          {!hideMonetaryValues && <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor Un.</th>}
-                          {!hideMonetaryValues && <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Subtotal</th>}
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Estágio</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {orderItems.filter(i => i.order_id === order.id).map((i: any) => {
-                          const itemStage = stages.find(s => s.id === i.stage_id);
-                          const unitPrice = i.unit_price !== undefined && i.unit_price !== null ? Number(i.unit_price) : (i.product?.price || 0);
-                          const subtotal = i.total_price !== undefined && i.total_price !== null ? Number(i.total_price) : ((i.print_run || 0) * unitPrice);
-                          const isCurrent = i.id === detailItem.id;
-                          return (
-                            <tr key={i.id} style={{ 
-                              borderBottom: '1px solid var(--border)',
-                              backgroundColor: isCurrent ? 'rgba(var(--primary-rgb), 0.04)' : 'transparent',
-                              fontWeight: isCurrent ? 700 : 400
-                            }}>
-                              <td style={{ padding: '0.5rem 0.75rem', color: isCurrent ? 'var(--primary)' : 'var(--text)' }}>
-                                {i.friendly_id || '—'} {isCurrent && '(Este)'}
-                              </td>
-                              <td style={{ padding: '0.5rem 0.75rem' }}>{i.name}</td>
-                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>{(i.print_run || 0).toLocaleString('pt-BR')}</td>
-                              {!hideMonetaryValues && (
-                                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
-                                  R$ {unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              )}
-                              {!hideMonetaryValues && (
-                                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
-                                  R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              )}
-                              <td style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap' }}>
-                                <span style={{ 
-                                  color: itemStage?.color || 'var(--text-muted)',
-                                  fontWeight: 700,
-                                  fontSize: '0.72rem',
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                  {itemStage?.name || 'A produzir'}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-
-                {/* Seção: Totais Financeiros do Pedido */}
-                {!hideMonetaryValues && (
-                  <>
-                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-                    <section>
-                      <div className="grid-responsive-3" style={{ backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', gap: '0.5rem' }}>
-                        {(() => {
-                          const orderItemsList = orderItems.filter(i => i.order_id === order.id);
-                          const totalProducts = orderItemsList.reduce((acc, i) => {
-                            const itemTotal = i.total_price !== undefined && i.total_price !== null ? Number(i.total_price) : ((i.print_run || 0) * (i.product?.price || 0));
-                            return acc + itemTotal;
-                          }, 0);
-                          const freight = Number(order.freight_value || 0);
-                          const netTotal = totalProducts + freight;
-                          return (
-                            <>
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total Produtos</span>
-                                <span style={{ fontSize: '0.875rem', color: 'var(--text)', fontWeight: 700 }}>
-                                  R$ {totalProducts.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Frete</span>
-                                <span style={{ fontSize: '0.875rem', color: 'var(--text)', fontWeight: 700 }}>
-                                  R$ {freight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total Líquido</span>
-                                <span style={{ fontSize: '0.875rem', color: 'var(--primary)', fontWeight: 800 }}>
-                                  R$ {netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </section>
-                  </>
-                )}
-
-                <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-
-                {/* Seção: Financeiro */}
-                <section>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <span style={{ width: '3px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px', display: 'inline-block' }} />
-                      Faturamento / Controle de Pagamento
-                    </div>
-                    {order.conta_azul_id && (
-                      <button
-                        type="button"
-                        onClick={() => handleSyncSingleOrder(order.id)}
-                        disabled={syncingSingleOrder}
-                        className="btn btn-secondary"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.25rem',
-                          padding: '0.25rem 0.5rem',
-                          fontSize: '0.68rem',
-                          height: '24px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <RefreshCw size={11} className={syncingSingleOrder ? 'spinner' : ''} />
-                        <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Pedido'}</span>
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.6rem' }}>
+              {/* Corpo em Grid 2 Colunas no Desktop / Stack no Mobile */}
+              <div className="trello-modal-body-grid">
+                
+                {/* COLUNA PRINCIPAL (Esquerda) */}
+                <div className="trello-main-content">
+                  
+                  {/* Banner de Alerta se Bloqueado */}
+                  {!isReleased && (
                     <div style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                      padding: '0.3rem 0.75rem', borderRadius: '99px',
-                      backgroundColor: isReleased ? 'hsla(142, 76.2%, 36.3%, 0.12)' : 'hsla(0, 84.2%, 60.2%, 0.10)',
-                      border: `1px solid ${isReleased ? 'hsla(142, 76.2%, 36.3%, 0.35)' : 'hsla(0, 84.2%, 60.2%, 0.3)'}`,
-                      color: isReleased ? 'hsl(142, 76.2%, 36.3%)' : 'hsl(0, 84.2%, 50%)',
-                      fontSize: '0.75rem', fontWeight: 700
+                      backgroundColor: 'var(--danger-bg)',
+                      border: '1px solid var(--danger)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '0.75rem 1rem',
+                      color: 'var(--danger)',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
                     }}>
-                      {isReleased ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-                      {isReleased ? 'Liberado para Produção' : 'Aguardando Pagamento'}
+                      <AlertTriangle size={16} />
+                      <span>Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal).</span>
                     </div>
-                    {isReleased && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        Sinal: {new Date(order.first_payment_date + 'T12:00:00').toLocaleDateString('pt-BR')}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid-responsive-3" style={{ gap: '0.5rem', marginBottom: '0.75rem' }}>
-                    {[
-                      { label: 'Frete', value: freightStyle.label },
-                      { label: 'Parcelas', value: `${order.installments_paid || 0}/${order.installments_total || 1} pagas` },
-                      { label: 'Frete (R$)', value: order.freight_value ? `R$ ${Number(order.freight_value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '—', hide: hideMonetaryValues },
-                    ].filter(x => !x.hide).map(({ label, value }) => (
-                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 500 }}>{value}</span>
+                  )}
+
+                  {/* Seção 1: Informações de Pedido e Cliente */}
+                  <section>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ width: '3px', height: '12px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
+                      Dados do Pedido & Cliente
+                    </div>
+                    
+                    <div className="grid-responsive-2" style={{ gap: '0.75rem' }}>
+                      <div style={{ backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <span style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Pedido</span>
+                        <div style={{ fontSize: '0.82rem' }}>PV: <strong>{order.pv_number || '—'}</strong></div>
+                        <div style={{ fontSize: '0.82rem' }}>OP: <strong>{order.op_number || '—'}</strong></div>
+                        <div style={{ fontSize: '0.82rem' }}>Vendedor(a): <strong>{order.seller_name || 'Samppel'}</strong></div>
+                        <div style={{ fontSize: '0.82rem' }}>Data: <strong>{order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—'}</strong></div>
                       </div>
-                    ))}
-                  </div>
 
-                  {/* Tabela de parcelas a receber */}
-                  {(() => {
-                    const orderTransactions = financialTransactions.filter(t => t.order_id === order.id);
+                      <div style={{ backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <span style={{ fontSize: '0.65rem', color: '#a855f7', fontWeight: 700, textTransform: 'uppercase' }}>Cliente</span>
+                        <div style={{ fontSize: '0.82rem' }}>Nome: <strong>{customer.name || '—'}</strong> {customer.name && <CopyButton text={customer.name} />}</div>
+                        <div style={{ fontSize: '0.82rem' }}>Documento: <strong>{formatDocument(customer.document) || '—'}</strong></div>
+                        <div style={{ fontSize: '0.82rem' }}>E-mail: <strong style={{ textTransform: 'lowercase' }}>{customer.email || '—'}</strong></div>
+                        <div style={{ fontSize: '0.82rem' }}>Telefone: <strong>{formatPhone(customer.phone) || '—'}</strong></div>
+                      </div>
+                    </div>
+                  </section>
 
-                    if (orderTransactions.length === 0) {
-                      return (
-                        <div style={{
-                          padding: '1rem 1.25rem',
-                          backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                          border: '1px solid rgba(239, 68, 68, 0.2)',
-                          borderRadius: 'var(--radius-md)',
-                          color: '#ef4444',
-                          fontSize: '0.78rem',
-                          lineHeight: '1.5',
-                          marginTop: '0.5rem',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '0.25rem'
-                        }}>
-                          <span style={{ fontWeight: 700 }}>⚠️ Sem parcelas financeiras sincronizadas</span>
-                          <span>
-                            Este pedido ainda não possui parcelas financeiras sincronizadas no banco local do portal. 
-                            Certifique-se de que a sua integração com o Conta Azul em <em>Configurações do Portal</em> está conectada e clique no botão <strong>Sincronizar Pedido</strong> acima para buscar e gravar as parcelas reais em tempo real.
-                          </span>
+                  <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+
+                  {/* Seção 2: Especificações Técnicas */}
+                  <section>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ width: '3px', height: '12px', backgroundColor: '#3b82f6', borderRadius: '2px', display: 'inline-block' }} />
+                      Especificações de Produção
+                    </div>
+                    <div className="grid-responsive-3" style={{ gap: '0.5rem' }}>
+                      {[
+                        { label: 'Tiragem', value: (detailItem.print_run || 0).toLocaleString('pt-BR') + ' un' },
+                        { label: 'Caixas', value: `${detailItem.boxes_count || 0} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` },
+                        { label: 'Medida / Faca', value: detailItem.measure || '—' },
+                        { label: 'Setor Físico', value: detailItem.production_sector || '—' },
+                        { label: 'Máquina', value: machineName },
+                        { label: 'Localização', value: detailItem.physical_location || 'Salão' },
+                        { label: 'Sobra/Falta', value: detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : detailItem.over_short_quantity < 0 ? `${detailItem.over_short_quantity}` : '—' },
+                        { label: 'Falta Entrega', value: detailItem.shortage_quantity ? `${detailItem.shortage_quantity} un` : '—' },
+                        { label: 'Cortesia/Brinde', value: detailItem.courtesy_quantity ? `${detailItem.courtesy_quantity} un` : '—' },
+                      ].map(({ label, value }) => (
+                        <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px', backgroundColor: 'var(--background)', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                          <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 600 }}>{value}</span>
                         </div>
-                      );
-                    }
+                      ))}
+                    </div>
+                  </section>
 
-                    // 1. Definir parcelas reais ordenadas cronologicamente
-                    const sortedTransactions = [...orderTransactions].sort((a, b) => {
-                      if (!a.due_date) return 1;
-                      if (!b.due_date) return -1;
-                      return a.due_date.localeCompare(b.due_date);
-                    });
+                  <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
 
-                    const finalInstallments = sortedTransactions.map((t: any, index: number) => {
-                      const statusUpper = (t.status || 'PENDENTE').toUpperCase();
-                      const isPaid = ['CONCILIADO', 'QUITADO', 'BAIXADO'].includes(statusUpper);
-                      
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
+                  {/* Seção 3: Financeiro & Contas a Receber */}
+                  <section>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ width: '3px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px', display: 'inline-block' }} />
+                        Controle Financeiro / Conta Azul
+                      </div>
+                      {order.conta_azul_id && (
+                        <button
+                          type="button"
+                          onClick={() => handleSyncSingleOrder(order.id)}
+                          disabled={syncingSingleOrder}
+                          className="btn btn-secondary"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.68rem',
+                            height: '24px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <RefreshCw size={11} className={syncingSingleOrder ? 'spinner' : ''} />
+                          <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar'}</span>
+                        </button>
+                      )}
+                    </div>
 
-                      const dueDate = t.due_date ? new Date(t.due_date + 'T00:00:00') : null;
-                      
-                      const valor = Number(t.amount || 0);
-                      const recebido = t.received_amount !== undefined && t.received_amount !== null ? Number(t.received_amount) : (isPaid ? valor : 0);
-                      const emAberto = t.open_amount !== undefined && t.open_amount !== null ? Number(t.open_amount) : (isPaid ? 0 : valor);
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.6rem' }}>
+                      <div style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                        padding: '0.3rem 0.75rem', borderRadius: '99px',
+                        backgroundColor: isReleased ? 'hsla(142, 76.2%, 36.3%, 0.12)' : 'hsla(0, 84.2%, 60.2%, 0.10)',
+                        border: `1px solid ${isReleased ? 'hsla(142, 76.2%, 36.3%, 0.35)' : 'hsla(0, 84.2%, 60.2%, 0.3)'}`,
+                        color: isReleased ? 'hsl(142, 76.2%, 36.3%)' : 'hsl(0, 84.2%, 50%)',
+                        fontSize: '0.75rem', fontWeight: 700
+                      }}>
+                        {isReleased ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+                        {isReleased ? 'Liberado para Produção' : 'Aguardando Pagamento / Sinal'}
+                      </div>
+                      {isReleased && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          Sinal: {new Date(order.first_payment_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                        </span>
+                      )}
+                    </div>
 
-                      let label = 'A vencer';
-                      let color = '#f59e0b';
-                      let bg = 'rgba(245,158,11,0.1)';
+                    {/* Tabela de parcelas */}
+                    {(() => {
+                      const orderTransactions = financialTransactions.filter(t => t.order_id === order.id);
 
-                      if (recebido > 0 && emAberto > 0) {
-                        label = 'Recebido Parcial';
-                        color = '#3b82f6';
-                        bg = 'rgba(59, 130, 246, 0.1)';
-                      } else if (isPaid || emAberto === 0) {
-                        label = 'Paga';
-                        color = '#10b981';
-                        bg = 'rgba(16,185,129,0.1)';
-                      } else if (dueDate) {
-                        dueDate.setHours(0, 0, 0, 0);
-                        if (dueDate.getTime() < today.getTime()) {
+                      if (orderTransactions.length === 0) {
+                        return (
+                          <div style={{
+                            padding: '0.85rem 1rem',
+                            backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                            border: '1px solid rgba(239, 68, 68, 0.2)',
+                            borderRadius: 'var(--radius-md)',
+                            color: '#ef4444',
+                            fontSize: '0.78rem',
+                            lineHeight: '1.5'
+                          }}>
+                            ⚠️ Sem parcelas financeiras sincronizadas no portal.
+                          </div>
+                        );
+                      }
+
+                      const sortedTransactions = [...orderTransactions].sort((a, b) => {
+                        if (!a.due_date) return 1;
+                        if (!b.due_date) return -1;
+                        return a.due_date.localeCompare(b.due_date);
+                      });
+
+                      const finalInstallments = sortedTransactions.map((t: any, index: number) => {
+                        const statusUpper = (t.status || 'PENDENTE').toUpperCase();
+                        const isPaid = ['CONCILIADO', 'QUITADO', 'BAIXADO'].includes(statusUpper);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+
+                        const dueDate = t.due_date ? new Date(t.due_date + 'T00:00:00') : null;
+                        const valor = Number(t.amount || 0);
+                        const recebido = t.received_amount !== undefined && t.received_amount !== null ? Number(t.received_amount) : (isPaid ? valor : 0);
+                        const emAberto = t.open_amount !== undefined && t.open_amount !== null ? Number(t.open_amount) : (isPaid ? 0 : valor);
+
+                        let label = 'A vencer';
+                        let color = '#f59e0b';
+                        let bg = 'rgba(245,158,11,0.1)';
+
+                        if (recebido > 0 && emAberto > 0) {
+                          label = 'Parcial';
+                          color = '#3b82f6';
+                          bg = 'rgba(59, 130, 246, 0.1)';
+                        } else if (isPaid || emAberto === 0) {
+                          label = 'Paga';
+                          color = '#10b981';
+                          bg = 'rgba(16,185,129,0.1)';
+                        } else if (dueDate && dueDate.getTime() < today.getTime()) {
                           label = 'Atrasada';
                           color = '#ef4444';
                           bg = 'rgba(239,68,68,0.1)';
                         }
-                      }
 
-                      let parcelaNum = `${index + 1}/${sortedTransactions.length}`;
-                      const desc = t.description || '';
-                      const match = desc.match(/(\d+)\s*\/\s*(\d+)/);
-                      if (match) {
-                        parcelaNum = match[0];
-                      }
+                        let parcelaNum = `${index + 1}/${sortedTransactions.length}`;
+                        return {
+                          vencimento: t.due_date || '',
+                          parcelaNum,
+                          formaPagamento: order.payment_condition || 'Pix',
+                          valor,
+                          recebido,
+                          emAberto,
+                          statusLabel: label,
+                          statusColor: color,
+                          statusBg: bg
+                        };
+                      });
 
-                      let formaPagamento = 'Pix';
-                      if (desc.includes('-')) {
-                        formaPagamento = desc.split('-').slice(1).join('-').trim();
-                      } else {
-                        formaPagamento = order.payment_condition || 'Pix';
-                      }
-
-                      return {
-                        vencimento: t.due_date || '',
-                        parcelaNum,
-                        formaPagamento,
-                        conta: 'Conta Banco',
-                        valor,
-                        recebido,
-                        emAberto,
-                        statusLabel: label,
-                        statusColor: color,
-                        statusBg: bg
-                      };
-                    });
-
-                    // 2. Somar os totais para os resumos
-                    const totalRecebido = finalInstallments.reduce((acc, inst) => acc + inst.recebido, 0);
-                    const totalAReceber = finalInstallments.filter(inst => {
-                      if (inst.statusLabel === 'A vencer') return true;
-                      if (inst.statusLabel === 'Recebido Parcial') {
-                        const dueTime = new Date(inst.vencimento + 'T12:00:00').getTime();
-                        const todayTime = new Date().setHours(0,0,0,0);
-                        return dueTime >= todayTime;
-                      }
-                      return false;
-                    }).reduce((acc, inst) => acc + inst.emAberto, 0);
-
-                    const totalEmAtraso = finalInstallments.filter(inst => {
-                      if (inst.statusLabel === 'Atrasada') return true;
-                      if (inst.statusLabel === 'Recebido Parcial') {
-                        const dueTime = new Date(inst.vencimento + 'T12:00:00').getTime();
-                        const todayTime = new Date().setHours(0,0,0,0);
-                        return dueTime < todayTime;
-                      }
-                      return false;
-                    }).reduce((acc, inst) => acc + inst.emAberto, 0);
-
-                    const totalEmAberto = totalAReceber + totalEmAtraso;
-
-                    return (
-                      <div style={{ marginTop: '0.75rem' }}>
+                      return (
                         <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                          <div style={{ padding: '0.4rem 0.6rem', fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                            Controle de Parcelas (Contas a Receber)
-                          </div>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
                             <thead>
                               <tr style={{ backgroundColor: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
-                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Vencimento</th>
-                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Parcela</th>
-                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Forma de pagamento</th>
-                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Conta</th>
-                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor R$</th>}
-                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Recebido R$</th>}
-                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Em aberto R$</th>}
-                                <th style={{ padding: '0.4rem 0.6rem', fontWeight: 700, color: 'var(--text-muted)' }}>Situação</th>
+                                <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>Vencimento</th>
+                                <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>Parcela</th>
+                                {!hideMonetaryValues && <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)', textAlign: 'right' }}>Valor</th>}
+                                <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>Situação</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -7094,32 +7001,20 @@ export default function PedidosPage() {
                                     {inst.vencimento ? new Date(inst.vencimento + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
                                   </td>
                                   <td style={{ padding: '0.4rem 0.6rem' }}>{inst.parcelaNum}</td>
-                                  <td style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>{inst.formaPagamento}</td>
-                                  <td style={{ padding: '0.4rem 0.6rem', color: 'var(--text-muted)' }}>{inst.conta}</td>
                                   {!hideMonetaryValues && (
                                     <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600 }}>
                                       R$ {inst.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                   )}
-                                  {!hideMonetaryValues && (
-                                    <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600, color: inst.recebido > 0 ? '#10b981' : 'var(--text-muted)' }}>
-                                      R$ {inst.recebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                  )}
-                                  {!hideMonetaryValues && (
-                                    <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600, color: inst.emAberto > 0 ? (inst.statusLabel === 'Atrasada' ? '#ef4444' : '#3b82f6') : 'var(--text-muted)' }}>
-                                      R$ {inst.emAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                  )}
                                   <td style={{ padding: '0.4rem 0.6rem' }}>
                                     <span style={{
                                       display: 'inline-block',
-                                      padding: '2px 8px',
+                                      padding: '2px 6px',
                                       borderRadius: '4px',
-                                      fontSize: '0.72rem',
+                                      fontSize: '0.7rem',
                                       fontWeight: 700,
                                       color: inst.statusColor,
-                                      backgroundColor: inst.statusBg,
+                                      backgroundColor: inst.statusBg
                                     }}>
                                       {inst.statusLabel}
                                     </span>
@@ -7129,248 +7024,119 @@ export default function PedidosPage() {
                             </tbody>
                           </table>
                         </div>
+                      );
+                    })()}
+                  </section>
 
-                        {/* Bloco de resumos financeiros do Conta Azul */}
-                        {!hideMonetaryValues && (
-                          <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            {/* Recebido */}
-                            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--background)' }}>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>Recebido</span>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total recebido (R$)</span>
-                                <span style={{ fontSize: '1.1rem', fontWeight: 800, color: '#10b981' }}>
-                                  R$ {totalRecebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Em aberto */}
-                            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'var(--background)' }}>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>Em aberto</span>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                                <div style={{ display: 'flex', gap: '1.5rem' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total a receber (R$)</span>
-                                    <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text)' }}>
-                                      R$ {totalAReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 300 }}>+</div>
-                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total em atraso (R$)</span>
-                                    <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#ef4444' }}>
-                                      R$ {totalEmAtraso.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-                                  <div style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 300 }}>=</div>
-                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total em aberto (R$)</span>
-                                    <span style={{ fontSize: '1.2rem', fontWeight: 800, color: '#3b82f6' }}>
-                                      R$ {totalEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
+                  {/* Seção 4: Observações */}
+                  {(detailItem.notes || order.notes || order.internal_notes || detailItem.expedition_notes) && (
+                    <>
+                      <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+                      <section>
+                        <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span style={{ width: '3px', height: '12px', backgroundColor: '#eab308', borderRadius: '2px', display: 'inline-block' }} />
+                          Observações & Anotações
+                        </div>
+                        {detailItem.notes && (
+                          <div style={{ marginBottom: '0.4rem' }}>
+                            <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Item</span>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{detailItem.notes}</p>
                           </div>
                         )}
-                      </div>
-                    );
-                  })()}
-                </section>
+                        {detailItem.expedition_notes && (
+                          <div style={{ marginBottom: '0.4rem', borderLeft: '3.5px solid var(--primary)', paddingLeft: '0.6rem' }}>
+                            <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Anotações da Expedição</span>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{detailItem.expedition_notes}</p>
+                          </div>
+                        )}
+                        {order.notes && (
+                          <div style={{ marginBottom: '0.4rem' }}>
+                            <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Pedido / Pagamento</span>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.notes}</p>
+                          </div>
+                        )}
+                        {order.internal_notes && (
+                          <div style={{ borderLeft: '3px solid var(--primary)', paddingLeft: '0.6rem', marginTop: '0.4rem', opacity: 0.85 }}>
+                            <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Anotações Internas</span>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.internal_notes}</p>
+                          </div>
+                        )}
+                      </section>
+                    </>
+                  )}
 
-                {/* Seção: Prazo */}
-                {deadline && (
-                  <>
-                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-                    <section>
-                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <span style={{ width: '3px', height: '12px', backgroundColor: isOverdue ? 'var(--danger)' : '#f97316', borderRadius: '2px', display: 'inline-block' }} />
-                        Prazo
-                      </div>
-                      <div style={{
-                        display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                        padding: '0.4rem 0.85rem', borderRadius: 'var(--radius-sm)',
-                        backgroundColor: isOverdue ? 'hsla(0, 84.2%, 60.2%, 0.08)' : 'hsla(38, 92.7%, 50.2%, 0.08)',
-                        border: `1px solid ${isOverdue ? 'hsla(0, 84.2%, 60.2%, 0.3)' : 'hsla(38, 92.7%, 50.2%, 0.3)'}`,
-                        color: isOverdue ? 'var(--danger)' : 'hsl(38, 92.7%, 45%)',
-                        fontSize: '0.82rem', fontWeight: 700
-                      }}>
-                        {deadline.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
-                        {isOverdue && <span>(ATRASADO)</span>}
-                      </div>
-                    </section>
-                  </>
-                )}
+                </div>
 
-                {/* Seção: Observações */}
-                {(detailItem.notes || order.notes || order.internal_notes || detailItem.expedition_notes) && (
-                  <>
-                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-                    <section>
-                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <span style={{ width: '3px', height: '12px', backgroundColor: '#eab308', borderRadius: '2px', display: 'inline-block' }} />
-                        Observações
-                      </div>
-                      {detailItem.notes && (
-                        <div style={{ marginBottom: '0.4rem' }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Item</span>
-                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{detailItem.notes}</p>
-                        </div>
-                      )}
-                      {detailItem.expedition_notes && (
-                        <div style={{ marginBottom: '0.4rem', borderLeft: '3.5px solid var(--primary)', paddingLeft: '0.6rem' }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Anotações da Expedição</span>
-                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{detailItem.expedition_notes}</p>
-                        </div>
-                      )}
-                      {order.notes && (
-                        <div style={{ marginBottom: '0.4rem' }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Pedido / Pagamento</span>
-                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.notes}</p>
-                        </div>
-                      )}
-                      {order.internal_notes && (
-                        <div style={{ borderLeft: '3px solid var(--primary)', paddingLeft: '0.6rem', marginTop: '0.4rem', opacity: 0.85 }}>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Anotações Internas</span>
-                          <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap' }}>{order.internal_notes}</p>
-                        </div>
-                      )}
-                    </section>
-                  </>
-                )}
+                {/* PAINEL LATERAL DE AÇÕES RÁPIDAS (Direita no Desktop / Baixo no Mobile) */}
+                <div className="trello-sidebar-actions">
+                  <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Ações Rápidas
+                  </div>
 
-                {/* Seção: Conferências (se houver) */}
-                {itemAdjs.length > 0 && (
-                  <>
-                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-                    <section>
-                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <span style={{ width: '3px', height: '12px', backgroundColor: 'hsl(168, 83.8%, 38.6%)', borderRadius: '2px', display: 'inline-block' }} />
-                        Conferência de Tiragem ({itemAdjs.length})
-                      </div>
-                      {itemAdjs.map((adj: any, i: number) => (
-                        <div key={i} style={{
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)',
-                          backgroundColor: adj.difference_quantity >= 0 ? 'hsla(142, 76.2%, 36.3%, 0.08)' : 'hsla(0, 84.2%, 60.2%, 0.08)',
-                          border: `1px solid ${adj.difference_quantity >= 0 ? 'hsla(142, 76.2%, 36.3%, 0.25)' : 'hsla(0, 84.2%, 60.2%, 0.25)'}`,
-                          marginBottom: '0.35rem',
-                          fontSize: '0.78rem'
-                        }}>
-                          <span style={{ color: 'var(--text-muted)' }}>Pedido: {adj.ordered_quantity?.toLocaleString('pt-BR')} → Produzido: {adj.produced_quantity?.toLocaleString('pt-BR')}</span>
-                          <span style={{ fontWeight: 700, color: adj.difference_quantity >= 0 ? 'hsl(142, 76.2%, 36.3%)' : 'hsl(0, 84.2%, 50%)' }}>
-                            {adj.difference_quantity >= 0 ? '+' : ''}{adj.difference_quantity?.toLocaleString('pt-BR')} un
-                          </span>
-                        </div>
-                      ))}
-                    </section>
-                  </>
-                )}
-
-                {/* Seção: Ocorrências de Expedição (Editável apenas na etapa Expedição) */}
-                {currentStage?.name === 'Expedição' && (
-                  <>
-                    <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
-                    <section style={{ 
-                      backgroundColor: 'rgba(var(--primary-rgb), 0.02)', 
-                      padding: '1rem', 
-                      borderRadius: 'var(--radius-md)', 
-                      border: '1px dashed rgba(var(--primary-rgb), 0.25)' 
-                    }}>
-                      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <Truck size={13} />
-                        Ocorrências na Expedição (Falta / Cortesia)
-                      </div>
-                      
-                      <div className="grid-responsive-2" style={{ gap: '0.75rem', marginBottom: '0.75rem' }}>
-                        <div className="form-group" style={{ margin: 0 }}>
-                          <label className="form-label" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Falta na Entrega (unidades)</label>
-                          <input 
-                            type="number"
-                            className="form-input"
-                            min="0"
-                            value={detailShortage}
-                            onChange={(e) => setDetailShortage(Math.max(0, parseInt(e.target.value) || 0))}
-                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem' }}
-                          />
-                        </div>
-                        <div className="form-group" style={{ margin: 0 }}>
-                          <label className="form-label" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Cortesia / Brinde (unidades)</label>
-                          <input 
-                            type="number"
-                            className="form-input"
-                            min="0"
-                            value={detailCourtesy}
-                            onChange={(e) => setDetailCourtesy(Math.max(0, parseInt(e.target.value) || 0))}
-                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem' }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="form-group" style={{ marginBottom: '1rem' }}>
-                        <label className="form-label" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Observações da Expedição</label>
-                        <textarea
-                          className="form-input"
-                          rows={2}
-                          value={detailExpeditionNotes}
-                          onChange={(e) => setDetailExpeditionNotes(e.target.value)}
-                          placeholder="Insira detalhes sobre falta, transportadora, coleta ou cortesia..."
-                          style={{ padding: '0.4rem 0.5rem', fontSize: '0.82rem', resize: 'vertical' }}
-                        />
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          disabled={savingExpeditionDetails}
-                          onClick={handleSaveExpeditionDetails}
-                          style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem', fontWeight: 600 }}
-                        >
-                          {savingExpeditionDetails ? 'Salvando...' : 'Salvar Dados da Expedição'}
-                        </button>
-                      </div>
-                    </section>
-                  </>
-                )}
-
-              </div>
-
-              {/* Footer */}
-              <div style={{
-                padding: '0.85rem 1.5rem',
-                borderTop: '1px solid var(--border)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                backgroundColor: 'var(--background)'
-              }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  ID: {detailItem.id?.substring(0, 8)}… · Tipo: {detailItem.item_type}
-                </span>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button
-                    onClick={() => setIsDetailModalOpen(false)}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '0.78rem' }}
-                  >
-                    Fechar
-                  </button>
                   {(!user?.role || user.role !== 'Produção' || currentStage?.name === 'Em produção') && (
                     <button
                       onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}
                       className="btn btn-primary"
-                      style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.65rem 1rem', fontSize: '0.82rem', fontWeight: 600 }}
                     >
-                      <Edit3 size={13} /> Editar Pedido
+                      <Edit3 size={15} />
+                      <span>Editar Pedido</span>
                     </button>
                   )}
+
+                  {order.conta_azul_id && (
+                    <button
+                      onClick={() => handleSyncSingleOrder(order.id)}
+                      disabled={syncingSingleOrder}
+                      className="btn btn-secondary"
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.6rem 1rem', fontSize: '0.82rem', fontWeight: 600 }}
+                    >
+                      <RefreshCw size={14} className={syncingSingleOrder ? 'spinner' : ''} />
+                      <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Conta Azul'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      const text = `PV: ${order.pv_number || '—'}\nCliente: ${customer.name || '—'}\nArte: ${detailItem.name}\nTiragem: ${detailItem.print_run} un`;
+                      navigator.clipboard.writeText(text);
+                      showToast('Dados do PV copiados para a área de transferência');
+
+                    }}
+                    className="btn btn-secondary"
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.6rem 1rem', fontSize: '0.82rem', fontWeight: 600 }}
+                  >
+                    <Copy size={14} />
+                    <span>Copiar Resumo PV</span>
+                  </button>
+
+                  <div style={{ height: '1px', backgroundColor: 'var(--border)', margin: '0.25rem 0' }} />
+
+                  {/* Resumo do Status no Rodapé Lateral */}
+                  <div style={{ backgroundColor: 'var(--background)', padding: '0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Identificação</span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                      ID: {detailItem.id?.substring(0, 12)}…
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Fase Atual: <strong style={{ color: currentStage?.color || 'var(--primary)' }}>{currentStage?.name || 'A produzir'}</strong>
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setIsDetailModalOpen(false)}
+                    className="btn btn-secondary"
+                    style={{ width: '100%', marginTop: 'auto', padding: '0.6rem 1rem', fontSize: '0.82rem', fontWeight: 600 }}
+                  >
+                    Fechar Visualização
+                  </button>
                 </div>
+
               </div>
 
             </div>
           </div>
+
         );
       })()}
 
@@ -7967,7 +7733,7 @@ export default function PedidosPage() {
                   onClick={handleCancelBlockedPaymentMove}
                   style={{ padding: '0.65rem 1.15rem', fontSize: '0.85rem', fontWeight: 600, flex: 1 }}
                 >
-                  🛑 Não, Manter Bloqueado
+                  Não, Manter Bloqueado
                 </button>
                 <button
                   type="button"
@@ -7986,15 +7752,25 @@ export default function PedidosPage() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '0.4rem',
-                    boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)',
                     flex: 1
                   }}
                 >
-                  <span>⚡ Sim, Colocar em Produção</span>
+                  <span>Sim, Colocar em Produção</span>
                 </button>
+
               </div>
 
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* COMPONENTE DE NOTIFICAÇÃO TOAST FLUTUANTE */}
+      {toastNotification && (
+        <div className="toast-container-floating">
+          <div className="toast-card-item">
+            <CheckCircle2 size={18} color="#10b981" />
+            <span>{toastNotification.message}</span>
           </div>
         </div>
       )}
@@ -8014,4 +7790,5 @@ export default function PedidosPage() {
     </div>
   );
 }
+
 
