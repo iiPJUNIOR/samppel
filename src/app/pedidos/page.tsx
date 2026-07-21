@@ -404,6 +404,33 @@ export default function PedidosPage() {
   const inProgressOrderBypass = useRef(false);
   const authActionType = useRef<'kanban_move' | 'save_details'>('kanban_move');
 
+  // Estados do Modal Didático de Alerta de Pedido Bloqueado (Sem Sinal/Pagamento)
+  const [isBlockedPaymentModalOpen, setIsBlockedPaymentModalOpen] = useState(false);
+  const [blockedPaymentItem, setBlockedPaymentItem] = useState<any>(null);
+  const [blockedPaymentTargetStageId, setBlockedPaymentTargetStageId] = useState<string>('');
+  const blockedPaymentBypass = useRef(false);
+
+  const handleConfirmBlockedPaymentMove = async () => {
+    if (!blockedPaymentItem || !blockedPaymentTargetStageId) return;
+    const item = blockedPaymentItem;
+    const targetStageId = blockedPaymentTargetStageId;
+
+    setIsBlockedPaymentModalOpen(false);
+    setBlockedPaymentItem(null);
+    setBlockedPaymentTargetStageId('');
+
+    blockedPaymentBypass.current = true;
+    await moveOrderItemToStage(item, targetStageId);
+    blockedPaymentBypass.current = false;
+  };
+
+  const handleCancelBlockedPaymentMove = () => {
+    setIsBlockedPaymentModalOpen(false);
+    setBlockedPaymentItem(null);
+    setBlockedPaymentTargetStageId('');
+  };
+
+
   // Estados de Tipo de Frete e CRUD
   const [shippingTypes, setShippingTypes] = useState<ShippingTypeConfig[]>([]);
   const [selectedShippingType, setSelectedShippingType] = useState<string>('');
@@ -1108,23 +1135,26 @@ export default function PedidosPage() {
       }
     }
 
-    // Regra básica de negócio: Não mover para produção se não houver sinal ou se houver parcelas vencidas
+    // Regra básica de negócio: Alerta didático de pedido bloqueado (sem sinal) ao mover para produção
     const isProductionStage = ['Em produção', 'Manuseio', 'Em revisão', 'Expedição', 'Concluído', 'Atrasado'].includes(targetStage.name);
     
-    if (isProductionStage && user?.role !== 'Administrador') {
+    if (isProductionStage) {
       const isParentPaid = !!item.order?.first_payment_date;
       const isOverdue = hasOverdueInstallments(item.order_id);
       
-      if (!isParentPaid) {
-        alert(`Bloqueio de Produção: O pedido ${item.order?.pv_number || 'PV'} ainda não foi autorizado financeiramente (sem data de sinal/primeiro pagamento).`);
+      if (!isParentPaid && !blockedPaymentBypass.current) {
+        setBlockedPaymentItem(item);
+        setBlockedPaymentTargetStageId(targetStageId);
+        setIsBlockedPaymentModalOpen(true);
         return;
       }
       
-      if (isOverdue) {
+      if (isOverdue && user?.role !== 'Administrador') {
         alert(`Bloqueio de Produção: O pedido ${item.order?.pv_number || 'PV'} possui parcelas em atraso financeiro no Conta Azul.`);
         return;
       }
     }
+
 
     setLoading(true);
     try {
@@ -7836,6 +7866,139 @@ export default function PedidosPage() {
         </div>
       )}
 
+      {/* MODAL DIDÁTICO: ALERTA DE PEDIDO BLOQUEADO (AGUARDANDO PAGAMENTO / SINAL) */}
+      {isBlockedPaymentModalOpen && blockedPaymentItem && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 99999,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
+            maxWidth: '540px', width: '90%', overflow: 'hidden',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+          }}>
+            {/* Cabeçalho de Alerta Destacado */}
+            <div style={{
+              backgroundColor: '#ef4444',
+              color: '#ffffff',
+              padding: '1.25rem 1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem'
+            }}>
+              <div style={{
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                borderRadius: '50%',
+                padding: '0.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+
+                <AlertTriangle size={24} color="#ffffff" />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#ffffff' }}>
+                  Atenção: Este pedido está Bloqueado
+                </h3>
+                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', opacity: 0.9 }}>
+                  Aguardando Pagamento / Sinal Financeiro
+                </p>
+              </div>
+            </div>
+
+            {/* Conteúdo Explicativo Didático */}
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              
+              {/* Informações Resumidas do Card */}
+              <div style={{
+                backgroundColor: 'var(--surface-subtle, #f8fafc)',
+                border: '1px solid var(--border, #e2e8f0)',
+                borderRadius: '10px',
+                padding: '1rem'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text)' }}>
+                    {blockedPaymentItem.friendly_id || blockedPaymentItem.order?.pv_number || 'Pedido'}
+                  </span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)' }}>
+                    {blockedPaymentItem.name || blockedPaymentItem.art_name}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
+                  Cliente: <strong>{blockedPaymentItem.order?.customer?.name || 'Cliente não informado'}</strong>
+                </div>
+              </div>
+
+              {/* Explicação Didática sobre Riscos */}
+              <div style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.06)',
+                borderLeft: '4px solid #ef4444',
+                borderRadius: '6px',
+                padding: '0.85rem 1rem',
+                fontSize: '0.85rem',
+                color: 'var(--text)',
+                lineHeight: '1.5'
+              }}>
+                <strong style={{ color: '#dc2626', display: 'block', marginBottom: '0.3rem' }}>
+                  Por que o pedido está bloqueado?
+                </strong>
+                Este pedido ainda não possui a confirmação da data do primeiro pagamento ou sinal financeiro no Conta Azul. Iniciar a produção sem o recebimento do sinal pode gerar custos operacionais sem garantia de recebimento.
+              </div>
+
+              <div style={{
+                textAlign: 'center',
+                padding: '0.5rem 0',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+                color: 'var(--text)'
+              }}>
+                Deseja colocar este pedido em produção mesmo assim?
+              </div>
+
+              {/* Botões Didáticos de Ação */}
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCancelBlockedPaymentMove}
+                  style={{ padding: '0.65rem 1.15rem', fontSize: '0.85rem', fontWeight: 600, flex: 1 }}
+                >
+                  🛑 Não, Manter Bloqueado
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleConfirmBlockedPaymentMove}
+                  style={{
+                    backgroundColor: '#ef4444',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '0.65rem 1.15rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-md, 8px)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.4rem',
+                    boxShadow: '0 2px 4px rgba(239, 68, 68, 0.3)',
+                    flex: 1
+                  }}
+                >
+                  <span>⚡ Sim, Colocar em Produção</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
       <OperatorAuthModal 
         isOpen={isOpAuthOpen}
         tenantId={user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'}
@@ -7851,3 +8014,4 @@ export default function PedidosPage() {
     </div>
   );
 }
+
