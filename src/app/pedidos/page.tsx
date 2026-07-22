@@ -439,6 +439,10 @@ export default function PedidosPage() {
   const dragCloneRef = useRef<HTMLElement | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
   const activeDragItemId = useRef<string | null>(null);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const isDragActive = useRef<boolean>(false);
+  const dragPendingItem = useRef<any>(null);
+  const dragPendingTarget = useRef<HTMLElement | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
@@ -1843,6 +1847,10 @@ export default function PedidosPage() {
     }
     dragCloneRef.current = null;
     activeDragItemId.current = null;
+    dragPendingItem.current = null;
+    dragPendingTarget.current = null;
+    isDragActive.current = false;
+
     setDraggedItemId(null);
     setDragOverStageId(null);
     setDragOverIndex(null);
@@ -1852,111 +1860,130 @@ export default function PedidosPage() {
   };
 
   const handlePointerDown = (e: React.PointerEvent, item: any) => {
-    // Apenas botão esquerdo do mouse ou toque
+    // Apenas botão esquerdo do mouse ou toque principal
     if (e.button !== 0) return;
 
     // Ignora se clicou em um botão (ex: botão Edit, Copiar PV)
     const target = e.target as HTMLElement;
     if (target.closest('button')) return;
 
-    // PREVENIR comportamento padrão (seleção de texto/HTML5 drag)
-    e.preventDefault();
-
     const currentTarget = e.currentTarget as HTMLElement;
     const rect = currentTarget.getBoundingClientRect();
     
-    // Calcula o offset (onde exatamente o mouse pegou no card)
+    // Registra a posição inicial para calcular o threshold (evita travar o scroll mobile)
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
     dragOffset.current = {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top
     };
 
-    // Cria o clone físico 100% sólido
-    const clone = currentTarget.cloneNode(true) as HTMLElement;
-    clone.id = 'custom-pointer-clone';
-    clone.style.position = 'fixed';
-    clone.style.top = '0px';
-    clone.style.left = '0px';
-    clone.style.width = `${rect.width}px`;
-    clone.style.boxSizing = 'border-box';
-    clone.style.backgroundColor = 'var(--surface)';
-    clone.style.border = '2px solid var(--primary)';
-    clone.style.borderRadius = '8px';
-    clone.style.boxShadow = 'var(--shadow-premium)';
-    clone.style.opacity = '1';
-    clone.style.zIndex = '999999';
-    clone.style.pointerEvents = 'none'; // Ignora cliques para podermos detectar os elementos embaixo!
-    clone.style.transition = 'none'; // Desliga transições CSS para não engasgar o movimento
-    clone.style.transform = `translate3d(${e.clientX - dragOffset.current.x}px, ${e.clientY - dragOffset.current.y}px, 0) rotate(3deg)`;
-    
-    document.body.appendChild(clone);
-    
-    dragCloneRef.current = clone;
-    activeDragItemId.current = item.id;
-    
-    setDraggedItemId(item.id);
+    dragPendingItem.current = item;
+    dragPendingTarget.current = currentTarget;
+    isDragActive.current = false;
 
-    // Registra eventos no document para seguir fora do card
+    // NÃO executa e.preventDefault() aqui para PERMITIR scroll mobile nativo.
     document.addEventListener('pointermove', handlePointerMove, { passive: false });
     document.addEventListener('pointerup', handlePointerUp);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
-    e.preventDefault();
-    if (!dragCloneRef.current || !activeDragItemId.current) return;
+    // Se o arrasto ainda não foi ativado, verifica se o usuário moveu o dedo/mouse mais de 10px
+    if (!isDragActive.current) {
+      const deltaX = Math.abs(e.clientX - dragStartPos.current.x);
+      const deltaY = Math.abs(e.clientY - dragStartPos.current.y);
+      const dist = Math.hypot(deltaX, deltaY);
 
-    // Atualiza a posição do clone (60FPS, sem state do React)
-    const x = e.clientX - dragOffset.current.x;
-    const y = e.clientY - dragOffset.current.y;
-    dragCloneRef.current.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(3deg)`;
+      // Se moveu menos de 10px, é apenas um toque ou scroll vertical — NÃO ativa o arrasto!
+      if (dist < 10) return;
 
-    // Encontra a coluna debaixo do mouse
-    // Como o clone tem pointerEvents: 'none', ele pega a coluna debaixo!
-    const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-    if (!elementBelow) return;
+      // Moveu mais de 10px: Ativa o arrasto do card!
+      isDragActive.current = true;
+      const item = dragPendingItem.current;
+      const currentTarget = dragPendingTarget.current;
 
-    const column = elementBelow.closest('.kanban-column');
-    if (column) {
-      const stageId = column.getAttribute('data-stage-id');
-      if (stageId) {
-        setDragOverStageId(stageId);
-        
-        // Lógica de Indexação (Opcional, para placeholder exato)
-        const cards = Array.from(column.querySelectorAll('.kanban-card-base'));
-        let foundIndex = cards.length;
-        for (let i = 0; i < cards.length; i++) {
-          const cardRect = cards[i].getBoundingClientRect();
-          const midY = cardRect.top + cardRect.height / 2;
-          if (e.clientY < midY) {
-            foundIndex = i;
-            break;
+      if (!item || !currentTarget) return;
+
+      const rect = currentTarget.getBoundingClientRect();
+
+      // Cria o clone físico 100% sólido estilo Trello
+      const clone = currentTarget.cloneNode(true) as HTMLElement;
+      clone.id = 'custom-pointer-clone';
+      clone.style.position = 'fixed';
+      clone.style.top = '0px';
+      clone.style.left = '0px';
+      clone.style.width = `${rect.width}px`;
+      clone.style.boxSizing = 'border-box';
+      clone.style.backgroundColor = 'var(--surface)';
+      clone.style.border = '2px solid var(--primary)';
+      clone.style.borderRadius = '8px';
+      clone.style.boxShadow = 'var(--shadow-premium)';
+      clone.style.opacity = '1';
+      clone.style.zIndex = '999999';
+      clone.style.pointerEvents = 'none';
+      clone.style.transition = 'none';
+      clone.style.transform = `translate3d(${e.clientX - dragOffset.current.x}px, ${e.clientY - dragOffset.current.y}px, 0) rotate(3deg)`;
+      
+      document.body.appendChild(clone);
+      
+      dragCloneRef.current = clone;
+      activeDragItemId.current = item.id;
+      setDraggedItemId(item.id);
+    }
+
+    // Se o arrasto já está ativo, bloqueia o scroll nativo e movimenta o card clone
+    if (isDragActive.current) {
+      e.preventDefault();
+      if (!dragCloneRef.current) return;
+
+      const x = e.clientX - dragOffset.current.x;
+      const y = e.clientY - dragOffset.current.y;
+      dragCloneRef.current.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(3deg)`;
+
+      const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+      if (!elementBelow) return;
+
+      const column = elementBelow.closest('.kanban-column');
+      if (column) {
+        const stageId = column.getAttribute('data-stage-id');
+        if (stageId) {
+          setDragOverStageId(stageId);
+          const cards = Array.from(column.querySelectorAll('.kanban-card-base'));
+          let foundIndex = cards.length;
+          for (let i = 0; i < cards.length; i++) {
+            const cardRect = cards[i].getBoundingClientRect();
+            const midY = cardRect.top + cardRect.height / 2;
+            if (e.clientY < midY) {
+              foundIndex = i;
+              break;
+            }
           }
+          setDragOverIndex(foundIndex);
         }
-        setDragOverIndex(foundIndex);
+      } else {
+        setDragOverStageId(null);
       }
-    } else {
-      setDragOverStageId(null);
     }
   };
 
   const handlePointerUp = async (e: PointerEvent) => {
+    const wasActive = isDragActive.current;
     const itemId = activeDragItemId.current;
     
-    // Encontra a coluna alvo
-    const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
     let targetStageId = null;
-    
-    if (elementBelow) {
-      const column = elementBelow.closest('.kanban-column');
-      if (column) {
-        targetStageId = column.getAttribute('data-stage-id');
+    if (wasActive) {
+      const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+      if (elementBelow) {
+        const column = elementBelow.closest('.kanban-column');
+        if (column) {
+          targetStageId = column.getAttribute('data-stage-id');
+        }
       }
     }
 
     // Limpa a interface visual
     cleanupCustomDrag();
 
-    if (itemId && targetStageId) {
+    if (wasActive && itemId && targetStageId) {
       const itemToMove = orderItems.find(i => i.id === itemId);
       if (itemToMove && itemToMove.stage_id !== targetStageId) {
         await moveOrderItemToStage(itemToMove, targetStageId);
@@ -3405,7 +3432,7 @@ export default function PedidosPage() {
                             className={`kanban-card-base ${recentlyMovedItemId === item.id ? 'pulse-glow' : ''} ${isBeingDragged ? 'kanban-card-dragging' : ''}`}
                             onPointerDown={(e) => handlePointerDown(e, item)}
                             style={{ 
-                              touchAction: 'none',
+                              touchAction: 'pan-y',
                               backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
                               border: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
                               borderLeft: `3px solid ${stage.color}`,
