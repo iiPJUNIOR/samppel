@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/services/supabase';
-import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
 
 export default function RedefinirSenhaPage() {
   const router = useRouter();
@@ -15,10 +15,17 @@ export default function RedefinirSenhaPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isInvite, setIsInvite] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('invite') === 'true' || searchParams.get('type') === 'invite') {
+        setIsInvite(true);
+      }
+    }
+
     if (!supabase) return;
-    // Escuta alterações na sessão do Supabase (ex: evento PASSWORD_RECOVERY)
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setError(null);
@@ -30,6 +37,14 @@ export default function RedefinirSenhaPage() {
     };
   }, []);
 
+  // Requisitos para Senha Forte
+  const reqMinLength = password.length >= 8;
+  const reqUpper = /[A-Z]/.test(password);
+  const reqLower = /[a-z]/.test(password);
+  const reqNumber = /[0-9]/.test(password);
+  const reqSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+  const isPasswordStrong = reqMinLength && reqUpper && reqLower && reqNumber && reqSpecial;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -39,8 +54,13 @@ export default function RedefinirSenhaPage() {
       return;
     }
 
-    if (!password || password.length < 6) {
-      setError('A nova senha deve ter no mínimo 6 caracteres.');
+    if (!password) {
+      setError('A nova senha é obrigatória.');
+      return;
+    }
+
+    if (!isPasswordStrong) {
+      setError('Sua senha precisa preencher todos os 5 requisitos de segurança forte abaixo.');
       return;
     }
 
@@ -60,12 +80,21 @@ export default function RedefinirSenhaPage() {
         throw updateError;
       }
 
+      // Remover a exigência de troca de senha no perfil
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        await supabase
+          .from('profiles')
+          .update({ force_password_change: false })
+          .eq('id', session.user.id);
+      }
+
       setSuccess(true);
       setTimeout(() => {
         router.push('/');
       }, 3000);
     } catch (err: any) {
-      setError(err.message || 'Erro ao redefinir a senha. O link pode ter expirado.');
+      setError(err.message || 'Erro ao definir a senha. O link de convite pode ter expirado.');
     } finally {
       setLoading(false);
     }
@@ -83,7 +112,7 @@ export default function RedefinirSenhaPage() {
     }}>
       <div style={{
         width: '100%',
-        maxWidth: '440px',
+        maxWidth: '460px',
         backgroundColor: '#ffffff',
         borderRadius: '16px',
         boxShadow: '0 10px 25px rgba(0, 0, 0, 0.05)',
@@ -104,12 +133,24 @@ export default function RedefinirSenhaPage() {
 
         {/* Content */}
         <div style={{ padding: '2rem' }}>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#0f172a', margin: '0 0 0.5rem 0', textAlign: 'center' }}>
-            Redefinir Senha
-          </h1>
-          <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', textAlign: 'center', lineHeight: '1.5' }}>
-            Digite e confirme sua nova senha abaixo para atualizar seu acesso.
-          </p>
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <div style={{
+              width: '48px', height: '48px', borderRadius: '50%',
+              backgroundColor: 'rgba(37, 99, 235, 0.1)', border: '1px solid rgba(37, 99, 235, 0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem auto'
+            }}>
+              <ShieldCheck size={26} style={{ color: '#2563eb' }} />
+            </div>
+
+            <h1 style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0f172a', margin: '0 0 0.4rem 0' }}>
+              {isInvite ? 'Criar Sua Senha de Acesso' : 'Redefinir Sua Senha'}
+            </h1>
+            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0, lineHeight: '1.5' }}>
+              {isInvite
+                ? 'Bem-vindo ao Portal Samppel! Para ativar seu convite, crie uma senha forte e segura abaixo.'
+                : 'Crie uma nova senha forte para atualizar as credenciais do seu usuário.'}
+            </p>
+          </div>
 
           {success ? (
             <div style={{
@@ -121,12 +162,14 @@ export default function RedefinirSenhaPage() {
               color: '#166534'
             }}>
               <CheckCircle2 size={36} style={{ color: '#22c55e', margin: '0 auto 0.75rem auto', display: 'block' }} />
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.4rem 0' }}>Senha alterada com sucesso!</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.4rem 0' }}>
+                Senha criada com sucesso!
+              </h3>
               <p style={{ fontSize: '0.85rem', margin: 0, color: '#15803d' }}>
-                Sua nova senha foi salva. Você será redirecionado para a página de login em instantes...
+                Sua conta foi ativada. Você será redirecionado para a página inicial em instantes...
               </p>
               <Link href="/" style={{ display: 'inline-block', marginTop: '1rem', fontSize: '0.875rem', fontWeight: 600, color: '#2563eb', textDecoration: 'none' }}>
-                Ir para o Login agora →
+                Ir para o Portal agora →
               </Link>
             </div>
           ) : (
@@ -150,13 +193,12 @@ export default function RedefinirSenhaPage() {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.4rem' }}>
-                  Nova Senha
+                  {isInvite ? 'Nova Senha Forte *' : 'Nova Senha *'}
                 </label>
                 <div style={{ position: 'relative' }}>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={6}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -164,9 +206,10 @@ export default function RedefinirSenhaPage() {
                       width: '100%',
                       padding: '0.75rem 2.5rem 0.75rem 0.875rem',
                       borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
+                      border: isPasswordStrong ? '1.5px solid #22c55e' : '1px solid #cbd5e1',
                       fontSize: '0.925rem',
-                      outline: 'none'
+                      outline: 'none',
+                      boxSizing: 'border-box'
                     }}
                   />
                   <button
@@ -188,14 +231,49 @@ export default function RedefinirSenhaPage() {
                 </div>
               </div>
 
+              {/* Checklist Visual de Senha Forte */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                fontSize: '0.78rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.35rem'
+              }}>
+                <div style={{ fontWeight: 600, color: '#475569', marginBottom: '0.2rem' }}>
+                  Requisitos de Segurança da Senha:
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: reqMinLength ? '#166534' : '#64748b', fontWeight: reqMinLength ? 600 : 400 }}>
+                  <CheckCircle2 size={13} style={{ color: reqMinLength ? '#22c55e' : '#cbd5e1' }} />
+                  <span>Mínimo de 8 caracteres</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: reqUpper ? '#166534' : '#64748b', fontWeight: reqUpper ? 600 : 400 }}>
+                  <CheckCircle2 size={13} style={{ color: reqUpper ? '#22c55e' : '#cbd5e1' }} />
+                  <span>Pelo menos 1 letra maiúscula (A-Z)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: reqLower ? '#166534' : '#64748b', fontWeight: reqLower ? 600 : 400 }}>
+                  <CheckCircle2 size={13} style={{ color: reqLower ? '#22c55e' : '#cbd5e1' }} />
+                  <span>Pelo menos 1 letra minúscula (a-z)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: reqNumber ? '#166534' : '#64748b', fontWeight: reqNumber ? 600 : 400 }}>
+                  <CheckCircle2 size={13} style={{ color: reqNumber ? '#22c55e' : '#cbd5e1' }} />
+                  <span>Pelo menos 1 número (0-9)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: reqSpecial ? '#166534' : '#64748b', fontWeight: reqSpecial ? 600 : 400 }}>
+                  <CheckCircle2 size={13} style={{ color: reqSpecial ? '#22c55e' : '#cbd5e1' }} />
+                  <span>Pelo menos 1 caractere especial (!@#$%...)</span>
+                </div>
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.4rem' }}>
-                  Confirmar Nova Senha
+                  Confirmar Nova Senha *
                 </label>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
-                  minLength={6}
                   placeholder="••••••••"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -203,50 +281,51 @@ export default function RedefinirSenhaPage() {
                     width: '100%',
                     padding: '0.75rem 0.875rem',
                     borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
+                    border: confirmPassword && confirmPassword === password ? '1.5px solid #22c55e' : '1px solid #cbd5e1',
                     fontSize: '0.925rem',
-                    outline: 'none'
+                    outline: 'none',
+                    boxSizing: 'border-box'
                   }}
                 />
               </div>
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !isPasswordStrong}
                 style={{
                   width: '100%',
-                  backgroundColor: '#2563eb',
+                  backgroundColor: isPasswordStrong ? '#2563eb' : '#94a3b8',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '0.875rem',
                   fontSize: '0.925rem',
                   fontWeight: 600,
-                  cursor: loading ? 'not-allowed' : 'pointer',
+                  cursor: (loading || !isPasswordStrong) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '0.5rem',
                   marginTop: '0.5rem',
-                  transition: 'background-color 0.2s'
+                  transition: 'all 0.2s'
                 }}
               >
                 {loading ? (
                   <>
                     <Loader2 size={18} className="spinner" />
-                    <span>Salvando nova senha...</span>
+                    <span>Ativando conta...</span>
                   </>
                 ) : (
                   <>
                     <Lock size={18} />
-                    <span>Atualizar Senha</span>
+                    <span>{isInvite ? 'Criar Senha e Entrar' : 'Atualizar Senha'}</span>
                   </>
                 )}
               </button>
 
               <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
                 <Link href="/" style={{ fontSize: '0.85rem', color: '#64748b', textDecoration: 'none' }}>
-                  ← Cancelar e voltar ao login
+                  ← Voltar ao login
                 </Link>
               </div>
             </form>

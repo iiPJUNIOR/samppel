@@ -910,5 +910,69 @@ body.is-dragging-card * {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   OPTION B: NATIVE DOM GUIDE LINE & COLUMN HIGHLIGHT (ZERO STUTTER)
+   ═══════════════════════════════════════════════════════════════ */
+
+.kanban-column {
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.kanban-column.column-drag-hover {
+  border-color: var(--primary) !important;
+  background-color: rgba(var(--primary-rgb), 0.05) !important;
+  box-shadow: 0 0 12px rgba(var(--primary-rgb), 0.25) !important;
+}
+
+#kanban-drag-guide-line {
+  position: fixed;
+  height: 3px;
+  background-color: var(--primary);
+  box-shadow: 0 0 10px var(--primary), 0 0 4px #ffffff;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 999998;
+  transition: opacity 0.1s ease, transform 0.04s ease-out;
+  opacity: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE GRID UTILITIES (.grid-responsive-2, 1-2, 3)
+   ═══════════════════════════════════════════════════════════════ */
+
+.grid-responsive-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+.grid-responsive-1-2 {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 1.5rem;
+}
+
+.grid-responsive-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .grid-responsive-2,
+  .grid-responsive-1-2,
+  .grid-responsive-3 {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+}
+
+/* Oculta textos secundários de botões em telas pequenas (mobile), mantendo apenas o ícone */
+@media (max-width: 768px) {
+  .desktop-only-inline {
+    display: none !important;
+  }
+}
+
 
 

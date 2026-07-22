@@ -57,8 +57,16 @@ export default function OperadorPerfilPage() {
       return;
     }
 
-    if (newPassword && newPassword.length < 6) {
-      setError('A nova senha deve conter no mínimo 6 caracteres.');
+    // Requisitos para Senha Forte
+    const reqMinLength = newPassword.length >= 8;
+    const reqUpper = /[A-Z]/.test(newPassword);
+    const reqLower = /[a-z]/.test(newPassword);
+    const reqNumber = /[0-9]/.test(newPassword);
+    const reqSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword);
+    const isPasswordStrong = reqMinLength && reqUpper && reqLower && reqNumber && reqSpecial;
+
+    if (newPassword && !isPasswordStrong) {
+      setError('A nova senha deve atender a todos os 5 requisitos de segurança forte abaixo (mínimo 8 caracteres, maiúscula, minúscula, número e caractere especial).');
       return;
     }
 
@@ -236,9 +244,49 @@ export default function OperadorPerfilPage() {
               className="form-input"
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
-              placeholder="Mínimo 6 caracteres..."
-              style={{ width: '100%' }}
+              placeholder="Digite a nova senha forte..."
+              style={{
+                width: '100%',
+                border: newPassword ? (newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword) && /[0-9]/.test(newPassword) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword) ? '1.5px solid var(--success)' : '1px solid var(--border)') : '1px solid var(--border)'
+              }}
             />
+
+            {/* Checklist de Recomendação de Senha Forte */}
+            <div style={{
+              backgroundColor: 'var(--surface-subtle)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.75rem 1rem',
+              fontSize: '0.78rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.35rem',
+              marginTop: '0.5rem'
+            }}>
+              <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: '0.2rem' }}>
+                Recomendações de Segurança da Senha:
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: newPassword.length >= 8 ? 'var(--success)' : 'var(--text-muted)', fontWeight: newPassword.length >= 8 ? 600 : 400 }}>
+                <CheckCircle2 size={13} style={{ color: newPassword.length >= 8 ? 'var(--success)' : 'var(--border)' }} />
+                <span>Mínimo de 8 caracteres</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: /[A-Z]/.test(newPassword) ? 'var(--success)' : 'var(--text-muted)', fontWeight: /[A-Z]/.test(newPassword) ? 600 : 400 }}>
+                <CheckCircle2 size={13} style={{ color: /[A-Z]/.test(newPassword) ? 'var(--success)' : 'var(--border)' }} />
+                <span>Pelo menos 1 letra maiúscula (A-Z)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: /[a-z]/.test(newPassword) ? 'var(--success)' : 'var(--text-muted)', fontWeight: /[a-z]/.test(newPassword) ? 600 : 400 }}>
+                <CheckCircle2 size={13} style={{ color: /[a-z]/.test(newPassword) ? 'var(--success)' : 'var(--border)' }} />
+                <span>Pelo menos 1 letra minúscula (a-z)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: /[0-9]/.test(newPassword) ? 'var(--success)' : 'var(--text-muted)', fontWeight: /[0-9]/.test(newPassword) ? 600 : 400 }}>
+                <CheckCircle2 size={13} style={{ color: /[0-9]/.test(newPassword) ? 'var(--success)' : 'var(--border)' }} />
+                <span>Pelo menos 1 número (0-9)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword) ? 'var(--success)' : 'var(--text-muted)', fontWeight: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword) ? 600 : 400 }}>
+                <CheckCircle2 size={13} style={{ color: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword) ? 'var(--success)' : 'var(--border)' }} />
+                <span>Pelo menos 1 caractere especial (!@#$%...)</span>
+              </div>
+            </div>
           </div>
 
           {/* AVISO DE RESPONSABILIDADE E SEGURANÇA */}

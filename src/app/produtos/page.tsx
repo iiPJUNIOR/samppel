@@ -36,6 +36,70 @@ export default function ProdutosPage() {
   const [isOpAuthOpen, setIsOpAuthOpen] = useState(false);
   const [pendingStockAdj, setPendingStockAdj] = useState<{ quantity: number; type: any; desc: string } | null>(null);
 
+  // Sync Products & Stock state
+  const [isSyncingProducts, setIsSyncingProducts] = useState(false);
+  const [syncStep, setSyncStep] = useState('');
+  const [syncProgress, setSyncProgress] = useState(0);
+
+  const handleSyncProducts = async () => {
+    setIsSyncingProducts(true);
+    setSyncStep('Iniciando comunicação com Conta Azul...');
+    setSyncProgress(5);
+
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const response = await fetch(`/api/sync/import-products?tenantId=${tenantId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userRole: user?.role })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        alert('Erro ao sincronizar produtos: ' + (errorData.error || response.statusText));
+        setIsSyncingProducts(false);
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              if (data.step) setSyncStep(data.step);
+              if (typeof data.progress === 'number') setSyncProgress(data.progress);
+              if (data.success) {
+                const msg = `Sincronização concluída com sucesso!\n\n• Novas criações: ${data.imported || 0}\n• Atualizações e Estoque: ${data.updated || 0}`;
+                alert(msg);
+                await fetchProducts();
+              } else if (data.error) {
+                alert('Erro na sincronização: ' + data.error);
+              }
+            } catch (e) {
+              console.error('Erro ao ler progresso da API:', e);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Erro ao conectar com API de produtos:', err);
+      alert('Falha na conexão para sincronizar produtos.');
+    } finally {
+      setIsSyncingProducts(false);
+    }
+  };
+
   const fetchProducts = async () => {
     setLoading(true);
     try {
@@ -210,12 +274,27 @@ export default function ProdutosPage() {
           </p>
         </div>
 
-        {canCreate && (
-          <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
-            <Plus size={14} />
-            <span>Novo Produto</span>
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {canCreate && (
+            <button
+              onClick={handleSyncProducts}
+              disabled={isSyncingProducts}
+              className="btn btn-secondary"
+              style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
+              title="Sincronizar produtos novos, atualizações e saldos de estoque do Conta Azul"
+            >
+              <RefreshCw size={14} className={isSyncingProducts ? 'spinner' : ''} />
+              <span>{isSyncingProducts ? 'Sincronizando...' : 'Atualizar Estoque/Produtos'}</span>
+            </button>
+          )}
+
+          {canCreate && (
+            <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}>
+              <Plus size={14} />
+              <span>Novo Produto</span>
+            </button>
+          )}
+        </div>
       </header>
 
       {/* FILTERS */}
@@ -615,6 +694,39 @@ export default function ProdutosPage() {
         onClose={() => setIsOpAuthOpen(false)}
         actionDescription={`Ajuste de Estoque (${stockAdjType}) - ${selectedProduct?.name}`}
       />
+
+      {/* Modal de Progresso da Sincronização */}
+      {isSyncingProducts && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
+            padding: '1.75rem', maxWidth: '460px', width: '90%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+              <RefreshCw size={28} className="spinner" style={{ color: 'var(--primary)' }} />
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>Sincronizando Produtos & Estoque</h3>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
+              {syncStep || 'Buscando produtos e saldos no Conta Azul...'}
+            </p>
+            <div style={{ width: '100%', backgroundColor: 'var(--background)', borderRadius: '99px', height: '8px', overflow: 'hidden' }}>
+              <div style={{
+                width: `${syncProgress}%`,
+                backgroundColor: 'var(--primary)',
+                height: '100%',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

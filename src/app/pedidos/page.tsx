@@ -450,6 +450,11 @@ export default function PedidosPage() {
   const activePointerId = useRef<number | null>(null);
   const lastPointerPos = useRef({ x: 0, y: 0 });
   const wasJustDragged = useRef<boolean>(false);
+  const currentOverStageId = useRef<string | null>(null);
+  const currentOverIndex = useRef<number | null>(null);
+  const rafId = useRef<number | null>(null);
+  const cachedColumnRects = useRef<Array<{ stageId: string; left: number; right: number; top: number; width: number; cardsY: Array<{ top: number; bottom: number; mid: number }> }>>([]);
+  const guideLineRef = useRef<HTMLElement | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
@@ -1852,8 +1857,18 @@ export default function PedidosPage() {
   // =========================================================================
 
   const cleanupCustomDrag = () => {
+    if (rafId.current !== null) {
+      cancelAnimationFrame(rafId.current);
+      rafId.current = null;
+    }
     if (typeof document !== 'undefined') {
       document.body.classList.remove('is-dragging-card');
+      document.body.style.cursor = '';
+      const cols = document.querySelectorAll('.kanban-column');
+      cols.forEach(c => c.classList.remove('column-drag-hover'));
+      if (guideLineRef.current) {
+        guideLineRef.current.style.opacity = '0';
+      }
     }
     if (touchHoldTimer.current) {
       clearTimeout(touchHoldTimer.current);
@@ -1875,6 +1890,9 @@ export default function PedidosPage() {
     dragPendingTarget.current = null;
     isDragActive.current = false;
     activePointerId.current = null;
+    currentOverStageId.current = null;
+    currentOverIndex.current = null;
+    cachedColumnRects.current = [];
 
     setDraggedItemId(null);
     setDragOverStageId(null);
@@ -1885,34 +1903,123 @@ export default function PedidosPage() {
     document.removeEventListener('pointercancel', handlePointerCancel);
   };
 
+  const updateDragFrame = () => {
+    if (!isDragActive.current || !dragCloneRef.current) return;
+
+    // 1. Posiciona a cópia do card via GPU acelerada pura (60/120Hz liso)
+    const x = lastPointerPos.current.x - dragOffset.current.x;
+    const y = lastPointerPos.current.y - dragOffset.current.y;
+    dragCloneRef.current.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(2deg)`;
+
+    const curX = lastPointerPos.current.x;
+    const curY = lastPointerPos.current.y;
+
+    let foundCol: any = null;
+
+    // 2. Procura no cache de coordenadas (ZERO reflows de DOM, ZERO React re-renders!)
+    for (const col of cachedColumnRects.current) {
+      if (curX >= col.left && curX <= col.right) {
+        foundCol = col;
+        break;
+      }
+    }
+
+    // 3. Atualiza destaque da coluna e linha guia nativa via DOM puro (ZERO React setState)
+    if (foundCol) {
+      if (currentOverStageId.current !== foundCol.stageId) {
+        currentOverStageId.current = foundStageIdRef(foundCol.stageId);
+      }
+
+      // Posiciona a linha guia de encaixe nativa (#kanban-drag-guide-line)
+      if (guideLineRef.current) {
+        let lineY = foundCol.top + 10;
+        let cardIdx = foundCol.cardsY.length;
+        for (let i = 0; i < foundCol.cardsY.length; i++) {
+          if (curY < foundCol.cardsY[i].mid) {
+            cardIdx = i;
+            lineY = foundCol.cardsY[i].top - 3;
+            break;
+          } else {
+            lineY = foundCol.cardsY[i].bottom + 3;
+          }
+        }
+        currentOverIndex.current = cardIdx;
+
+        guideLineRef.current.style.width = `${foundCol.width}px`;
+        guideLineRef.current.style.transform = `translate3d(${foundCol.left}px, ${lineY}px, 0)`;
+        guideLineRef.current.style.opacity = '1';
+      }
+    } else {
+      if (currentOverStageId.current !== null) {
+        currentOverStageId.current = null;
+        const allCols = document.querySelectorAll('.kanban-column');
+        allCols.forEach(c => c.classList.remove('column-drag-hover'));
+      }
+      if (guideLineRef.current) {
+        guideLineRef.current.style.opacity = '0';
+      }
+    }
+  };
+
+  const foundStageIdRef = (stageId: string) => {
+    const allCols = document.querySelectorAll('.kanban-column');
+    allCols.forEach(c => {
+      if (c.getAttribute('data-stage-id') === stageId) {
+        c.classList.add('column-drag-hover');
+      } else {
+        c.classList.remove('column-drag-hover');
+      }
+    });
+    return stageId;
+  };
+
   const startDragMode = (item: any, currentTarget: HTMLElement, clientX: number, clientY: number) => {
     if (isDragActive.current) return;
 
-    // Sinaliza que uma operação de arrasto física foi iniciada (impede de abrir modal de detalhes no clique)
     wasJustDragged.current = true;
 
-    // Tenta travar a captura do ponteiro para garantir entrega contínua dos eventos de movimento no mobile
-    if (activePointerId.current !== null) {
-      try {
-        currentTarget.setPointerCapture(activePointerId.current);
-      } catch (err) {}
-    }
-
-    // Limpa qualquer seleção de texto acidental ocorrida no toque
     if (typeof window !== 'undefined') {
       window.getSelection()?.removeAllRanges();
     }
     if (typeof document !== 'undefined') {
       document.body.classList.add('is-dragging-card');
+      document.body.style.cursor = 'grabbing';
+
+      // Cria a linha guia de encaixe no DOM nativo se ainda não existir
+      let guide = document.getElementById('kanban-drag-guide-line');
+      if (!guide) {
+        guide = document.createElement('div');
+        guide.id = 'kanban-drag-guide-line';
+        document.body.appendChild(guide);
+      }
+      guideLineRef.current = guide;
     }
 
     isDragActive.current = true;
     const rect = currentTarget.getBoundingClientRect();
 
-    // Feedback tátil leve no mobile ao destacar o card
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      try { navigator.vibrate(35); } catch (err) {}
-    }
+    // Cacheia coordenadas numéricas puras de todas as colunas e cards de uma só vez
+    const cols = Array.from(document.querySelectorAll('.kanban-column'));
+    cachedColumnRects.current = cols.map((cEl) => {
+      const cRect = cEl.getBoundingClientRect();
+      const cardEls = Array.from(cEl.querySelectorAll('.kanban-card-base'));
+      const cardsY = cardEls.map((kEl) => {
+        const kRect = kEl.getBoundingClientRect();
+        return {
+          top: kRect.top,
+          bottom: kRect.bottom,
+          mid: kRect.top + kRect.height / 2
+        };
+      });
+      return {
+        stageId: cEl.getAttribute('data-stage-id') || '',
+        left: cRect.left,
+        right: cRect.right,
+        top: cRect.top,
+        width: cRect.width,
+        cardsY
+      };
+    });
 
     const clone = currentTarget.cloneNode(true) as HTMLElement;
     clone.id = 'custom-pointer-clone';
@@ -1925,13 +2032,13 @@ export default function PedidosPage() {
     clone.style.border = '2px solid var(--primary)';
     clone.style.borderRadius = '8px';
     clone.style.boxShadow = 'var(--shadow-premium)';
-    clone.style.opacity = '1';
+    clone.style.opacity = '0.92';
     clone.style.zIndex = '999999';
     clone.style.pointerEvents = 'none';
     clone.style.userSelect = 'none';
     clone.style.webkitUserSelect = 'none';
     clone.style.transition = 'none';
-    clone.style.transform = `translate3d(${clientX - dragOffset.current.x}px, ${clientY - dragOffset.current.y}px, 0) rotate(3deg)`;
+    clone.style.transform = `translate3d(${clientX - dragOffset.current.x}px, ${clientY - dragOffset.current.y}px, 0) rotate(2deg)`;
     
     document.body.appendChild(clone);
     
@@ -1958,8 +2065,6 @@ export default function PedidosPage() {
   };
 
   const handlePointerDown = (e: React.PointerEvent, item: any) => {
-    // No mobile (toque), o arrasto é 100% desativado para permitir rolagem nativa fluida.
-    // A movimentação é feita através do botão "Mover" + Modal de seleção de etapa.
     if ((e.pointerType as string) === 'touch') return;
     if (e.button !== 0) return;
 
@@ -1997,51 +2102,26 @@ export default function PedidosPage() {
     const dist = Math.hypot(deltaX, deltaY);
 
     if (!isDragActive.current) {
-      // Mouse Desktop: Ativa o arrasto imediato com threshold de 8px
-      if (dist < 8) return;
+      if (dist < 4) return;
       if (dragPendingItem.current && dragPendingTarget.current) {
         startDragMode(dragPendingItem.current, dragPendingTarget.current, e.clientX, e.clientY);
       }
     }
 
-    // Se o arrasto já está ativo, bloqueia o scroll nativo e movimenta o card clone 60FPS
     if (isDragActive.current) {
       if (e.cancelable) e.preventDefault();
-      if (!dragCloneRef.current) return;
 
-      const x = e.clientX - dragOffset.current.x;
-      const y = e.clientY - dragOffset.current.y;
-      dragCloneRef.current.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(3deg)`;
-
-      const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-      if (!elementBelow) return;
-
-      const column = elementBelow.closest('.kanban-column');
-      if (column) {
-        const stageId = column.getAttribute('data-stage-id');
-        if (stageId) {
-          setDragOverStageId(stageId);
-          const cards = Array.from(column.querySelectorAll('.kanban-card-base'));
-          let foundIndex = cards.length;
-          for (let i = 0; i < cards.length; i++) {
-            const cardRect = cards[i].getBoundingClientRect();
-            const midY = cardRect.top + cardRect.height / 2;
-            if (e.clientY < midY) {
-              foundIndex = i;
-              break;
-            }
-          }
-          setDragOverIndex(foundIndex);
-        }
-      } else {
-        setDragOverStageId(null);
+      // Sincroniza com a taxa de atualização do monitor (rAF)
+      if (rafId.current === null) {
+        rafId.current = requestAnimationFrame(() => {
+          rafId.current = null;
+          updateDragFrame();
+        });
       }
     }
   };
 
   const handlePointerCancel = (e: PointerEvent) => {
-    // Se o arrasto ainda NÃO tinha sido ativado, limpa os timers
-    // Se o arrasto JÁ estava ativo, ignora o cancelamento do navegador para que o card continue seguindo o toque!
     if (!isDragActive.current) {
       cleanupCustomDrag();
     }
@@ -2051,9 +2131,8 @@ export default function PedidosPage() {
     const wasActive = isDragActive.current;
     const itemId = activeDragItemId.current;
     
-    let targetStageId = null;
-    if (wasActive) {
-      wasJustDragged.current = true;
+    let targetStageId = currentOverStageId.current;
+    if (!targetStageId && wasActive) {
       const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
       if (elementBelow) {
         const column = elementBelow.closest('.kanban-column');
@@ -2063,7 +2142,6 @@ export default function PedidosPage() {
       }
     }
 
-    // Limpa a interface visual
     cleanupCustomDrag();
 
     if (wasActive && itemId && targetStageId) {
@@ -5621,8 +5699,8 @@ export default function PedidosPage() {
       {isSyncModalOpen && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+          backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 300000, padding: '1rem', backdropFilter: 'blur(4px)'
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',

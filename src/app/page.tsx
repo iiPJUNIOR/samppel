@@ -58,7 +58,21 @@ export default function LoginPage() {
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      if (hash.includes('type=invite') || hash.includes('type=recovery') || search.includes('type=invite') || search.includes('type=recovery')) {
+        router.push('/redefinir-senha?invite=true');
+        return;
+      }
+    }
+
     if (user && !showRoleSelector) {
+      if (user.force_password_change) {
+        router.push('/redefinir-senha?invite=true');
+        return;
+      }
+
       if (user.role === 'Produção') {
         router.push('/operador-perfil');
       } else if (user.role === 'Fábrica') {

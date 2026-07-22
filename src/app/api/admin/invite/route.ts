@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     const protocol = host?.includes('localhost') ? 'http' : 'https';
     const origin = request.headers.get('origin') || (host ? `${protocol}://${host}` : null);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || origin || 'https://portalsamppel.vercel.app';
-    const redirectTo = `${appUrl}`;
+    const redirectTo = `${appUrl}/redefinir-senha?invite=true`;
 
 
     // 1. Envia o convite por e-mail via Supabase Auth Admin
@@ -96,6 +96,7 @@ export async function POST(request: NextRequest) {
         role: selectedRole,
         email: email,
         status: 'ATIVO',
+        force_password_change: true,
         created_at: new Date().toISOString()
       });
 
@@ -136,7 +137,7 @@ export async function PUT(request: NextRequest) {
     const protocol = host?.includes('localhost') ? 'http' : 'https';
     const origin = request.headers.get('origin') || (host ? `${protocol}://${host}` : null);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || origin || 'https://portalsamppel.vercel.app';
-    const redirectTo = `${appUrl}`;
+    const redirectTo = `${appUrl}/redefinir-senha?invite=true`;
 
 
     // Se o usuário já existia em estado pendente, removemos o registro anterior para renovar a chave/token de convite limpo

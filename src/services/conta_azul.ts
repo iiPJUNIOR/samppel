@@ -864,6 +864,154 @@ export class ContaAzulService {
   }
 
   /**
+   * Importa / Sincroniza Produtos e Quantidades de Estoque do Conta Azul para o Supabase local
+   */
+  public async importProducts(onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number; total: number }> {
+    const { data: config } = await getContaAzulConfig(this.tenantId);
+    const isMock = false;
+
+    if (isMock) {
+      return { imported: 0, updated: 0, total: 0 };
+    }
+
+    try {
+      onProgress?.('Autenticando com Conta Azul...', 5);
+      const token = await this.getValidAccessToken();
+
+      onProgress?.('Buscando catálogo de produtos e estoque no Conta Azul...', 15);
+
+      const dbClient = supabaseAdmin || supabase;
+      if (!dbClient) throw new Error('Cliente Supabase não inicializado.');
+
+      // 1. Busca Produtos no Conta Azul
+      let productsList: any[] = [];
+      try {
+        const prodRes = await fetch(`${CONTA_AZUL_API_URL}/v1/products?size=200`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (prodRes.ok) {
+          const prodData = await prodRes.json();
+          productsList = Array.isArray(prodData) ? prodData : (prodData.items || prodData.data || []);
+        } else {
+          console.warn('Endpoint /v1/products respondeu status:', prodRes.status);
+        }
+      } catch (e) {
+        console.error('Erro ao buscar /v1/products:', e);
+      }
+
+      // 2. Busca Serviços no Conta Azul (caso existam produtos cadastrados como serviços)
+      try {
+        const servRes = await fetch(`${CONTA_AZUL_API_URL}/v1/services?size=200`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (servRes.ok) {
+          const servData = await servRes.json();
+          const servList = Array.isArray(servData) ? servData : (servData.items || servData.data || []);
+          productsList = [...productsList, ...servList];
+        }
+      } catch (e) {
+        // Serviços são opcionais
+      }
+
+      onProgress?.(`Encontrados ${productsList.length} itens no Conta Azul. Processando...`, 30);
+
+      let imported = 0;
+      let updated = 0;
+      let currentIdx = 0;
+
+      for (const prod of productsList) {
+        currentIdx++;
+        const pct = 30 + Math.floor((currentIdx / (productsList.length || 1)) * 65);
+        const prodName = prod.name || prod.nome || 'Produto sem nome';
+        onProgress?.(`Processando ${prodName}...`, pct);
+
+        const caId = prod.id || prod.conta_azul_id;
+        const code = prod.code || prod.codigo || prod.sku || (prodName.toUpperCase().replace(/\s+/g, '-'));
+        const price = prod.value || prod.preco || prod.price || prod.valor || 0;
+        const desc = prod.description || prod.descricao || '';
+        
+        // Extrai saldo em estoque
+        let stockQty = 0;
+        if (typeof prod.stock === 'object' && prod.stock !== null) {
+          stockQty = prod.stock.quantity ?? prod.stock.saldo ?? 0;
+        } else if (typeof prod.stock_quantity === 'number') {
+          stockQty = prod.stock_quantity;
+        } else if (typeof prod.saldo === 'number') {
+          stockQty = prod.saldo;
+        } else if (typeof prod.quantidade === 'number') {
+          stockQty = prod.quantidade;
+        }
+
+        // Tenta localizar produto existente no Supabase por conta_azul_id, sku ou name
+        let query = dbClient
+          .from('products')
+          .select('id, stock_quantity')
+          .eq('tenant_id', this.tenantId);
+
+        if (caId && code) {
+          query = query.or(`conta_azul_id.eq.${caId},sku.eq.${code}`);
+        } else if (caId) {
+          query = query.eq('conta_azul_id', caId);
+        } else if (code) {
+          query = query.eq('sku', code);
+        } else {
+          query = query.eq('name', prodName);
+        }
+
+        const { data: existingProd } = await query.maybeSingle();
+
+        const payload: any = {
+          name: prodName,
+          sku: code,
+          description: desc,
+          price: price,
+          stock_quantity: stockQty,
+          conta_azul_id: caId || undefined
+        };
+
+        if (existingProd) {
+          const { error } = await dbClient
+            .from('products')
+            .update(payload)
+            .eq('id', existingProd.id);
+          if (error) console.error('Erro ao atualizar produto:', error);
+          else updated++;
+        } else {
+          const { error } = await dbClient
+            .from('products')
+            .insert([{ tenant_id: this.tenantId, ...payload }]);
+          if (error) console.error('Erro ao inserir produto:', error);
+          else imported++;
+        }
+      }
+
+      onProgress?.('Sincronização de produtos e estoque concluída!', 100);
+
+      await createIntegrationLog(
+        'IMPORT_PRODUCTS',
+        'SUCCESS',
+        { count: productsList.length },
+        { imported, updated },
+        null,
+        this.tenantId
+      );
+
+      return { imported, updated, total: productsList.length };
+    } catch (err: any) {
+      console.error('Erro ao importar produtos e estoque:', err);
+      await createIntegrationLog(
+        'IMPORT_PRODUCTS',
+        'ERROR',
+        null,
+        null,
+        err.message || 'Falha ao importar produtos do Conta Azul',
+        this.tenantId
+      );
+      throw err;
+    }
+  }
+
+  /**
    * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
    */
   public async importOrders(startDate?: string, endDate?: string, onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
@@ -1605,6 +1753,7 @@ export class ContaAzulService {
   }
 
   async importSingleOrder(saleId: string, onProgress?: (step: string, progress: number) => void) {
+    onProgress?.('Conectando ao Conta Azul e buscando dados do pedido...', 15);
     const token = await this.getValidAccessToken();
     const dbClient = supabaseAdmin || supabase;
     if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
@@ -1623,6 +1772,8 @@ export class ContaAzulService {
       criado_em: saleDetail.venda?.data_compromisso,
       situacao: saleDetail.venda?.situacao
     };
+
+    onProgress?.('Sincronizando cliente e itens do pedido...', 40);
 
     // 2. Fetch items
     const itemsRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${saleId}/itens`, {
@@ -1819,6 +1970,8 @@ export class ContaAzulService {
       conta_azul_status: contaAzulStatus,
       conta_azul_id: saleSummary.id
     };
+
+    onProgress?.('Atualizando contas a receber e parcelamento do pedido...', 75);
 
     let orderId = '';
     const { data: existingOrder } = await dbClient

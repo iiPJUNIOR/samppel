@@ -90,6 +90,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         setUser(profile);
+        if (profile.force_password_change && typeof window !== 'undefined') {
+          const currentPath = window.location.pathname;
+          if (currentPath !== '/redefinir-senha' && currentPath !== '/operador-perfil') {
+            window.location.href = '/redefinir-senha?invite=true';
+          }
+        }
       } else {
         setUser(null);
       }

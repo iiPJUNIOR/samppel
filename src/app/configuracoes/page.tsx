@@ -56,12 +56,16 @@ import {
 export default function ConfiguracoesPage() {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<'integracao' | 'producao' | 'embalagem' | 'sistema' | 'operadores' | 'convites'>('integracao');
+  const [activeTab, setActiveTab] = useState<'operadores' | 'convites' | 'producao' | 'embalagem' | 'integracao' | 'sistema'>('operadores');
   
   // States
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [isSaved, setIsSaved] = useState(false);
+  const [isEditingCredentials, setIsEditingCredentials] = useState(false);
+  const [isConfigWarningModalOpen, setIsConfigWarningModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<any | null>(null);
+  const [isDeletingUserLoading, setIsDeletingUserLoading] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [queue, setQueue] = useState<any[]>([]);
@@ -381,6 +385,19 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  const handleConfigureApiClick = () => {
+    if (isEditingCredentials) {
+      setIsEditingCredentials(false);
+    } else {
+      setIsConfigWarningModalOpen(true);
+    }
+  };
+
+  const handleConfirmUnlockApi = () => {
+    setIsEditingCredentials(true);
+    setIsConfigWarningModalOpen(false);
+  };
+
   // Aciona o redirecionamento do fluxo do OAuth 2.0
   const handleOAuthConnect = async () => {
     if (!clientId || !clientSecret) {
@@ -659,6 +676,38 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  const handleRequestDeleteUser = (userItem: any) => {
+    if (userItem.id === user?.id) {
+      alert('Você não pode excluir o seu próprio usuário conectado.');
+      return;
+    }
+    setUserToDelete(userItem);
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    setIsDeletingUserLoading(true);
+
+    try {
+      const res = await fetch(`/api/admin/invite?id=${userToDelete.id}`, {
+        method: 'DELETE'
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || 'Falha ao excluir usuário.');
+      }
+      if (selectedOperatorForPermissions?.id === userToDelete.id) {
+        setSelectedOperatorForPermissions(null);
+      }
+      setUserToDelete(null);
+      fetchConfigAndLogs();
+    } catch (err: any) {
+      alert('Erro ao excluir usuário: ' + err.message);
+    } finally {
+      setIsDeletingUserLoading(false);
+    }
+  };
+
   const handleToggleOperatorStagePermission = async (profileId: string, stageId: string, type: 'enter' | 'exit', currentPermissions: any[]) => {
     setSavingPermission(profileId);
     
@@ -866,32 +915,11 @@ export default function ConfiguracoesPage() {
       {/* TABS NAVIGATION */}
       <div className="tabs-nav">
         <button 
-          onClick={() => setActiveTab('integracao')} 
-          className={`tab-btn ${activeTab === 'integracao' ? 'active' : ''}`}
-        >
-          <RefreshCw size={16} />
-          <span>Integração ERP</span>
-        </button>
-        <button 
-          onClick={() => setActiveTab('producao')} 
-          className={`tab-btn ${activeTab === 'producao' ? 'active' : ''}`}
-        >
-          <Cpu size={16} />
-          <span>Produção & Fábrica</span>
-        </button>
-        <button 
           onClick={() => setActiveTab('operadores')} 
           className={`tab-btn ${activeTab === 'operadores' ? 'active' : ''}`}
         >
           <Users size={16} />
           <span>Operadores de Produção</span>
-        </button>
-        <button 
-          onClick={() => setActiveTab('embalagem')} 
-          className={`tab-btn ${activeTab === 'embalagem' ? 'active' : ''}`}
-        >
-          <Package size={16} />
-          <span>Regras de Embalagem</span>
         </button>
         <button 
           onClick={() => {
@@ -904,11 +932,32 @@ export default function ConfiguracoesPage() {
           <span>Convites de Usuários</span>
         </button>
         <button 
+          onClick={() => setActiveTab('producao')} 
+          className={`tab-btn ${activeTab === 'producao' ? 'active' : ''}`}
+        >
+          <Cpu size={16} />
+          <span>Produção &amp; Fábrica</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('embalagem')} 
+          className={`tab-btn ${activeTab === 'embalagem' ? 'active' : ''}`}
+        >
+          <Package size={16} />
+          <span>Regras de Embalagem</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('integracao')} 
+          className={`tab-btn ${activeTab === 'integracao' ? 'active' : ''}`}
+        >
+          <RefreshCw size={16} />
+          <span>Integração ERP</span>
+        </button>
+        <button 
           onClick={() => setActiveTab('sistema')} 
           className={`tab-btn ${activeTab === 'sistema' ? 'active' : ''}`}
         >
           <Settings size={16} />
-          <span>Geral & Sistema</span>
+          <span>Geral &amp; Sistema</span>
         </button>
       </div>
 
@@ -919,9 +968,16 @@ export default function ConfiguracoesPage() {
             
             {/* CONTA AZUL API CREDENTIALS FORM */}
             <div className="card">
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Cpu size={18} style={{ color: 'var(--primary)' }} />
-                Credenciais de API Conta Azul
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Cpu size={18} style={{ color: 'var(--primary)' }} />
+                  Credenciais de API Conta Azul
+                </span>
+                {!isEditingCredentials && (
+                  <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '4px', backgroundColor: 'var(--surface-subtle)', color: 'var(--text-muted)', border: '1px solid var(--border)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    🔒 Configurado e Bloqueado
+                  </span>
+                )}
               </h3>
               
               <form onSubmit={handleSaveCredentials} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -931,9 +987,15 @@ export default function ConfiguracoesPage() {
                     type="text" 
                     className="form-input"
                     required
+                    disabled={!isEditingCredentials}
                     placeholder="Insira o Client ID do Conta Azul..."
                     value={clientId}
                     onChange={(e) => setClientId(e.target.value)}
+                    style={{
+                      opacity: isEditingCredentials ? 1 : 0.75,
+                      backgroundColor: isEditingCredentials ? 'var(--surface)' : 'var(--background)',
+                      cursor: isEditingCredentials ? 'text' : 'not-allowed'
+                    }}
                   />
                 </div>
 
@@ -943,16 +1005,28 @@ export default function ConfiguracoesPage() {
                     type="password" 
                     className="form-input"
                     required
+                    disabled={!isEditingCredentials}
                     placeholder="Insira o Client Secret do Conta Azul..."
                     value={clientSecret}
                     onChange={(e) => setClientSecret(e.target.value)}
+                    style={{
+                      opacity: isEditingCredentials ? 1 : 0.75,
+                      backgroundColor: isEditingCredentials ? 'var(--surface)' : 'var(--background)',
+                      cursor: isEditingCredentials ? 'text' : 'not-allowed'
+                    }}
                   />
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-                  <button type="submit" className="btn btn-primary">
-                    Salvar Credenciais
-                  </button>
+                  {isEditingCredentials ? (
+                    <button type="submit" className="btn btn-primary">
+                      Salvar Credenciais
+                    </button>
+                  ) : (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+                      Credenciais salvas. Clique em **Configurar API** ao lado se precisar alterar.
+                    </p>
+                  )}
                   {isSaved && (
                     <span style={{ color: 'var(--success)', fontSize: '0.8125rem', fontWeight: 500 }}>
                       Salvo com sucesso!
@@ -992,7 +1066,7 @@ export default function ConfiguracoesPage() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 <button 
                   onClick={handleOAuthConnect} 
                   className="btn btn-primary"
@@ -1005,10 +1079,21 @@ export default function ConfiguracoesPage() {
                   onClick={handleTriggerSync} 
                   disabled={syncing}
                   className="btn btn-secondary"
-                  style={{ flex: 1, minWidth: '150px', display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}
+                  style={{ flex: 1, minWidth: '140px', display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}
                 >
                   <RefreshCw size={16} className={syncing ? 'spinner' : ''} />
                   <span>Sincronizar Fila</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleConfigureApiClick}
+                  className={`btn ${isEditingCredentials ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'center' }}
+                  title={isEditingCredentials ? 'Bloquear edição das credenciais de API' : 'Liberar alteração das credenciais de API Conta Azul'}
+                >
+                  <Settings size={16} />
+                  <span>{isEditingCredentials ? 'Bloquear API' : 'Configurar API'}</span>
                 </button>
               </div>
 
@@ -1665,11 +1750,11 @@ export default function ConfiguracoesPage() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                      <div style={{ display: 'flex', gap: '0.375rem', justifyContent: 'flex-end', alignItems: 'center' }}>
                         <button 
                           onClick={() => handleToggleOperatorStatus(op.id, op.status)}
                           className="btn btn-secondary"
-                          style={{ padding: '0.375rem 0.75rem', fontSize: '0.75rem', fontWeight: 600 }}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem', fontWeight: 600 }}
                         >
                           {op.status === 'ATIVO' ? 'Desativar' : 'Ativar'}
                         </button>
@@ -1677,16 +1762,37 @@ export default function ConfiguracoesPage() {
                           onClick={() => handleToggleForcePassword(op.id, !!op.force_password_change)}
                           className="btn btn-secondary"
                           style={{ 
-                            padding: '0.375rem 0.75rem', 
-                            fontSize: '0.75rem', 
+                            padding: '0.25rem 0.5rem', 
+                            fontSize: '0.72rem', 
                             fontWeight: 600,
                             backgroundColor: op.force_password_change ? 'var(--success-bg)' : 'var(--danger-bg)',
                             color: op.force_password_change ? 'var(--success)' : 'var(--danger)',
                             border: op.force_password_change ? '1px solid var(--success)' : '1px solid var(--danger)'
                           }}
                         >
-                          {op.force_password_change ? 'Remover Exigência' : 'Exigir troca da senha'}
+                          {op.force_password_change ? 'Remover Exigência' : 'Exigir Troca Senha'}
                         </button>
+                        {op.id !== user?.id && (
+                          <button 
+                            onClick={() => handleRequestDeleteUser(op)}
+                            className="btn btn-secondary"
+                            style={{ 
+                              padding: '0.25rem 0.5rem', 
+                              fontSize: '0.72rem', 
+                              fontWeight: 600, 
+                              color: 'var(--danger)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                              display: 'flex', 
+                              gap: '0.25rem', 
+                              alignItems: 'center' 
+                            }}
+                            title="Excluir este usuário permanentemente do portal"
+                          >
+                            <Trash2 size={12} />
+                            <span>Excluir</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1830,7 +1936,19 @@ export default function ConfiguracoesPage() {
               </div>
             ) }
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
+              {activeOp && activeOp.id !== user?.id ? (
+                <button
+                  type="button"
+                  onClick={() => handleRequestDeleteUser(activeOp)}
+                  className="btn btn-secondary"
+                  style={{ color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.08)', display: 'flex', gap: '0.35rem', alignItems: 'center', fontSize: '0.8rem' }}
+                >
+                  <Trash2 size={14} />
+                  <span>Excluir Usuário</span>
+                </button>
+              ) : <div />}
+
               <button 
                 onClick={() => setSelectedOperatorForPermissions(null)}
                 className="btn btn-primary"
@@ -2280,6 +2398,137 @@ export default function ConfiguracoesPage() {
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Alerta de Alteração de Credenciais de API */}
+      {isConfigWarningModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+          backdropFilter: 'blur(4px)', padding: '1rem'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
+            padding: '1.75rem', maxWidth: '480px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'center'
+          }}>
+            <div style={{
+              width: '56px', height: '56px', borderRadius: '50%',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto'
+            }}>
+              <ShieldAlert size={32} style={{ color: 'var(--danger)' }} />
+            </div>
+
+            <div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--danger)', marginBottom: '0.5rem' }}>
+                Atenção: Alteração de Credenciais de API
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text)', lineHeight: '1.5', margin: 0 }}>
+                Qualquer alteração indevida no <strong>Client ID</strong> ou <strong>Client Secret</strong> irá <strong>interromper a sincronização</strong> com o Conta Azul!
+              </p>
+            </div>
+
+            <div style={{
+              padding: '0.75rem 1rem', borderRadius: '8px',
+              backgroundColor: 'var(--background)', border: '1px dashed var(--border)',
+              fontSize: '0.78rem', color: 'var(--text-muted)'
+            }}>
+              💡 Recomendado alterar somente se houver troca de chaves na sua conta oficial do Conta Azul.
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setIsConfigWarningModalOpen(false)}
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUnlockApi}
+                className="btn btn-primary"
+                style={{ flex: 1, backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}
+              >
+                Liberar Edição
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Customizado de Confirmação de Exclusão de Usuário */}
+      {userToDelete && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+          backdropFilter: 'blur(4px)', padding: '1rem'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
+            padding: '1.75rem', maxWidth: '460px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'center'
+          }}>
+            <div style={{
+              width: '56px', height: '56px', borderRadius: '50%',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto'
+            }}>
+              <Trash2 size={28} style={{ color: 'var(--danger)' }} />
+            </div>
+
+            <div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--danger)', marginBottom: '0.5rem' }}>
+                Excluir Usuário Permanentemente
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text)', lineHeight: '1.5', margin: 0 }}>
+                Tem certeza de que deseja excluir o usuário <strong>{userToDelete.name || userToDelete.email}</strong>?
+              </p>
+            </div>
+
+            <div style={{
+              padding: '0.75rem 1rem', borderRadius: '8px',
+              backgroundColor: 'var(--background)', border: '1px dashed var(--border)',
+              fontSize: '0.78rem', color: 'var(--text-muted)'
+            }}>
+              ⚠️ Esta ação revogará imediatamente o acesso do colaborador ao portal e excluirá seu cadastro.
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                disabled={isDeletingUserLoading}
+                onClick={() => setUserToDelete(null)}
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingUserLoading}
+                onClick={handleConfirmDeleteUser}
+                className="btn btn-primary"
+                style={{ flex: 1, backgroundColor: 'var(--danger)', borderColor: 'var(--danger)', display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}
+              >
+                {isDeletingUserLoading ? (
+                  <span>Excluindo...</span>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    <span>Excluir Usuário</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
