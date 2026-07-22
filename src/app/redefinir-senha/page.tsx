@@ -80,9 +80,15 @@ export default function RedefinirSenhaPage() {
         throw updateError;
       }
 
-      // Remover a exigência de troca de senha no perfil
+      // Remover a exigência de troca de senha no perfil via API do servidor (bypassa RLS)
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user?.id) {
+        await fetch('/api/auth/clear-force-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: session.user.id })
+        }).catch(err => console.error('Erro ao chamar API clear-force-password:', err));
+
         await supabase
           .from('profiles')
           .update({ force_password_change: false })
@@ -91,8 +97,8 @@ export default function RedefinirSenhaPage() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push('/');
-      }, 3000);
+        window.location.href = '/';
+      }, 2000);
     } catch (err: any) {
       setError(err.message || 'Erro ao definir a senha. O link de convite pode ter expirado.');
     } finally {

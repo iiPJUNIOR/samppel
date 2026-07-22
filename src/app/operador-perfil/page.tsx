@@ -92,13 +92,28 @@ export default function OperadorPerfilPage() {
         throw new Error(data.error || 'Erro ao salvar os dados cadastrais.');
       }
 
+      if (user.force_password_change) {
+        await fetch('/api/auth/clear-force-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id })
+        }).catch(err => console.error('Erro ao chamar clear-force-password:', err));
+      }
+
       setSuccess('Seus dados foram atualizados com sucesso!');
       setCurrentPassword('');
       setNewPin('');
       setNewPassword('');
-      setTimeout(() => {
-        setSuccess('');
-      }, 4000);
+      
+      if (user.force_password_change) {
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 1500);
+      } else {
+        setTimeout(() => {
+          setSuccess('');
+        }, 4000);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
