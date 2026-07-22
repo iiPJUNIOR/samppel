@@ -734,12 +734,28 @@ export default function ConfiguracoesPage() {
     } else {
       canExit = !canExit;
     }
+
+    // Atualização instantânea no estado local (elimina a piscada da tela)
+    const newPerms = [...(currentPermissions || [])];
+    const existingIdx = newPerms.findIndex((p: any) => p.stage_id === stageId);
+    if (existingIdx >= 0) {
+      newPerms[existingIdx] = { ...newPerms[existingIdx], can_enter: canEnter, can_exit: canExit };
+    } else {
+      newPerms.push({ stage_id: stageId, can_enter: canEnter, can_exit: canExit });
+    }
+
+    if (selectedOperatorForPermissions && selectedOperatorForPermissions.id === profileId) {
+      setSelectedOperatorForPermissions({
+        ...selectedOperatorForPermissions,
+        profile_stage_permissions: newPerms
+      });
+    }
+
+    setProfilesList(prev => prev.map(p => p.id === profileId ? { ...p, profile_stage_permissions: newPerms } : p));
     
     const { error } = await saveProfileStagePermission(profileId, stageId, canEnter, canExit);
     if (error) {
       alert('Erro ao atualizar permissão: ' + error.message);
-    } else {
-      fetchConfigAndLogs();
     }
     setSavingPermission(null);
   };
@@ -1795,6 +1811,25 @@ export default function ConfiguracoesPage() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '0.375rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <button 
+                          onClick={() => setSelectedOperatorForPermissions(op)}
+                          className="btn btn-secondary"
+                          style={{ 
+                            padding: '0.25rem 0.55rem', 
+                            fontSize: '0.72rem', 
+                            fontWeight: 600,
+                            color: 'var(--primary)',
+                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                            backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                            display: 'flex', 
+                            gap: '0.3rem', 
+                            alignItems: 'center' 
+                          }}
+                          title="Configurar permissões de etapas e perfil do usuário"
+                        >
+                          <Sliders size={12} />
+                          <span>Configurar</span>
+                        </button>
                         <button 
                           onClick={() => handleToggleOperatorStatus(op.id, op.status)}
                           className="btn btn-secondary"
