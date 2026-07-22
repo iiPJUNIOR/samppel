@@ -445,6 +445,7 @@ export default function PedidosPage() {
   const isDragActive = useRef<boolean>(false);
   const dragPendingItem = useRef<any>(null);
   const dragPendingTarget = useRef<HTMLElement | null>(null);
+  const touchHoldTimer = useRef<any>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
@@ -1845,6 +1846,10 @@ export default function PedidosPage() {
   // =========================================================================
 
   const cleanupCustomDrag = () => {
+    if (touchHoldTimer.current) {
+      clearTimeout(touchHoldTimer.current);
+      touchHoldTimer.current = null;
+    }
     if (dragCloneRef.current && dragCloneRef.current.parentNode) {
       dragCloneRef.current.parentNode.removeChild(dragCloneRef.current);
     }
@@ -1860,20 +1865,53 @@ export default function PedidosPage() {
     
     document.removeEventListener('pointermove', handlePointerMove);
     document.removeEventListener('pointerup', handlePointerUp);
+    document.removeEventListener('pointercancel', handlePointerUp);
+  };
+
+  const startDragMode = (item: any, currentTarget: HTMLElement, clientX: number, clientY: number) => {
+    if (isDragActive.current) return;
+
+    isDragActive.current = true;
+    const rect = currentTarget.getBoundingClientRect();
+
+    // Feedback tátil leve no mobile ao destacar o card
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(35); } catch (err) {}
+    }
+
+    const clone = currentTarget.cloneNode(true) as HTMLElement;
+    clone.id = 'custom-pointer-clone';
+    clone.style.position = 'fixed';
+    clone.style.top = '0px';
+    clone.style.left = '0px';
+    clone.style.width = `${rect.width}px`;
+    clone.style.boxSizing = 'border-box';
+    clone.style.backgroundColor = 'var(--surface)';
+    clone.style.border = '2px solid var(--primary)';
+    clone.style.borderRadius = '8px';
+    clone.style.boxShadow = 'var(--shadow-premium)';
+    clone.style.opacity = '1';
+    clone.style.zIndex = '999999';
+    clone.style.pointerEvents = 'none';
+    clone.style.transition = 'none';
+    clone.style.transform = `translate3d(${clientX - dragOffset.current.x}px, ${clientY - dragOffset.current.y}px, 0) rotate(3deg)`;
+    
+    document.body.appendChild(clone);
+    
+    dragCloneRef.current = clone;
+    activeDragItemId.current = item.id;
+    setDraggedItemId(item.id);
   };
 
   const handlePointerDown = (e: React.PointerEvent, item: any) => {
-    // Apenas botão esquerdo do mouse ou toque principal
     if (e.button !== 0) return;
 
-    // Ignora se clicou em um botão (ex: botão Edit, Copiar PV)
     const target = e.target as HTMLElement;
     if (target.closest('button')) return;
 
     const currentTarget = e.currentTarget as HTMLElement;
     const rect = currentTarget.getBoundingClientRect();
     
-    // Registra a posição inicial para calcular o threshold (evita travar o scroll mobile)
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     dragOffset.current = {
       x: e.clientX - rect.left,
@@ -1884,56 +1922,61 @@ export default function PedidosPage() {
     dragPendingTarget.current = currentTarget;
     isDragActive.current = false;
 
-    // NÃO executa e.preventDefault() aqui para PERMITIR scroll mobile nativo.
+    if (touchHoldTimer.current) clearTimeout(touchHoldTimer.current);
+
+    // No toque mobile: Exige segurar o dedo por 350ms para descolar o card (Long Press)
+    if (e.pointerType === 'touch') {
+      touchHoldTimer.current = setTimeout(() => {
+        if (!isDragActive.current && dragPendingItem.current && dragPendingTarget.current) {
+          startDragMode(dragPendingItem.current, dragPendingTarget.current, dragStartPos.current.x, dragStartPos.current.y);
+        }
+      }, 350);
+    }
+
     document.addEventListener('pointermove', handlePointerMove, { passive: false });
     document.addEventListener('pointerup', handlePointerUp);
+    document.addEventListener('pointercancel', handlePointerUp);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
-    // Se o arrasto ainda não foi ativado, verifica se o usuário moveu o dedo/mouse mais de 10px
+    const deltaX = Math.abs(e.clientX - dragStartPos.current.x);
+    const deltaY = Math.abs(e.clientY - dragStartPos.current.y);
+    const dist = Math.hypot(deltaX, deltaY);
+
     if (!isDragActive.current) {
-      const deltaX = Math.abs(e.clientX - dragStartPos.current.x);
-      const deltaY = Math.abs(e.clientY - dragStartPos.current.y);
-      const dist = Math.hypot(deltaX, deltaY);
+      if (e.pointerType === 'touch') {
+        // Se for um movimento predominantemente VERTICAL (rolagem de tela):
+        // Cancela o timer do hold e libera o scroll nativo sem travar o card!
+        if (deltaY > 6 && deltaY > deltaX) {
+          if (touchHoldTimer.current) {
+            clearTimeout(touchHoldTimer.current);
+            touchHoldTimer.current = null;
+          }
+          return;
+        }
 
-      // Se moveu menos de 10px, é apenas um toque ou scroll vertical — NÃO ativa o arrasto!
-      if (dist < 10) return;
-
-      // Moveu mais de 10px: Ativa o arrasto do card!
-      isDragActive.current = true;
-      const item = dragPendingItem.current;
-      const currentTarget = dragPendingTarget.current;
-
-      if (!item || !currentTarget) return;
-
-      const rect = currentTarget.getBoundingClientRect();
-
-      // Cria o clone físico 100% sólido estilo Trello
-      const clone = currentTarget.cloneNode(true) as HTMLElement;
-      clone.id = 'custom-pointer-clone';
-      clone.style.position = 'fixed';
-      clone.style.top = '0px';
-      clone.style.left = '0px';
-      clone.style.width = `${rect.width}px`;
-      clone.style.boxSizing = 'border-box';
-      clone.style.backgroundColor = 'var(--surface)';
-      clone.style.border = '2px solid var(--primary)';
-      clone.style.borderRadius = '8px';
-      clone.style.boxShadow = 'var(--shadow-premium)';
-      clone.style.opacity = '1';
-      clone.style.zIndex = '999999';
-      clone.style.pointerEvents = 'none';
-      clone.style.transition = 'none';
-      clone.style.transform = `translate3d(${e.clientX - dragOffset.current.x}px, ${e.clientY - dragOffset.current.y}px, 0) rotate(3deg)`;
-      
-      document.body.appendChild(clone);
-      
-      dragCloneRef.current = clone;
-      activeDragItemId.current = item.id;
-      setDraggedItemId(item.id);
+        // Se for um deslize HORIZONTAL nítido (> 25px para trocar de coluna):
+        if (deltaX > 25 && deltaX > deltaY * 1.2) {
+          if (touchHoldTimer.current) {
+            clearTimeout(touchHoldTimer.current);
+            touchHoldTimer.current = null;
+          }
+          if (dragPendingItem.current && dragPendingTarget.current) {
+            startDragMode(dragPendingItem.current, dragPendingTarget.current, e.clientX, e.clientY);
+          }
+        } else {
+          return;
+        }
+      } else {
+        // Mouse Desktop: Ativa o arrasto imediato com threshold de 8px
+        if (dist < 8) return;
+        if (dragPendingItem.current && dragPendingTarget.current) {
+          startDragMode(dragPendingItem.current, dragPendingTarget.current, e.clientX, e.clientY);
+        }
+      }
     }
 
-    // Se o arrasto já está ativo, bloqueia o scroll nativo e movimenta o card clone
+    // Se o arrasto já está ativo (ou por hold ou por swipe horizontal), movimenta o clone
     if (isDragActive.current) {
       e.preventDefault();
       if (!dragCloneRef.current) return;
