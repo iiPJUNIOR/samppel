@@ -1855,6 +1855,13 @@ export default function PedidosPage() {
       clearTimeout(touchHoldTimer.current);
       touchHoldTimer.current = null;
     }
+    if (dragPendingTarget.current && activePointerId.current !== null) {
+      try {
+        if (dragPendingTarget.current.hasPointerCapture(activePointerId.current)) {
+          dragPendingTarget.current.releasePointerCapture(activePointerId.current);
+        }
+      } catch (err) {}
+    }
     if (dragCloneRef.current && dragCloneRef.current.parentNode) {
       dragCloneRef.current.parentNode.removeChild(dragCloneRef.current);
     }
@@ -1876,6 +1883,13 @@ export default function PedidosPage() {
 
   const startDragMode = (item: any, currentTarget: HTMLElement, clientX: number, clientY: number) => {
     if (isDragActive.current) return;
+
+    // Tenta travar a captura do ponteiro para garantir entrega contínua dos eventos de movimento no mobile
+    if (activePointerId.current !== null) {
+      try {
+        currentTarget.setPointerCapture(activePointerId.current);
+      } catch (err) {}
+    }
 
     // Limpa qualquer seleção de texto acidental ocorrida no toque
     if (typeof window !== 'undefined') {
