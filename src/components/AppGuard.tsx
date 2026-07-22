@@ -3,6 +3,7 @@
 import React, { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { ShieldAlert, Users } from 'lucide-react';
 
 export default function AppGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -43,8 +44,8 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
             router.push('/pedidos');
           }
         } else if (user.role === 'Produção') {
-          if (pathname !== '/pedidos' && pathname !== '/operador-perfil') {
-            router.push('/pedidos');
+          if (pathname !== '/operador-perfil') {
+            router.push('/operador-perfil');
           }
         } else if (user.role === 'Fábrica') {
           if (pathname !== '/pedidos') {
@@ -189,6 +190,73 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
             }
           }
         `}</style>
+      </div>
+    );
+  }
+
+  // Restrição estrita para perfil de Produção (Acesso exclusivo para /operador-perfil)
+  if (user && user.role === 'Produção' && pathname !== '/operador-perfil' && pathname !== '/redefinir-senha') {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '80vh',
+        width: '100%',
+        padding: '2rem',
+        textAlign: 'center',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      }}>
+        <div style={{
+          maxWidth: '480px',
+          width: '100%',
+          backgroundColor: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '16px',
+          padding: '2.5rem 2rem',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.08)'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            color: '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.25rem auto'
+          }}>
+            <ShieldAlert size={34} />
+          </div>
+
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text, #0f172a)', margin: '0 0 0.5rem 0' }}>
+            Acesso Restrito ao Operador
+          </h2>
+
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted, #64748b)', margin: '0 0 1.5rem 0', lineHeight: '1.5' }}>
+            Atenção! Seu usuário com perfil <strong>Operador de Produção</strong> não possui permissão para acessar esta tela. Seu acesso ao portal é exclusivo para a tela de <strong>Dados de Perfil do Operador</strong>.
+          </p>
+
+          <button
+            onClick={() => router.push('/operador-perfil')}
+            className="btn btn-primary"
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              borderRadius: '8px',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <Users size={18} />
+            <span>Ir para Meus Dados de Operador</span>
+          </button>
+        </div>
       </div>
     );
   }
