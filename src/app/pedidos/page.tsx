@@ -6767,39 +6767,43 @@ export default function PedidosPage() {
             onClick={(e) => { if (e.target === e.currentTarget) setIsDetailModalOpen(false); }}
             style={{
               position: 'fixed', inset: 0,
-              backgroundColor: 'rgba(0,0,0,0.55)',
+              backgroundColor: 'rgba(0,0,0,0.65)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              zIndex: 1100, padding: '1rem',
+              zIndex: 99999,
+              padding: '0.5rem',
+              paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
               backdropFilter: 'blur(4px)'
             }}
           >
             <div style={{
               backgroundColor: 'var(--surface)',
-              borderRadius: 'var(--radius-lg)',
+              borderRadius: 'var(--radius-lg, 12px)',
               border: '1px solid var(--border)',
               boxShadow: 'var(--shadow-premium)',
               width: '100%',
               maxWidth: '860px',
-              maxHeight: '90vh',
+              maxHeight: 'min(92vh, calc(100dvh - 1rem))',
               display: 'flex',
               flexDirection: 'column',
               animation: 'fadeIn 0.2s ease',
               overflow: 'hidden'
             }}>
 
-              {/* Header Padrão do Sistema */}
+              {/* Header Padrão do Sistema (Responsivo no Mobile) */}
               <div style={{
-                padding: '1.1rem 1.5rem',
+                padding: '0.85rem 1.15rem',
                 borderBottom: '1px solid var(--border)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
                 background: `linear-gradient(135deg, ${currentStage?.color || 'var(--primary)'}18 0%, transparent 100%)`,
                 borderLeft: `4px solid ${currentStage?.color || 'var(--primary)'}`
               }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 200px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)', wordBreak: 'break-all' }}>
                       {detailItem.friendly_id || order.pv_number || '---'}
                     </span>
                     {currentStage && (
@@ -6808,32 +6812,33 @@ export default function PedidosPage() {
                         backgroundColor: currentStage.color + '22',
                         color: currentStage.color,
                         padding: '2px 8px', borderRadius: '99px',
-                        border: `1px solid ${currentStage.color}55`
+                        border: `1px solid ${currentStage.color}55`,
+                        whiteSpace: 'nowrap'
                       }}>
                         {currentStage.name}
                       </span>
                     )}
                     {isOverdue && (
-                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700 }}>Atrasado</span>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700, whiteSpace: 'nowrap' }}>Atrasado</span>
                     )}
                   </div>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {customer.name || 'Cliente'} · {detailItem.name}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginLeft: 'auto' }}>
                   {(!user?.role || user.role !== 'Produção' || currentStage?.name === 'Em produção') && (
                     <button
                       onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}
                       className="btn btn-primary"
-                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}
                     >
                       <Edit3 size={12} /> Editar
                     </button>
                   )}
                   <button
                     onClick={() => setIsDetailModalOpen(false)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.4rem', color: 'var(--text-muted)', lineHeight: 1, padding: '0 0.2rem' }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--text-muted)', lineHeight: 1, padding: '0 0.3rem' }}
                   >
                     &times;
                   </button>
