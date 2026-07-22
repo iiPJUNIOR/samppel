@@ -113,7 +113,7 @@ export default function OperatorAuthModal({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 9999,
+      zIndex: 200000,
       padding: '1rem'
     }}>
       <div className="modal-content card" style={{

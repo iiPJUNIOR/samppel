@@ -7982,7 +7982,7 @@ export default function PedidosPage() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0, 0, 0, 0.65)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
           backdropFilter: 'blur(4px)'
         }}>
           <div style={{
@@ -8059,7 +8059,7 @@ export default function PedidosPage() {
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 99999,
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
           backdropFilter: 'blur(4px)'
         }}>
           <div style={{
@@ -8196,7 +8196,7 @@ export default function PedidosPage() {
             position: 'fixed', inset: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.65)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 99999, padding: '0.75rem',
+            zIndex: 200000, padding: '0.75rem',
             backdropFilter: 'blur(4px)'
           }}
         >
