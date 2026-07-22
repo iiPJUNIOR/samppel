@@ -2898,7 +2898,7 @@ export default function PedidosPage() {
         paddingBottom: '1rem'
       } : undefined}
     >
-      <header className="page-header" style={{ display: isHeaderCollapsed ? 'none' : 'flex' }}>
+      <header className="page-header" style={{ display: isHeaderCollapsed ? 'none' : undefined }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Pedidos & Vendas</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
