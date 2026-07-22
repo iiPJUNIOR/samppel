@@ -880,5 +880,11 @@ body.sidebar-collapsed .kanban-board-container {
   }
 }
 
+@media (max-width: 640px) {
+  .desktop-only-inline {
+    display: none !important;
+  }
+}
+
 
 

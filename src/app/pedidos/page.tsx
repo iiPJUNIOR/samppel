@@ -62,6 +62,8 @@ import {
   List,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Loader2,
   Scale,
   Copy,
@@ -445,6 +447,7 @@ export default function PedidosPage() {
   const dragPendingTarget = useRef<HTMLElement | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
 
 
   const showToast = (message: string, type: 'success' | 'info' = 'success') => {
@@ -2852,7 +2855,7 @@ export default function PedidosPage() {
         paddingBottom: '1rem'
       } : undefined}
     >
-      <header className="page-header">
+      <header className="page-header" style={{ display: isHeaderCollapsed ? 'none' : 'flex' }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Pedidos & Vendas</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
@@ -2968,19 +2971,20 @@ export default function PedidosPage() {
 
         return (
           <div className="filter-bar">
-            {/* Linha Superior (Sempre Visível): Busca PV + Toggle Kanban/Lista + Botão Filtros Mobile */}
-            <div style={{ display: 'flex', gap: '0.5rem', width: '100%', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Linha Superior (Sempre Visível): Busca PV + Toggle Kanban/Lista + Botão Filtros Mobile + Seta Collapse */}
+            <div style={{ display: 'flex', gap: '0.4rem', width: '100%', alignItems: 'center', flexWrap: 'nowrap' }}>
               
               {/* Alternador de Modo de Visualização */}
-              <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '36px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '36px', alignItems: 'center', flexShrink: 0 }}>
                 <button
                   onClick={() => setViewMode('kanban')}
                   className="btn"
+                  title="Kanban"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '0.25rem',
-                    padding: '0.35rem 0.65rem',
+                    padding: '0.35rem 0.55rem',
                     fontSize: '0.78rem',
                     border: 'none',
                     height: '100%',
@@ -2992,16 +2996,17 @@ export default function PedidosPage() {
                   }}
                 >
                   <LayoutGrid size={14} />
-                  <span>Kanban</span>
+                  <span className="desktop-only-inline">Kanban</span>
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
                   className="btn"
+                  title="Lista"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '0.25rem',
-                    padding: '0.35rem 0.65rem',
+                    padding: '0.35rem 0.55rem',
                     fontSize: '0.78rem',
                     border: 'none',
                     height: '100%',
@@ -3013,40 +3018,42 @@ export default function PedidosPage() {
                   }}
                 >
                   <List size={14} />
-                  <span>Lista</span>
+                  <span className="desktop-only-inline">Lista</span>
                 </button>
               </div>
 
-              {/* Busca de Pedidos por PV / OP */}
-              <div style={{ flex: 1, minWidth: '160px' }}>
+              {/* Busca de Pedidos por PV / OP (Expandido no Mobile) */}
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <input
                   type="text"
                   className="form-input"
                   placeholder="Pesquisar PV/OP..."
                   value={filterSearchOrder}
                   onChange={(e) => setFilterSearchOrder(e.target.value)}
-                  style={{ height: '36px', fontSize: '0.825rem', padding: '0.4rem 0.75rem' }}
+                  style={{ height: '36px', fontSize: '0.825rem', padding: '0.4rem 0.6rem', width: '100%' }}
                 />
               </div>
 
-              {/* Botão de Filtros no Celular */}
+              {/* Botão de Filtros no Celular (Ícone compacto no mobile) */}
               <button
                 onClick={() => setIsMobileFiltersOpen(!isMobileFiltersOpen)}
                 className="btn btn-secondary mobile-only-flex"
+                title="Filtros"
                 style={{
                   height: '36px',
-                  padding: '0.35rem 0.65rem',
+                  padding: '0.35rem 0.55rem',
                   fontSize: '0.78rem',
                   alignItems: 'center',
-                  gap: '0.35rem',
+                  gap: '0.25rem',
                   fontWeight: 600,
                   backgroundColor: isMobileFiltersOpen || activeFiltersCount > 0 ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
                   borderColor: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--border)',
-                  color: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--text)'
+                  color: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--text)',
+                  flexShrink: 0
                 }}
               >
                 <Filter size={14} />
-                <span>Filtros</span>
+                <span className="desktop-only-inline">Filtros</span>
                 {activeFiltersCount > 0 && (
                   <span style={{
                     backgroundColor: 'var(--primary)',
@@ -3054,12 +3061,39 @@ export default function PedidosPage() {
                     fontSize: '0.65rem',
                     fontWeight: 700,
                     borderRadius: '99px',
-                    padding: '1px 6px',
+                    padding: '1px 5px',
                     lineHeight: 1
                   }}>
                     {activeFiltersCount}
                   </span>
                 )}
+              </button>
+
+              {/* Botão Seta (Recolher / Expandir Painel Superior) */}
+              <button
+                onClick={() => {
+                  const nextState = !isHeaderCollapsed;
+                  setIsHeaderCollapsed(nextState);
+                  if (nextState) setIsMobileFiltersOpen(false);
+                }}
+                className="btn btn-secondary"
+                title={isHeaderCollapsed ? 'Expandir painel' : 'Ocultar topo (Modo Tela Cheia)'}
+                style={{
+                  height: '36px',
+                  width: '36px',
+                  minWidth: '36px',
+                  padding: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: isHeaderCollapsed ? 'var(--primary)' : 'transparent',
+                  color: isHeaderCollapsed ? '#ffffff' : 'var(--text-muted)',
+                  borderColor: isHeaderCollapsed ? 'var(--primary)' : 'var(--border)',
+                  flexShrink: 0
+                }}
+              >
+                {isHeaderCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
               </button>
 
             </div>
