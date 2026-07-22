@@ -276,9 +276,7 @@ export default function ConfiguracoesPage() {
       setStages(stagesRes.data || []);
 
       const allProfiles = profilesRes.data || [];
-      // Filtra perfis com papel de 'Administrador', 'Produção', 'Fábrica' ou 'Vendedor'
-      const filteredProfiles = allProfiles.filter((p: any) => p.role === 'Administrador' || p.role === 'Produção' || p.role === 'Fábrica' || p.role === 'Vendedor');
-      const mappedProfiles = filteredProfiles.map((p: any) => ({
+      const mappedProfiles = allProfiles.map((p: any) => ({
         ...p,
         name: p.full_name || p.name || 'Sem nome'
       }));
@@ -311,6 +309,21 @@ export default function ConfiguracoesPage() {
   useEffect(() => {
     if (user?.role === 'Administrador') {
       fetchConfigAndLogs();
+    }
+
+    const client = supabase;
+    if (client) {
+      const channel = client
+        .channel('profiles-realtime-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+          fetchConfigAndLogs();
+          fetchInvites();
+        })
+        .subscribe();
+
+      return () => {
+        client.removeChannel(channel);
+      };
     }
   }, [user]);
 
@@ -1685,7 +1698,7 @@ export default function ConfiguracoesPage() {
       {/* TAB CONTENT: OPERADORES DE PRODUÇÃO */}
       {activeTab === 'operadores' && (
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Users size={20} style={{ color: 'var(--primary)' }} />
@@ -1695,6 +1708,19 @@ export default function ConfiguracoesPage() {
                 Gerencie todos os colaboradores cadastrados. Clique no nome de qualquer usuário para configurar seu Perfil de Acesso (Administrador, Produção, Terminal de Fábrica) e suas liberações do processo.
               </p>
             </div>
+            <button
+              onClick={() => {
+                fetchConfigAndLogs();
+                fetchInvites();
+              }}
+              disabled={loading}
+              className="btn btn-secondary"
+              style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.8rem', padding: '0.4rem 0.85rem' }}
+              title="Atualizar lista de usuários em tempo real"
+            >
+              <RefreshCw size={14} className={loading ? 'spinner' : ''} />
+              <span>Atualizar Lista</span>
+            </button>
           </div>
 
           <div className="table-responsive">
