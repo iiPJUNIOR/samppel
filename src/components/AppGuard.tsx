@@ -12,25 +12,46 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isLoading) {
       if (!user) {
-        if (pathname !== '/') {
+        // Se não estiver autenticado, permite ficar na página de login ('/') ou de redefinir senha ('/redefinir-senha')
+        if (pathname !== '/' && pathname !== '/redefinir-senha') {
           router.push('/');
         }
       } else {
         // Usuário autenticado
+        
+        // 1. Se a conta exigir troca de senha obrigatória (convite inicial ou redefinição forçada)
+        if (user.force_password_change) {
+          if (pathname !== '/redefinir-senha') {
+            router.push('/redefinir-senha?invite=true');
+          }
+          return;
+        }
+
+        // 2. Se o usuário estiver na tela de redefinir senha, permite continuar nela
+        if (pathname === '/redefinir-senha') {
+          return;
+        }
+
+        // 3. Se o usuário estiver na tela de Perfil do Operador, permite acesso a TODOS os usuários!
+        if (pathname === '/operador-perfil') {
+          return;
+        }
+
+        // 4. Regras de navegação padrão por papel
         if (user.is_factory_account) {
           if (pathname !== '/pedidos') {
             router.push('/pedidos');
           }
         } else if (user.role === 'Produção') {
-          if (pathname !== '/operador-perfil') {
-            router.push('/operador-perfil');
+          if (pathname !== '/pedidos' && pathname !== '/operador-perfil') {
+            router.push('/pedidos');
           }
         } else if (user.role === 'Fábrica') {
           if (pathname !== '/pedidos') {
             router.push('/pedidos');
           }
         } else if (user.role === 'Vendedor') {
-          if (!['/pedidos', '/clientes', '/produtos'].includes(pathname) && !pathname.startsWith('/pedidos/') && !pathname.startsWith('/clientes/') && !pathname.startsWith('/produtos/')) {
+          if (!['/pedidos', '/clientes', '/produtos', '/operador-perfil'].includes(pathname) && !pathname.startsWith('/pedidos/') && !pathname.startsWith('/clientes/') && !pathname.startsWith('/produtos/')) {
             router.push('/pedidos');
           }
         } else {

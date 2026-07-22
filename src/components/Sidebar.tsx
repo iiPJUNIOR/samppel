@@ -143,7 +143,7 @@ export default function Sidebar() {
       label: 'Dados do Operador',
       path: '/operador-perfil',
       icon: <Users size={17} />,
-      allowedRoles: ['Administrador', 'Produção']
+      allowedRoles: ['Administrador', 'Produção', 'Fábrica', 'Vendedor', 'Comercial', 'Financeiro', 'Expedição', 'Estoque']
     },
     {
       label: 'Configurações',
