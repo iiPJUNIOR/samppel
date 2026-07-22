@@ -6070,7 +6070,7 @@ export default function PedidosPage() {
             </header>
 
             <form onSubmit={handleSubmit} style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
-              <div className="grid-responsive-2" style={{ gap: '1rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 
                 {/* Número do PV */}
                 <div className="form-group">
@@ -6100,7 +6100,7 @@ export default function PedidosPage() {
                 </div>
 
                 {/* Nome da Arte */}
-                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                <div className="form-group">
                   <label className="form-label">Produto/Serviço / Identificação Visual da Embalagem *</label>
                   <input 
                     type="text" 
@@ -6291,9 +6291,9 @@ export default function PedidosPage() {
 
               {/* CONTROLE FINANCEIRO */}
               {user?.role !== 'Produção' && user?.role !== 'Estoque' && user?.role !== 'Expedição' && (
-                <div style={{ marginTop: '1.25rem', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ marginTop: '1.25rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'rgba(var(--primary-rgb), 0.02)' }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)', marginBottom: '0.75rem' }}>Controle Financeiro & Liberação da Fábrica</h4>
-                  <div className="grid-responsive-2" style={{ gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                     
                     <div className="form-group">
                       <label className="form-label">Data do Primeiro Pagamento (Libera Produção)</label>
@@ -6349,7 +6349,7 @@ export default function PedidosPage() {
               )}
 
               {/* ETAPA DO KANBAN E SETOR (DINÂMICO) */}
-              <div className="grid-responsive-2" style={{ gap: '1rem', marginTop: '1rem', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}>
                 
                 <div className="form-group">
                   <label className="form-label" style={{ fontWeight: 600 }}>Etapa / Status de Produção</label>
@@ -6993,9 +6993,11 @@ export default function PedidosPage() {
                     <button
                       onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}
                       className="btn btn-primary"
-                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}
+                      title="Editar informações do pedido"
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}
                     >
-                      <Edit3 size={12} /> Editar
+                      <Edit3 size={12} />
+                      <span className="desktop-only-inline">Editar</span>
                     </button>
                   )}
                   <button
@@ -7150,6 +7152,7 @@ export default function PedidosPage() {
                         onClick={() => handleSyncSingleOrder(order.id)}
                         disabled={syncingSingleOrder}
                         className="btn btn-secondary"
+                        title={syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Conta Azul'}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -7161,7 +7164,7 @@ export default function PedidosPage() {
                         }}
                       >
                         <RefreshCw size={11} className={syncingSingleOrder ? 'spinner' : ''} />
-                        <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Conta Azul'}</span>
+                        <span className="desktop-only-inline">{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Conta Azul'}</span>
                       </button>
                     )}
                   </div>
