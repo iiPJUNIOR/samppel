@@ -92,19 +92,33 @@ export default function RedefinirSenhaPage() {
       let currentSession = sessionRes.data.session;
       let targetUserId = currentSession?.user?.id;
       let targetEmail = currentSession?.user?.email;
+      let currentAccessToken = currentSession?.access_token || '';
 
-      if (!targetUserId && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
         const hash = window.location.hash || '';
         if (hash.includes('access_token=')) {
           const hashParams = new URLSearchParams(hash.replace('#', '?'));
-          const accessToken = hashParams.get('access_token');
-          if (accessToken) {
+          const hashToken = hashParams.get('access_token');
+          if (hashToken) {
+            currentAccessToken = hashToken;
             try {
-              const payload = JSON.parse(atob(accessToken.split('.')[1]));
-              targetUserId = payload.sub;
-              targetEmail = payload.email;
+              const base64Url = hashToken.split('.')[1];
+              if (base64Url) {
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(
+                  atob(base64)
+                    .split('')
+                    .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                    .join('')
+                );
+                const payload = JSON.parse(jsonPayload);
+                if (payload) {
+                  if (!targetUserId && payload.sub) targetUserId = payload.sub;
+                  if (!targetEmail && payload.email) targetEmail = payload.email;
+                }
+              }
             } catch (e) {
-              console.error('Erro ao decodificar access_token:', e);
+              console.error('Erro ao decodificar JWT token do hash:', e);
             }
           }
         }
@@ -124,20 +138,21 @@ export default function RedefinirSenhaPage() {
       }
 
       // 3. Se a atualização client-side falhou ou não havia sessão salva (evita "Auth session missing!"), usa a API Admin no servidor
-      if (!updateSuccess && (targetUserId || targetEmail)) {
+      if (!updateSuccess) {
         const res = await fetch('/api/auth/set-invited-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId: targetUserId,
             email: targetEmail,
+            accessToken: currentAccessToken,
             password: password
           })
         });
 
         const json = await res.json();
         if (!res.ok) {
-          throw new Error(json.error || 'Erro ao definir a senha no servidor.');
+          throw new Error(json.error || 'Não foi possível autenticar o convite. O link pode ter expirado.');
         }
         updateSuccess = true;
 

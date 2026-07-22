@@ -14,25 +14,39 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { userId, email, password } = await request.json();
+    const { userId, email, password, accessToken } = await request.json();
 
     if (!password) {
       return NextResponse.json({ error: 'A nova senha é obrigatória.' }, { status: 400 });
     }
 
     let targetUserId = userId;
+    let targetEmail = email;
 
-    // Se não veio o userId mas veio o email, buscar o ID do usuário no Supabase Auth
-    if (!targetUserId && email) {
+    // Se recebemos um accessToken (do hash da URL do convite), tenta obter o usuário pelo token
+    if (!targetUserId && accessToken) {
+      try {
+        const { data: userData } = await supabaseAdmin.auth.getUser(accessToken);
+        if (userData?.user) {
+          targetUserId = userData.user.id;
+          targetEmail = userData.user.email;
+        }
+      } catch (e) {
+        console.warn('Aviso ao obter usuário pelo accessToken:', e);
+      }
+    }
+
+    // Se ainda não veio o userId mas veio o email, buscar o ID do usuário no Supabase Auth
+    if (!targetUserId && targetEmail) {
       const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-      const matched = (usersData?.users || []).find(u => u.email?.toLowerCase() === String(email).toLowerCase());
+      const matched = (usersData?.users || []).find(u => u.email?.toLowerCase() === String(targetEmail).toLowerCase());
       if (matched) {
         targetUserId = matched.id;
       }
     }
 
     if (!targetUserId) {
-      return NextResponse.json({ error: 'Não foi possível identificar o usuário para atualização da senha.' }, { status: 400 });
+      return NextResponse.json({ error: 'Não foi possível identificar o usuário para atualização da senha. O link do convite pode ser inválido ou ter sido desativado.' }, { status: 400 });
     }
 
     // 1. Atualiza a senha no Supabase Auth via Admin API (imune a falhas de Auth Session client-side)
