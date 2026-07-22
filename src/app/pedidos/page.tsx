@@ -1846,6 +1846,9 @@ export default function PedidosPage() {
   // =========================================================================
 
   const cleanupCustomDrag = () => {
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('is-dragging-card');
+    }
     if (touchHoldTimer.current) {
       clearTimeout(touchHoldTimer.current);
       touchHoldTimer.current = null;
@@ -1871,6 +1874,14 @@ export default function PedidosPage() {
   const startDragMode = (item: any, currentTarget: HTMLElement, clientX: number, clientY: number) => {
     if (isDragActive.current) return;
 
+    // Limpa qualquer seleção de texto acidental ocorrida no toque
+    if (typeof window !== 'undefined') {
+      window.getSelection()?.removeAllRanges();
+    }
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('is-dragging-card');
+    }
+
     isDragActive.current = true;
     const rect = currentTarget.getBoundingClientRect();
 
@@ -1893,6 +1904,8 @@ export default function PedidosPage() {
     clone.style.opacity = '1';
     clone.style.zIndex = '999999';
     clone.style.pointerEvents = 'none';
+    clone.style.userSelect = 'none';
+    clone.style.webkitUserSelect = 'none';
     clone.style.transition = 'none';
     clone.style.transform = `translate3d(${clientX - dragOffset.current.x}px, ${clientY - dragOffset.current.y}px, 0) rotate(3deg)`;
     
@@ -3510,6 +3523,7 @@ export default function PedidosPage() {
                             onPointerDown={(e) => handlePointerDown(e, item)}
                             style={{ 
                               touchAction: 'pan-y',
+                              userSelect: 'none',
                               backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
                               border: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
                               borderLeft: `3px solid ${stage.color}`,

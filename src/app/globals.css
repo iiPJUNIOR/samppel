@@ -890,6 +890,20 @@ body.sidebar-collapsed .kanban-board-container {
   }
 }
 
+.kanban-card-base,
+.kanban-card-base * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body.is-dragging-card,
+body.is-dragging-card * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
 @media (max-width: 640px) {
   .desktop-only-inline {
     display: none !important;
