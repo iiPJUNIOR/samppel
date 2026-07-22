@@ -3365,7 +3365,6 @@ export default function PedidosPage() {
                 {/* Lista de Cards da Etapa */}
                 <div 
                   className="no-scrollbar"
-                  onDragOver={(e) => handleDragOverColumn(e, stage.id)}
                   style={{ 
                     display: 'flex', 
                     flexDirection: 'column', 
@@ -3423,21 +3422,8 @@ export default function PedidosPage() {
                               const target = e.target as HTMLElement;
                               const isButton = target.closest('button');
 
-                            if (!isButton) handleOpenDetail(item);
-                          }}
-
-                          style={{
-                            backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
-                            border: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
-                            borderLeft: `3px solid ${stage.color}`,
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '0.5rem',
-                            cursor: 'pointer',
-                            boxShadow: isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '0.35rem',
-                          }}
+                              if (!isButton) handleOpenDetail(item);
+                            }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.transform = 'translateY(-1px)';
                             e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-md)' : '0 4px 6px rgba(239, 68, 68, 0.15)';
