@@ -71,7 +71,8 @@ import {
   Users,
   AlertTriangle,
   Download,
-  Clock
+  Clock,
+  ArrowRightLeft
 } from 'lucide-react';
 
 // Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
@@ -451,6 +452,8 @@ export default function PedidosPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
+  const [isMoveStageModalOpen, setIsMoveStageModalOpen] = useState(false);
+  const [itemToMoveStage, setItemToMoveStage] = useState<any>(null);
 
 
   const showToast = (message: string, type: 'success' | 'info' = 'success') => {
@@ -1933,7 +1936,27 @@ export default function PedidosPage() {
     setDraggedItemId(item.id);
   };
 
+  const canUserMoveItemStage = (item: any) => {
+    if (!user) return true;
+    if (['Admin', 'Gerente', 'Comercial', 'Vendedor', 'Atendimento'].includes(user.role)) return true;
+    if (user.role === 'Estoque') {
+      const currentStage = stages.find(s => s.id === item.stage_id);
+      return currentStage?.name === 'Estoque';
+    }
+    if (user.role === 'Expedição') {
+      const currentStage = stages.find(s => s.id === item.stage_id);
+      return currentStage && ['Em revisão', 'Expedição', 'Concluído'].includes(currentStage.name);
+    }
+    if (['Produção', 'Fábrica'].includes(user.role)) {
+      return true;
+    }
+    return true;
+  };
+
   const handlePointerDown = (e: React.PointerEvent, item: any) => {
+    // No mobile (toque), o arrasto é 100% desativado para permitir rolagem nativa fluida.
+    // A movimentação é feita através do botão "Mover" + Modal de seleção de etapa.
+    if ((e.pointerType as string) === 'touch') return;
     if (e.button !== 0) return;
 
     const target = e.target as HTMLElement;
@@ -1954,23 +1977,13 @@ export default function PedidosPage() {
     dragPendingTarget.current = currentTarget;
     isDragActive.current = false;
 
-    if (touchHoldTimer.current) clearTimeout(touchHoldTimer.current);
-
-    // No toque mobile: Exige segurar o dedo por 300ms para descolar o card (Long Press)
-    if (e.pointerType === 'touch') {
-      touchHoldTimer.current = setTimeout(() => {
-        if (!isDragActive.current && dragPendingItem.current && dragPendingTarget.current) {
-          startDragMode(dragPendingItem.current, dragPendingTarget.current, lastPointerPos.current.x, lastPointerPos.current.y);
-        }
-      }, 300);
-    }
-
     document.addEventListener('pointermove', handlePointerMove, { passive: false });
     document.addEventListener('pointerup', handlePointerUp);
     document.addEventListener('pointercancel', handlePointerCancel);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') return;
     lastPointerPos.current = { x: e.clientX, y: e.clientY };
 
     const deltaX = Math.abs(e.clientX - dragStartPos.current.x);
@@ -1978,34 +1991,10 @@ export default function PedidosPage() {
     const dist = Math.hypot(deltaX, deltaY);
 
     if (!isDragActive.current) {
-      if (e.pointerType === 'touch') {
-        // Se for rolagem vertical da coluna: cancela o hold timer e deixa o scroll livre!
-        if (deltaY > 6 && deltaY > deltaX) {
-          if (touchHoldTimer.current) {
-            clearTimeout(touchHoldTimer.current);
-            touchHoldTimer.current = null;
-          }
-          return;
-        }
-
-        // Se o movimento for predominantemente HORIZONTAL (> 20px): ativa o drag!
-        if (deltaX > 20 && deltaX > deltaY * 1.2) {
-          if (touchHoldTimer.current) {
-            clearTimeout(touchHoldTimer.current);
-            touchHoldTimer.current = null;
-          }
-          if (dragPendingItem.current && dragPendingTarget.current) {
-            startDragMode(dragPendingItem.current, dragPendingTarget.current, e.clientX, e.clientY);
-          }
-        } else {
-          return;
-        }
-      } else {
-        // Mouse Desktop: Ativa o arrasto imediato com threshold de 8px
-        if (dist < 8) return;
-        if (dragPendingItem.current && dragPendingTarget.current) {
-          startDragMode(dragPendingItem.current, dragPendingTarget.current, e.clientX, e.clientY);
-        }
+      // Mouse Desktop: Ativa o arrasto imediato com threshold de 8px
+      if (dist < 8) return;
+      if (dragPendingItem.current && dragPendingTarget.current) {
+        startDragMode(dragPendingItem.current, dragPendingTarget.current, e.clientX, e.clientY);
       }
     }
 
@@ -3887,10 +3876,37 @@ export default function PedidosPage() {
                             );
                           })()}
 
-                          {/* Informações adicionais como Prazo e Vendedora */}
-                          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                          {/* Informações adicionais como Prazo e Vendedora + Botão Mover no Mobile */}
+                          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
                             <span>Vend: {parentOrder.seller_name || 'Samppel'}</span>
-                            <span>Tipo: {item.item_type}</span>
+
+                            {/* Botão Mover de Etapa (Mobile) */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (canUserMoveItemStage(item)) {
+                                  setItemToMoveStage(item);
+                                  setIsMoveStageModalOpen(true);
+                                }
+                              }}
+                              disabled={!canUserMoveItemStage(item)}
+                              className="btn btn-secondary mobile-only-flex"
+                              style={{
+                                fontSize: '0.62rem',
+                                padding: '1px 6px',
+                                height: '22px',
+                                alignItems: 'center',
+                                gap: '0.2rem',
+                                fontWeight: 600,
+                                opacity: canUserMoveItemStage(item) ? 1 : 0.45,
+                                cursor: canUserMoveItemStage(item) ? 'pointer' : 'not-allowed'
+                              }}
+                              title={canUserMoveItemStage(item) ? 'Mover este pedido de etapa' : 'Sem permissão para mover de etapa'}
+                            >
+                              <ArrowRightLeft size={10} />
+                              <span>Mover</span>
+                            </button>
                           </div>
 
                           {/* Badge de Equipe de Manuseio */}
@@ -8166,6 +8182,129 @@ export default function PedidosPage() {
 
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE MOVER PEDIDO DE ETAPA (MOBILE / MANUAL) */}
+      {isMoveStageModalOpen && itemToMoveStage && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setIsMoveStageModalOpen(false); }}
+          style={{
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 99999, padding: '0.75rem',
+            backdropFilter: 'blur(4px)'
+          }}
+        >
+          <div style={{
+            backgroundColor: 'var(--surface)',
+            borderRadius: 'var(--radius-lg, 12px)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-premium)',
+            width: '100%',
+            maxWidth: '420px',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'fadeIn 0.2s ease'
+          }}>
+            {/* Cabecalho */}
+            <div style={{
+              padding: '0.85rem 1.15rem',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              backgroundColor: 'rgba(var(--primary-rgb), 0.04)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ArrowRightLeft size={16} style={{ color: 'var(--primary)' }} />
+                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>
+                  Mover Pedido de Etapa
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMoveStageModalOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Dados do Item / Pedido */}
+            <div style={{ padding: '0.85rem 1.15rem', borderBottom: '1px solid var(--border)', backgroundColor: 'var(--background)' }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text)' }}>
+                {itemToMoveStage.friendly_id || itemToMoveStage.order?.pv_number || '---'}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {itemToMoveStage.order?.customer?.name || 'Cliente'} · {itemToMoveStage.name || 'Item'}
+              </div>
+            </div>
+
+            {/* Opções de Etapa */}
+            <div style={{ padding: '0.85rem 1.15rem', display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '350px', overflowY: 'auto' }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Selecione a nova etapa:
+              </span>
+
+              {stages.map((stg) => {
+                const isCurrent = itemToMoveStage.stage_id === stg.id || (!itemToMoveStage.stage_id && stg.id === stages[0]?.id);
+                return (
+                  <button
+                    key={stg.id}
+                    type="button"
+                    onClick={async () => {
+                      const targetItem = itemToMoveStage;
+                      setIsMoveStageModalOpen(false);
+                      setItemToMoveStage(null);
+                      if (!isCurrent) {
+                        await moveOrderItemToStage(targetItem, stg.id);
+                      }
+                    }}
+                    disabled={isCurrent}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: 'var(--radius-md)',
+                      border: isCurrent ? `2px solid ${stg.color}` : '1px solid var(--border)',
+                      backgroundColor: isCurrent ? `${stg.color}15` : 'var(--surface)',
+                      cursor: isCurrent ? 'default' : 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: stg.color, display: 'inline-block' }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: isCurrent ? 700 : 500, color: 'var(--text)' }}>
+                        {stg.name}
+                      </span>
+                    </div>
+                    {isCurrent && (
+                      <span style={{ fontSize: '0.68rem', fontWeight: 700, color: stg.color, backgroundColor: `${stg.color}25`, padding: '2px 8px', borderRadius: '99px' }}>
+                        Etapa Atual
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Rodapé */}
+            <div style={{ padding: '0.75rem 1.15rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', backgroundColor: 'var(--background)' }}>
+              <button
+                type="button"
+                onClick={() => setIsMoveStageModalOpen(false)}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem', padding: '0.35rem 0.85rem' }}
+              >
+                Cancelar
+              </button>
             </div>
           </div>
         </div>
