@@ -23,11 +23,26 @@ export default function RedefinirSenhaPage() {
       if (searchParams.get('invite') === 'true' || searchParams.get('type') === 'invite') {
         setIsInvite(true);
       }
+
+      // Tenta recuperar sessão pelo hash da URL (#access_token=...&refresh_token=...)
+      const hash = window.location.hash || '';
+      if (hash.includes('access_token=') && supabase) {
+        const hashParams = new URLSearchParams(hash.replace('#', '?'));
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+
+        if (accessToken && refreshToken) {
+          supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          }).catch(err => console.error('Erro ao definir sessão via hash token:', err));
+        }
+      }
     }
 
     if (!supabase) return;
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event) => {
-      if (event === 'PASSWORD_RECOVERY') {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
         setError(null);
       }
     });
@@ -72,34 +87,89 @@ export default function RedefinirSenhaPage() {
     setLoading(true);
 
     try {
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: password
-      });
+      // 1. Tentar obter a sessão atual ou decodificar JWT do hash caso o client do Supabase ainda não tenha salvo
+      const sessionRes = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+      let currentSession = sessionRes.data.session;
+      let targetUserId = currentSession?.user?.id;
+      let targetEmail = currentSession?.user?.email;
 
-      if (updateError) {
-        throw updateError;
+      if (!targetUserId && typeof window !== 'undefined') {
+        const hash = window.location.hash || '';
+        if (hash.includes('access_token=')) {
+          const hashParams = new URLSearchParams(hash.replace('#', '?'));
+          const accessToken = hashParams.get('access_token');
+          if (accessToken) {
+            try {
+              const payload = JSON.parse(atob(accessToken.split('.')[1]));
+              targetUserId = payload.sub;
+              targetEmail = payload.email;
+            } catch (e) {
+              console.error('Erro ao decodificar access_token:', e);
+            }
+          }
+        }
       }
 
-      // Remover a exigência de troca de senha no perfil via API do servidor (bypassa RLS)
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id) {
+      let updateSuccess = false;
+
+      // 2. Primeiro tenta a atualização pelo cliente Supabase do navegador se houver sessão ativa
+      if (currentSession) {
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: password
+        });
+
+        if (!updateError) {
+          updateSuccess = true;
+        }
+      }
+
+      // 3. Se a atualização client-side falhou ou não havia sessão salva (evita "Auth session missing!"), usa a API Admin no servidor
+      if (!updateSuccess && (targetUserId || targetEmail)) {
+        const res = await fetch('/api/auth/set-invited-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: targetUserId,
+            email: targetEmail,
+            password: password
+          })
+        });
+
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.error || 'Erro ao definir a senha no servidor.');
+        }
+        updateSuccess = true;
+
+        // Fazer login local no navegador
+        if (targetEmail) {
+          await supabase.auth.signInWithPassword({
+            email: targetEmail,
+            password: password
+          }).catch(err => console.warn('Aviso ao efetuar login local:', err));
+        }
+      }
+
+      if (!updateSuccess) {
+        throw new Error('Não foi possível autenticar o convite. O link pode ter expirado.');
+      }
+
+      // 4. Remover exigência de troca de senha no banco Postgres
+      const activeUser = targetUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (activeUser) {
         await fetch('/api/auth/clear-force-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: session.user.id })
-        }).catch(err => console.error('Erro ao chamar API clear-force-password:', err));
-
-        await supabase
-          .from('profiles')
-          .update({ force_password_change: false })
-          .eq('id', session.user.id);
+          body: JSON.stringify({ userId: activeUser })
+        }).catch(err => console.error('Erro ao chamar clear-force-password:', err));
       }
 
       setSuccess(true);
       setTimeout(() => {
         window.location.href = '/';
-      }, 2000);
+      }, 1500);
     } catch (err: any) {
+      console.error('Erro ao submeter nova senha:', err);
       setError(err.message || 'Erro ao definir a senha. O link de convite pode ter expirado.');
     } finally {
       setLoading(false);
