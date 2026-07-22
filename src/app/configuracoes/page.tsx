@@ -689,6 +689,7 @@ export default function ConfiguracoesPage() {
     }
   };
 
+
   const handleRequestDeleteUser = (userItem: any) => {
     if (userItem.id === user?.id) {
       alert('Você não pode excluir o seu próprio usuário conectado.');
@@ -824,7 +825,7 @@ export default function ConfiguracoesPage() {
     }
   };
 
-  const handleUpdateOperatorRole = async (profileId: string, newRole: 'Administrador' | 'Produção' | 'Fábrica' | 'Vendedor') => {
+  const handleUpdateOperatorRole = async (profileId: string, newRole: string) => {
     setSavingFactoryAccount(true);
     try {
       const isFactory = newRole === 'Fábrica';
@@ -1758,12 +1759,33 @@ export default function ConfiguracoesPage() {
                     </td>
                     <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{op.email}</td>
                     <td>
-                      <span className={`badge ${
-                        op.is_factory_account ? 'badge-warning' : 
-                        op.role === 'Administrador' ? 'badge-primary' : 'badge-success'
-                      }`}>
-                        {op.is_factory_account ? 'Terminal Fábrica' : op.role}
-                      </span>
+                      <select
+                        value={op.is_factory_account ? 'Fábrica' : (op.role || 'Produção')}
+                        onChange={(e) => handleUpdateOperatorRole(op.id, e.target.value)}
+                        disabled={savingFactoryAccount}
+                        style={{
+                          padding: '0.3rem 0.6rem',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          border: '1px solid var(--border)',
+                          backgroundColor: op.is_factory_account ? 'rgba(234, 179, 8, 0.12)' : 
+                                           op.role === 'Administrador' ? 'rgba(59, 130, 246, 0.12)' : 'var(--surface)',
+                          color: op.is_factory_account ? '#b45309' : 
+                                 op.role === 'Administrador' ? '#1d4ed8' : 'var(--text)',
+                          cursor: 'pointer',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="Administrador">Administrador</option>
+                        <option value="Produção">Produção</option>
+                        <option value="Fábrica">Terminal de Fábrica</option>
+                        <option value="Vendedor">Vendedor</option>
+                        <option value="Comercial">Comercial</option>
+                        <option value="Financeiro">Financeiro</option>
+                        <option value="Expedição">Expedição</option>
+                        <option value="Estoque">Estoque</option>
+                      </select>
                     </td>
                     <td>
                       <span className={`badge ${op.status === 'ATIVO' ? 'badge-success' : 'badge-danger'}`}>
@@ -1900,7 +1922,11 @@ export default function ConfiguracoesPage() {
                 <option value="Administrador">Administrador (Acesso total)</option>
                 <option value="Produção">Produção (Operador individual)</option>
                 <option value="Fábrica">Terminal de Fábrica (Apenas Kanban & necessita PIN de operador)</option>
-                <option value="Vendedor">Vendedor (Apenas consulta e visualização)</option>
+                <option value="Vendedor">Vendedor (Visualização de Pedidos e Produtos)</option>
+                <option value="Comercial">Comercial (Equipe comercial)</option>
+                <option value="Financeiro">Financeiro (Financeiro & Faturamento)</option>
+                <option value="Expedição">Expedição (Expedição e Logística)</option>
+                <option value="Estoque">Estoque (Estoque e Almoxarifado)</option>
               </select>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
                 Definir como "Terminal de Fábrica" bloqueia esta conta na visualização do Kanban de produção, exigindo PIN de um operador para qualquer movimento.
