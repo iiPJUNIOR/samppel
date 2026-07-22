@@ -1781,10 +1781,6 @@ export default function ConfiguracoesPage() {
                         <option value="Produção">Produção</option>
                         <option value="Fábrica">Terminal de Fábrica</option>
                         <option value="Vendedor">Vendedor</option>
-                        <option value="Comercial">Comercial</option>
-                        <option value="Financeiro">Financeiro</option>
-                        <option value="Expedição">Expedição</option>
-                        <option value="Estoque">Estoque</option>
                       </select>
                     </td>
                     <td>
@@ -1923,10 +1919,6 @@ export default function ConfiguracoesPage() {
                 <option value="Produção">Produção (Operador individual)</option>
                 <option value="Fábrica">Terminal de Fábrica (Apenas Kanban & necessita PIN de operador)</option>
                 <option value="Vendedor">Vendedor (Visualização de Pedidos e Produtos)</option>
-                <option value="Comercial">Comercial (Equipe comercial)</option>
-                <option value="Financeiro">Financeiro (Financeiro & Faturamento)</option>
-                <option value="Expedição">Expedição (Expedição e Logística)</option>
-                <option value="Estoque">Estoque (Estoque e Almoxarifado)</option>
               </select>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
                 Definir como "Terminal de Fábrica" bloqueia esta conta na visualização do Kanban de produção, exigindo PIN de um operador para qualquer movimento.
