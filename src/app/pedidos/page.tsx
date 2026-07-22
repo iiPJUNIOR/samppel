@@ -446,6 +446,8 @@ export default function PedidosPage() {
   const dragPendingItem = useRef<any>(null);
   const dragPendingTarget = useRef<HTMLElement | null>(null);
   const touchHoldTimer = useRef<any>(null);
+  const activePointerId = useRef<number | null>(null);
+  const lastPointerPos = useRef({ x: 0, y: 0 });
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
@@ -1861,6 +1863,7 @@ export default function PedidosPage() {
     dragPendingItem.current = null;
     dragPendingTarget.current = null;
     isDragActive.current = false;
+    activePointerId.current = null;
 
     setDraggedItemId(null);
     setDragOverStageId(null);
@@ -1868,7 +1871,7 @@ export default function PedidosPage() {
     
     document.removeEventListener('pointermove', handlePointerMove);
     document.removeEventListener('pointerup', handlePointerUp);
-    document.removeEventListener('pointercancel', handlePointerUp);
+    document.removeEventListener('pointercancel', handlePointerCancel);
   };
 
   const startDragMode = (item: any, currentTarget: HTMLElement, clientX: number, clientY: number) => {
@@ -1925,7 +1928,9 @@ export default function PedidosPage() {
     const currentTarget = e.currentTarget as HTMLElement;
     const rect = currentTarget.getBoundingClientRect();
     
+    activePointerId.current = e.pointerId;
     dragStartPos.current = { x: e.clientX, y: e.clientY };
+    lastPointerPos.current = { x: e.clientX, y: e.clientY };
     dragOffset.current = {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top
@@ -1937,29 +1942,30 @@ export default function PedidosPage() {
 
     if (touchHoldTimer.current) clearTimeout(touchHoldTimer.current);
 
-    // No toque mobile: Exige segurar o dedo por 350ms para descolar o card (Long Press)
+    // No toque mobile: Exige segurar o dedo por 300ms para descolar o card (Long Press)
     if (e.pointerType === 'touch') {
       touchHoldTimer.current = setTimeout(() => {
         if (!isDragActive.current && dragPendingItem.current && dragPendingTarget.current) {
-          startDragMode(dragPendingItem.current, dragPendingTarget.current, dragStartPos.current.x, dragStartPos.current.y);
+          startDragMode(dragPendingItem.current, dragPendingTarget.current, lastPointerPos.current.x, lastPointerPos.current.y);
         }
-      }, 350);
+      }, 300);
     }
 
     document.addEventListener('pointermove', handlePointerMove, { passive: false });
     document.addEventListener('pointerup', handlePointerUp);
-    document.addEventListener('pointercancel', handlePointerUp);
+    document.addEventListener('pointercancel', handlePointerCancel);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
+    lastPointerPos.current = { x: e.clientX, y: e.clientY };
+
     const deltaX = Math.abs(e.clientX - dragStartPos.current.x);
     const deltaY = Math.abs(e.clientY - dragStartPos.current.y);
     const dist = Math.hypot(deltaX, deltaY);
 
     if (!isDragActive.current) {
       if (e.pointerType === 'touch') {
-        // Se for um movimento predominantemente VERTICAL (rolagem de tela):
-        // Cancela o timer do hold e libera o scroll nativo sem travar o card!
+        // Se for rolagem vertical da coluna: cancela o hold timer e deixa o scroll livre!
         if (deltaY > 6 && deltaY > deltaX) {
           if (touchHoldTimer.current) {
             clearTimeout(touchHoldTimer.current);
@@ -1968,8 +1974,8 @@ export default function PedidosPage() {
           return;
         }
 
-        // Se for um deslize HORIZONTAL nítido (> 25px para trocar de coluna):
-        if (deltaX > 25 && deltaX > deltaY * 1.2) {
+        // Se o movimento for predominantemente HORIZONTAL (> 20px): ativa o drag!
+        if (deltaX > 20 && deltaX > deltaY * 1.2) {
           if (touchHoldTimer.current) {
             clearTimeout(touchHoldTimer.current);
             touchHoldTimer.current = null;
@@ -1989,9 +1995,9 @@ export default function PedidosPage() {
       }
     }
 
-    // Se o arrasto já está ativo (ou por hold ou por swipe horizontal), movimenta o clone
+    // Se o arrasto já está ativo, bloqueia o scroll nativo e movimenta o card clone 60FPS
     if (isDragActive.current) {
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       if (!dragCloneRef.current) return;
 
       const x = e.clientX - dragOffset.current.x;
@@ -2021,6 +2027,14 @@ export default function PedidosPage() {
       } else {
         setDragOverStageId(null);
       }
+    }
+  };
+
+  const handlePointerCancel = (e: PointerEvent) => {
+    // Se o arrasto ainda NÃO tinha sido ativado, limpa os timers
+    // Se o arrasto JÁ estava ativo, ignora o cancelamento do navegador para que o card continue seguindo o toque!
+    if (!isDragActive.current) {
+      cleanupCustomDrag();
     }
   };
 
