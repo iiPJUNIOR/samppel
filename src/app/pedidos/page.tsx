@@ -449,6 +449,7 @@ export default function PedidosPage() {
   const touchHoldTimer = useRef<any>(null);
   const activePointerId = useRef<number | null>(null);
   const lastPointerPos = useRef({ x: 0, y: 0 });
+  const wasJustDragged = useRef<boolean>(false);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
@@ -1887,6 +1888,9 @@ export default function PedidosPage() {
   const startDragMode = (item: any, currentTarget: HTMLElement, clientX: number, clientY: number) => {
     if (isDragActive.current) return;
 
+    // Sinaliza que uma operação de arrasto física foi iniciada (impede de abrir modal de detalhes no clique)
+    wasJustDragged.current = true;
+
     // Tenta travar a captura do ponteiro para garantir entrega contínua dos eventos de movimento no mobile
     if (activePointerId.current !== null) {
       try {
@@ -1961,6 +1965,8 @@ export default function PedidosPage() {
 
     const target = e.target as HTMLElement;
     if (target.closest('button')) return;
+
+    wasJustDragged.current = false;
 
     const currentTarget = e.currentTarget as HTMLElement;
     const rect = currentTarget.getBoundingClientRect();
@@ -2047,6 +2053,7 @@ export default function PedidosPage() {
     
     let targetStageId = null;
     if (wasActive) {
+      wasJustDragged.current = true;
       const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
       if (elementBelow) {
         const column = elementBelow.closest('.kanban-column');
@@ -2064,6 +2071,13 @@ export default function PedidosPage() {
       if (itemToMove && itemToMove.stage_id !== targetStageId) {
         await moveOrderItemToStage(itemToMove, targetStageId);
       }
+    }
+
+    // Mantém a trava por 150ms para capturar e anular o evento sintético onClick do navegador
+    if (wasActive) {
+      setTimeout(() => {
+        wasJustDragged.current = false;
+      }, 150);
     }
   };
 
@@ -3553,7 +3567,11 @@ export default function PedidosPage() {
                               gap: '0.35rem'
                             }}
                             onClick={(e) => {
-                              // Abre detalhes apenas em clique direto (não durante drag)
+                              // Abre detalhes apenas em clique direto (não durante ou após um drag)
+                              if (wasJustDragged.current) {
+                                wasJustDragged.current = false;
+                                return;
+                              }
                               const target = e.target as HTMLElement;
                               const isButton = target.closest('button');
 
