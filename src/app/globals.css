@@ -184,24 +184,16 @@ h1, h2, h3, h4, h5, h6 {
   animation: fadeIn 0.3s ease;
 }
 
-/* Kanban mode: contain the layout to viewport height for column scroll */
+/* Kanban mode: page-container handles its own height via inline style */
 .app-container.kanban-mode {
-  height: 100dvh;
-  max-height: 100dvh;
-  overflow: hidden;
+  /* nothing needed here - page-container manages height directly */
 }
 
 .app-container.kanban-mode .main-content {
-  height: 100dvh;
-  max-height: 100dvh;
-  overflow: hidden;
+  /* nothing needed here - page-container manages height directly */
 }
 
 .app-container.kanban-mode .page-container {
-  flex: 1;
-  overflow: hidden;
-  height: 100%;
-  max-height: 100%;
   animation: none;
 }
 
@@ -628,6 +620,16 @@ body.sidebar-collapsed .page-container {
 
 body.sidebar-collapsed .kanban-board-container {
   min-height: calc(100vh - 120px) !important;
+}
+
+/* Logo na filter-bar: oculto quando sidebar visível (duplicaria o logo),
+   visível apenas quando sidebar recolhida */
+.filterbar-logo {
+  display: none !important;
+}
+
+body.sidebar-collapsed .filterbar-logo {
+  display: flex !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════

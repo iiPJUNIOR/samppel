@@ -3035,11 +3035,14 @@ export default function PedidosPage() {
       style={viewMode === 'kanban' ? {
         display: 'flex',
         flexDirection: 'column',
-        padding: '0 0.75rem 0 0.75rem',
-        boxSizing: 'border-box'
+        padding: '0.75rem 0.75rem 0 0.75rem',
+        boxSizing: 'border-box',
+        height: '100dvh',
+        maxHeight: '100dvh',
+        overflow: 'hidden'
       } : undefined}
     >
-      <header className="page-header" style={{ display: isHeaderCollapsed || viewMode === 'kanban' ? 'none' : undefined }}>
+      <header className="page-header" style={{ display: isHeaderCollapsed ? 'none' : undefined, marginBottom: viewMode === 'kanban' ? '0.5rem' : undefined }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Pedidos & Vendas</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
@@ -3047,7 +3050,8 @@ export default function PedidosPage() {
           </p>
         </div>
         
-        {!['Produção', 'Fábrica'].includes(user?.role || '') && (
+        {/* Controles de importação: só no modo lista (no kanban ficam na filter bar) */}
+        {viewMode !== 'kanban' && !['Produção', 'Fábrica'].includes(user?.role || '') && (
           <div className="page-header-actions">
             <div className="import-action-bar">
               {/* Opção 1: Importar por Período */}
@@ -3143,7 +3147,9 @@ export default function PedidosPage() {
         )}
       </header>
 
-      {/* BARRA DE FILTROS RESPONSIVA COM LOGO DA SAMPPEL */}
+      {/* ═══════════════════════════════════════════════════════════════
+          BARRA DE FILTROS PREMIUM — KANBAN HEADER
+          ═══════════════════════════════════════════════════════════════ */}
       {(() => {
         const activeFiltersCount = [
           filterCustomer,
@@ -3154,41 +3160,58 @@ export default function PedidosPage() {
         ].filter(Boolean).length;
 
         return (
-          <div className="filter-bar" style={{ padding: '0.4rem 0.75rem', marginBottom: '0.5rem' }}>
-            {/* Linha Única: LOGO SAMPPEL + Toggle Kanban/Lista + Busca PV + Filtros Inline */}
-            <div style={{ display: 'flex', gap: '0.5rem', width: '100%', alignItems: 'center', flexWrap: 'wrap' }}>
-              
-              {/* LOGO DA SAMPPEL no canto superior esquerdo (Dobro do Tamanho - 80px) */}
-              <div style={{ display: 'flex', alignItems: 'center', paddingRight: '1rem', borderRight: '1px solid var(--border)', flexShrink: 0 }}>
-                <Image 
-                  src="/logo.png" 
-                  alt="Samppel Logo" 
-                  width={320} 
-                  height={85} 
-                  style={{ objectFit: 'contain', height: '80px', width: 'auto', maxHeight: '80px' }}
-                  priority 
+          <div
+            className="filter-bar"
+            style={{
+              padding: '0.3rem 0.85rem',
+              marginBottom: '0.25rem',
+              flexShrink: 0,
+              background: 'linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--primary) 4%, var(--surface)) 100%)',
+              borderBottom: '2px solid color-mix(in srgb, var(--primary) 25%, var(--border))',
+              borderRadius: '10px',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
+              backdropFilter: 'blur(4px)'
+            }}
+          >
+            <div style={{ display: 'flex', gap: '0.6rem', width: '100%', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+
+              {/* LOGO DA SAMPPEL — só quando sidebar está recolhida */}
+              <div className="filterbar-logo" style={{ display: 'flex', alignItems: 'center', paddingRight: '0.85rem', borderRight: '2px solid color-mix(in srgb, var(--primary) 20%, var(--border))', flexShrink: 0 }}>
+                <Image
+                  src="/logo.png"
+                  alt="Samppel Logo"
+                  width={320}
+                  height={85}
+                  style={{ objectFit: 'contain', height: '36px', width: 'auto', maxHeight: '36px' }}
+                  priority
                 />
               </div>
 
-              {/* Alternador de Modo de Visualização */}
-              <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '34px', alignItems: 'center', flexShrink: 0 }}>
+              {/* Toggle Kanban / Lista */}
+              <div style={{
+                display: 'flex',
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                padding: '2px',
+                height: '32px',
+                alignItems: 'center',
+                flexShrink: 0,
+                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.06)'
+              }}>
                 <button
                   onClick={() => setViewMode('kanban')}
                   className="btn"
                   title="Kanban"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    padding: '0.35rem 0.55rem',
-                    fontSize: '0.78rem',
-                    border: 'none',
-                    height: '100%',
-                    borderRadius: 'var(--radius-sm)',
-                    backgroundColor: viewMode === 'kanban' ? 'var(--surface)' : 'transparent',
-                    color: viewMode === 'kanban' ? 'var(--primary)' : 'var(--text-muted)',
-                    boxShadow: viewMode === 'kanban' ? 'var(--shadow-sm)' : 'none',
-                    fontWeight: viewMode === 'kanban' ? 600 : 500
+                    display: 'flex', alignItems: 'center', gap: '0.3rem',
+                    padding: '0.3rem 0.65rem', fontSize: '0.78rem', border: 'none', height: '100%',
+                    borderRadius: '6px',
+                    backgroundColor: viewMode === 'kanban' ? 'var(--primary)' : 'transparent',
+                    color: viewMode === 'kanban' ? '#fff' : 'var(--text-muted)',
+                    boxShadow: viewMode === 'kanban' ? '0 1px 6px rgba(var(--primary-rgb),0.35)' : 'none',
+                    fontWeight: viewMode === 'kanban' ? 700 : 500,
+                    transition: 'all 0.18s ease'
                   }}
                 >
                   <LayoutGrid size={14} />
@@ -3199,18 +3222,14 @@ export default function PedidosPage() {
                   className="btn"
                   title="Lista"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    padding: '0.35rem 0.55rem',
-                    fontSize: '0.78rem',
-                    border: 'none',
-                    height: '100%',
-                    borderRadius: 'var(--radius-sm)',
-                    backgroundColor: viewMode === 'list' ? 'var(--surface)' : 'transparent',
-                    color: viewMode === 'list' ? 'var(--primary)' : 'var(--text-muted)',
-                    boxShadow: viewMode === 'list' ? 'var(--shadow-sm)' : 'none',
-                    fontWeight: viewMode === 'list' ? 600 : 500
+                    display: 'flex', alignItems: 'center', gap: '0.3rem',
+                    padding: '0.3rem 0.65rem', fontSize: '0.78rem', border: 'none', height: '100%',
+                    borderRadius: '6px',
+                    backgroundColor: viewMode === 'list' ? 'var(--primary)' : 'transparent',
+                    color: viewMode === 'list' ? '#fff' : 'var(--text-muted)',
+                    boxShadow: viewMode === 'list' ? '0 1px 6px rgba(var(--primary-rgb),0.35)' : 'none',
+                    fontWeight: viewMode === 'list' ? 700 : 500,
+                    transition: 'all 0.18s ease'
                   }}
                 >
                   <List size={14} />
@@ -3218,90 +3237,89 @@ export default function PedidosPage() {
                 </button>
               </div>
 
-              {/* Busca de Pedidos por PV / OP */}
-              <div style={{ flex: '1 1 130px', minWidth: '120px', maxWidth: '200px' }}>
+              {/* Divisor */}
+              <div style={{ width: '1px', height: '32px', background: 'linear-gradient(to bottom, transparent, var(--border), transparent)', flexShrink: 0 }} />
+
+              {/* Busca PV / OP */}
+              <div style={{ flex: '1 1 140px', minWidth: '120px', maxWidth: '190px', position: 'relative' }}>
+                <div style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                  <Search size={13} />
+                </div>
                 <input
                   type="text"
                   className="form-input"
                   placeholder="Pesquisar PV/OP..."
                   value={filterSearchOrder}
                   onChange={(e) => setFilterSearchOrder(e.target.value)}
-                  style={{ height: '34px', fontSize: '0.8rem', padding: '0.35rem 0.55rem', width: '100%' }}
+                  style={{ height: '32px', fontSize: '0.78rem', padding: '0.3rem 0.55rem 0.3rem 1.9rem', width: '100%', borderRadius: '7px' }}
                 />
               </div>
 
-              {/* Filtros compactos horizontais inline */}
-              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
-                <div style={{ minWidth: '95px', flex: '1 1 95px', maxWidth: '140px' }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Cliente..."
-                    value={filterCustomer}
-                    onChange={(e) => setFilterCustomer(e.target.value)}
-                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.5rem', width: '100%' }}
-                  />
-                </div>
+              {/* ─── GRUPO DE FILTROS ─── */}
+              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flex: 1 }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Cliente..."
+                  value={filterCustomer}
+                  onChange={(e) => setFilterCustomer(e.target.value)}
+                  style={{ height: '32px', fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '90px', flex: '1 1 90px', maxWidth: '150px', borderRadius: '7px' }}
+                />
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Vendedora..."
+                  value={filterSeller}
+                  onChange={(e) => setFilterSeller(e.target.value)}
+                  style={{ height: '32px', fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '90px', flex: '1 1 90px', maxWidth: '130px', borderRadius: '7px' }}
+                />
+                <select
+                  className="form-select"
+                  value={filterContaAzulStatus}
+                  onChange={(e) => setFilterContaAzulStatus(e.target.value)}
+                  style={{ height: '32px', fontSize: '0.73rem', padding: '0.25rem 0.4rem', minWidth: '100px', flex: '1 1 100px', maxWidth: '130px', borderRadius: '7px' }}
+                >
+                  <option value="">Todas</option>
+                  <option value="Aprovado">Aprovado</option>
+                  <option value="Cancelado">Cancelado</option>
+                  <option value="Em andamento">Em andamento</option>
+                  <option value="Faturado">Faturado</option>
+                  <option value="Recusado">Recusado</option>
+                </select>
+                <select
+                  className="form-select"
+                  value={filterPedidosRelease}
+                  onChange={(e) => setFilterPedidosRelease(e.target.value)}
+                  style={{ height: '32px', fontSize: '0.73rem', padding: '0.25rem 0.4rem', minWidth: '100px', flex: '1 1 100px', maxWidth: '130px', borderRadius: '7px' }}
+                >
+                  <option value="">Todas</option>
+                  <option value="liberados">Liberados</option>
+                  <option value="bloqueados">Bloqueados</option>
+                  <option value="autorizados">Com Autorização</option>
+                </select>
+                <select
+                  className="form-select"
+                  value={filterStage}
+                  onChange={(e) => setFilterStage(e.target.value)}
+                  style={{ height: '32px', fontSize: '0.73rem', padding: '0.25rem 0.4rem', minWidth: '110px', flex: '1 1 110px', maxWidth: '145px', borderRadius: '7px' }}
+                >
+                  <option value="">Todas as Etapas</option>
+                  {stages.map(s => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
 
-                <div style={{ minWidth: '95px', flex: '1 1 95px', maxWidth: '130px' }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Vendedora..."
-                    value={filterSeller}
-                    onChange={(e) => setFilterSeller(e.target.value)}
-                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.5rem', width: '100%' }}
-                  />
-                </div>
-
-                <div style={{ minWidth: '100px', flex: '1 1 100px', maxWidth: '130px' }}>
-                  <select
-                    className="form-select"
-                    value={filterContaAzulStatus}
-                    onChange={(e) => setFilterContaAzulStatus(e.target.value)}
-                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.4rem', width: '100%' }}
-                  >
-                    <option value="">Todas</option>
-                    <option value="Aprovado">Aprovado</option>
-                    <option value="Cancelado">Cancelado</option>
-                    <option value="Em andamento">Em andamento</option>
-                    <option value="Faturado">Faturado</option>
-                    <option value="Recusado">Recusado</option>
-                  </select>
-                </div>
-
-                <div style={{ minWidth: '100px', flex: '1 1 100px', maxWidth: '130px' }}>
-                  <select
-                    className="form-select"
-                    value={filterPedidosRelease}
-                    onChange={(e) => setFilterPedidosRelease(e.target.value)}
-                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.4rem', width: '100%' }}
-                  >
-                    <option value="">Todas</option>
-                    <option value="liberados">Liberados</option>
-                    <option value="bloqueados">Bloqueados</option>
-                    <option value="autorizados">Com Autorização</option>
-                  </select>
-                </div>
-
-                <div style={{ minWidth: '110px', flex: '1 1 110px', maxWidth: '140px' }}>
-                  <select
-                    className="form-select"
-                    value={filterStage}
-                    onChange={(e) => setFilterStage(e.target.value)}
-                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.4rem', width: '100%' }}
-                  >
-                    <option value="">Todas as Etapas</option>
-                    {stages.map(s => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-
+                {/* Badge com contagem de filtros ativos + Limpar */}
                 {activeFiltersCount > 0 && (
                   <button
-                    className="btn btn-secondary"
-                    style={{ height: '34px', fontSize: '0.72rem', padding: '0.25rem 0.5rem', flexShrink: 0 }}
+                    className="btn"
+                    style={{
+                      height: '32px', fontSize: '0.72rem', padding: '0.2rem 0.6rem',
+                      flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      backgroundColor: 'rgba(var(--primary-rgb), 0.1)',
+                      color: 'var(--primary)', border: '1px solid rgba(var(--primary-rgb), 0.25)',
+                      borderRadius: '7px', fontWeight: 600, whiteSpace: 'nowrap'
+                    }}
                     onClick={() => {
                       setFilterCustomer('');
                       setFilterSeller('');
@@ -3319,12 +3337,109 @@ export default function PedidosPage() {
                       }
                     }}
                   >
+                    <span style={{
+                      backgroundColor: 'var(--primary)', color: '#fff',
+                      borderRadius: '50%', width: '16px', height: '16px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '0.65rem', fontWeight: 700, lineHeight: 1
+                    }}>{activeFiltersCount}</span>
                     Limpar
                   </button>
                 )}
               </div>
 
-              {/* Botão Seta (Recolher / Expandir Painel Superior) */}
+              {/* ═══ SINCRONIZAÇÃO CONTA AZUL (Kanban + roles autorizados) ═══ */}
+              {viewMode === 'kanban' && !['Produção', 'Fábrica'].includes(user?.role || '') && (
+                <>
+                  {/* Divisor */}
+                  <div style={{ width: '1px', height: '32px', background: 'linear-gradient(to bottom, transparent, var(--border), transparent)', flexShrink: 0 }} />
+
+                  {/* Importar por Período */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0,
+                    backgroundColor: 'rgba(var(--primary-rgb), 0.04)',
+                    border: '1px solid rgba(var(--primary-rgb), 0.15)',
+                    borderRadius: '8px', padding: '0.3rem 0.6rem'
+                  }}>
+                    <span style={{ fontSize: '0.6rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>
+                      Período
+                    </span>
+                    <input
+                      type="date"
+                      value={importStartDate}
+                      onChange={(e) => setImportStartDate(e.target.value)}
+                      disabled={importing}
+                      style={{
+                        height: '26px', padding: '0.18rem 0.35rem', fontSize: '0.72rem',
+                        border: '1px solid var(--border)', borderRadius: '6px',
+                        backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '112px'
+                      }}
+                    />
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 500 }}>→</span>
+                    <input
+                      type="date"
+                      value={importEndDate}
+                      onChange={(e) => setImportEndDate(e.target.value)}
+                      disabled={importing}
+                      style={{
+                        height: '26px', padding: '0.18rem 0.35rem', fontSize: '0.72rem',
+                        border: '1px solid var(--border)', borderRadius: '6px',
+                        backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '112px'
+                      }}
+                    />
+                    <button
+                      onClick={handleImportOrders}
+                      disabled={importing}
+                      className="btn btn-primary"
+                      style={{
+                        height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center',
+                        padding: '0.2rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0
+                      }}
+                    >
+                      <RefreshCw size={11} className={importing ? 'spinner' : ''} />
+                      <span>{importing ? 'Sincronizando...' : 'Importar Conta Azul'}</span>
+                    </button>
+                  </div>
+
+                  {/* Importar Pedido por Número */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0,
+                    backgroundColor: 'rgba(var(--primary-rgb), 0.04)',
+                    border: '1px solid rgba(var(--primary-rgb), 0.15)',
+                    borderRadius: '8px', padding: '0.3rem 0.6rem'
+                  }}>
+                    <span style={{ fontSize: '0.6rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>
+                      Pedido Nº
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="406..."
+                      value={pullOrderNumber}
+                      onChange={(e) => setPullOrderNumber(e.target.value)}
+                      disabled={importing}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSyncOrderByNumber(pullOrderNumber);
+                      }}
+                      style={{
+                        height: '26px', padding: '0.18rem 0.35rem', fontSize: '0.72rem', width: '70px',
+                        border: '1px solid var(--border)', borderRadius: '6px',
+                        backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none'
+                      }}
+                    />
+                    <button
+                      onClick={() => handleSyncOrderByNumber(pullOrderNumber)}
+                      disabled={importing || !pullOrderNumber.trim()}
+                      className="btn btn-secondary"
+                      style={{ height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.18rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0 }}
+                    >
+                      <Download size={11} />
+                      <span>Importar</span>
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Botão Colapsar */}
               <button
                 onClick={() => {
                   const nextState = !isHeaderCollapsed;
@@ -3333,21 +3448,17 @@ export default function PedidosPage() {
                 className="btn btn-secondary"
                 title={isHeaderCollapsed ? 'Expandir painel' : 'Ocultar topo (Modo Tela Cheia)'}
                 style={{
-                  height: '34px',
-                  width: '34px',
-                  minWidth: '34px',
-                  padding: 0,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: isHeaderCollapsed ? 'var(--primary)' : 'transparent',
-                  color: isHeaderCollapsed ? '#ffffff' : 'var(--text-muted)',
-                  borderColor: isHeaderCollapsed ? 'var(--primary)' : 'var(--border)',
-                  flexShrink: 0
+                  height: '32px', width: '32px', minWidth: '32px', padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '8px',
+                  backgroundColor: isHeaderCollapsed ? 'var(--primary)' : 'rgba(var(--primary-rgb), 0.06)',
+                  color: isHeaderCollapsed ? '#ffffff' : 'var(--primary)',
+                  borderColor: isHeaderCollapsed ? 'var(--primary)' : 'rgba(var(--primary-rgb), 0.2)',
+                  flexShrink: 0,
+                  transition: 'all 0.18s ease'
                 }}
               >
-                {isHeaderCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+                {isHeaderCollapsed ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
               </button>
 
             </div>

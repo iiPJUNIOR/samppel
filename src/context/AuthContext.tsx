@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '@/services/supabase';
 
 export type UserRole = 'Administrador' | 'Comercial' | 'Produção' | 'Financeiro' | 'Estoque' | 'Expedição' | 'Fábrica' | 'Vendedor';
@@ -35,12 +35,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const isLoadingRef = useRef(true);
+
   // Monitora o estado de autenticacao real do Supabase
   useEffect(() => {
     if (!supabase) {
       setIsLoading(false);
+      isLoadingRef.current = false;
       return;
     }
+
+    // Timeout de segurança: se ficar em loading por mais de 8s, desbloqueia
+    const safetyTimer = setTimeout(() => {
+      if (isLoadingRef.current) {
+        console.warn('[Auth] Timeout de segurança atingido — forçando saída do loading.');
+        setIsLoading(false);
+        isLoadingRef.current = false;
+      }
+    }, 8000);
 
     // Busca sessao ativa inicial
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -48,6 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await fetchProfile(session.user.id);
       } else {
         setIsLoading(false);
+        isLoadingRef.current = false;
       }
     });
 
@@ -58,11 +71,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setUser(null);
         setIsLoading(false);
+        isLoadingRef.current = false;
       }
     });
 
     return () => {
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
+    };
+  }, []);
+
+  // Page Visibility API: reconecta quando a aba volta ao foco (sleep do PC, celular desbloqueado)
+  useEffect(() => {
+    if (!supabase) return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      // Se o app ainda estava em loading quando a aba voltou → recarregar
+      if (isLoadingRef.current) {
+        console.warn('[Auth] Aba voltou ao foco durante loading — recarregando.');
+        window.location.reload();
+        return;
+      }
+
+      // App já estava carregado: reverificar sessão silenciosamente
+      try {
+        const { data: { session } } = await supabase!.auth.getSession();
+        if (!session) {
+          // Sessão expirou enquanto estava em background → desloga
+          setUser(null);
+        }
+      } catch {
+        // Erro silencioso — não bloqueia a UI
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -104,6 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
     } finally {
       setIsLoading(false);
+      isLoadingRef.current = false;
     }
   };
 
