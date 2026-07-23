@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { userId, email, password, accessToken } = await request.json();
+    const { userId, email, password, accessToken, pin } = await request.json();
 
     if (!password) {
       return NextResponse.json({ error: 'A nova senha é obrigatória.' }, { status: 400 });
@@ -60,10 +60,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: updateAuthErr.message }, { status: 500 });
     }
 
-    // 2. Remove a exigência de troca de senha no perfil Postgres
+    // 2. Remove a exigência de troca de senha no perfil Postgres e salva o PIN se fornecido
+    const profileUpdates: any = {
+      force_password_change: false
+    };
+
+    if (pin) {
+      const { hashCredential } = await import('@/lib/crypto');
+      if (!/^\d{4,6}$/.test(pin)) {
+        return NextResponse.json({ error: 'O PIN deve conter de 4 a 6 dígitos numéricos.' }, { status: 400 });
+      }
+      profileUpdates.pin = hashCredential(pin);
+    }
+
     await supabaseAdmin
       .from('profiles')
-      .update({ force_password_change: false })
+      .update(profileUpdates)
       .eq('id', targetUserId);
 
     return NextResponse.json({ success: true, message: 'Senha atualizada com sucesso no servidor!' });

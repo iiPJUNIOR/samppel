@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { 
   getOrders, 
@@ -217,7 +218,28 @@ export default function PedidosPage() {
   useEffect(() => {
     localStorage.setItem('pedidos_view_mode', viewMode);
     window.dispatchEvent(new Event('pedidos_view_mode_changed'));
+    // Toggle kanban-mode class for CSS containment
+    const appContainer = document.querySelector('.app-container');
+    if (appContainer) {
+      if (viewMode === 'kanban') {
+        appContainer.classList.add('kanban-mode');
+      } else {
+        appContainer.classList.remove('kanban-mode');
+      }
+    }
   }, [viewMode]);
+
+  // Set kanban-mode on initial mount
+  useEffect(() => {
+    const appContainer = document.querySelector('.app-container');
+    if (appContainer && viewMode === 'kanban') {
+      appContainer.classList.add('kanban-mode');
+    }
+    return () => {
+      document.querySelector('.app-container')?.classList.remove('kanban-mode');
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [filterCustomer, setFilterCustomer] = useState(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_customer') || '';
@@ -3011,16 +3033,13 @@ export default function PedidosPage() {
     <div 
       className="page-container"
       style={viewMode === 'kanban' ? {
-        height: 'calc(100vh - 4rem)',
-        maxHeight: 'calc(100vh - 4rem)',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
-        paddingTop: '1rem',
-        paddingBottom: '1rem'
+        padding: '0 0.75rem 0 0.75rem',
+        boxSizing: 'border-box'
       } : undefined}
     >
-      <header className="page-header" style={{ display: isHeaderCollapsed ? 'none' : undefined }}>
+      <header className="page-header" style={{ display: isHeaderCollapsed || viewMode === 'kanban' ? 'none' : undefined }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Pedidos & Vendas</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
@@ -3124,7 +3143,7 @@ export default function PedidosPage() {
         )}
       </header>
 
-      {/* BARRA DE FILTROS RESPONSIVA */}
+      {/* BARRA DE FILTROS RESPONSIVA COM LOGO DA SAMPPEL */}
       {(() => {
         const activeFiltersCount = [
           filterCustomer,
@@ -3135,12 +3154,24 @@ export default function PedidosPage() {
         ].filter(Boolean).length;
 
         return (
-          <div className="filter-bar">
-            {/* Linha Superior (Sempre Visível): Busca PV + Toggle Kanban/Lista + Botão Filtros Mobile + Seta Collapse */}
-            <div style={{ display: 'flex', gap: '0.4rem', width: '100%', alignItems: 'center', flexWrap: 'nowrap' }}>
+          <div className="filter-bar" style={{ padding: '0.4rem 0.75rem', marginBottom: '0.5rem' }}>
+            {/* Linha Única: LOGO SAMPPEL + Toggle Kanban/Lista + Busca PV + Filtros Inline */}
+            <div style={{ display: 'flex', gap: '0.5rem', width: '100%', alignItems: 'center', flexWrap: 'wrap' }}>
               
+              {/* LOGO DA SAMPPEL no canto superior esquerdo (Dobro do Tamanho - 80px) */}
+              <div style={{ display: 'flex', alignItems: 'center', paddingRight: '1rem', borderRight: '1px solid var(--border)', flexShrink: 0 }}>
+                <Image 
+                  src="/logo.png" 
+                  alt="Samppel Logo" 
+                  width={320} 
+                  height={85} 
+                  style={{ objectFit: 'contain', height: '80px', width: 'auto', maxHeight: '80px' }}
+                  priority 
+                />
+              </div>
+
               {/* Alternador de Modo de Visualização */}
-              <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '36px', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ display: 'flex', backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '2px', height: '34px', alignItems: 'center', flexShrink: 0 }}>
                 <button
                   onClick={() => setViewMode('kanban')}
                   className="btn"
@@ -3187,66 +3218,124 @@ export default function PedidosPage() {
                 </button>
               </div>
 
-              {/* Busca de Pedidos por PV / OP (Expandido no Mobile) */}
-              <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Busca de Pedidos por PV / OP */}
+              <div style={{ flex: '1 1 130px', minWidth: '120px', maxWidth: '200px' }}>
                 <input
                   type="text"
                   className="form-input"
                   placeholder="Pesquisar PV/OP..."
                   value={filterSearchOrder}
                   onChange={(e) => setFilterSearchOrder(e.target.value)}
-                  style={{ height: '36px', fontSize: '0.825rem', padding: '0.4rem 0.6rem', width: '100%' }}
+                  style={{ height: '34px', fontSize: '0.8rem', padding: '0.35rem 0.55rem', width: '100%' }}
                 />
               </div>
 
-              {/* Botão de Filtros no Celular (Ícone compacto no mobile) */}
-              <button
-                onClick={() => setIsMobileFiltersOpen(!isMobileFiltersOpen)}
-                className="btn btn-secondary mobile-only-flex"
-                title="Filtros"
-                style={{
-                  height: '36px',
-                  padding: '0.35rem 0.55rem',
-                  fontSize: '0.78rem',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                  fontWeight: 600,
-                  backgroundColor: isMobileFiltersOpen || activeFiltersCount > 0 ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
-                  borderColor: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--border)',
-                  color: isMobileFiltersOpen || activeFiltersCount > 0 ? 'var(--primary)' : 'var(--text)',
-                  flexShrink: 0
-                }}
-              >
-                <Filter size={14} />
-                <span className="desktop-only-inline">Filtros</span>
+              {/* Filtros compactos horizontais inline */}
+              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
+                <div style={{ minWidth: '95px', flex: '1 1 95px', maxWidth: '140px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Cliente..."
+                    value={filterCustomer}
+                    onChange={(e) => setFilterCustomer(e.target.value)}
+                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.5rem', width: '100%' }}
+                  />
+                </div>
+
+                <div style={{ minWidth: '95px', flex: '1 1 95px', maxWidth: '130px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Vendedora..."
+                    value={filterSeller}
+                    onChange={(e) => setFilterSeller(e.target.value)}
+                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.5rem', width: '100%' }}
+                  />
+                </div>
+
+                <div style={{ minWidth: '100px', flex: '1 1 100px', maxWidth: '130px' }}>
+                  <select
+                    className="form-select"
+                    value={filterContaAzulStatus}
+                    onChange={(e) => setFilterContaAzulStatus(e.target.value)}
+                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.4rem', width: '100%' }}
+                  >
+                    <option value="">Todas</option>
+                    <option value="Aprovado">Aprovado</option>
+                    <option value="Cancelado">Cancelado</option>
+                    <option value="Em andamento">Em andamento</option>
+                    <option value="Faturado">Faturado</option>
+                    <option value="Recusado">Recusado</option>
+                  </select>
+                </div>
+
+                <div style={{ minWidth: '100px', flex: '1 1 100px', maxWidth: '130px' }}>
+                  <select
+                    className="form-select"
+                    value={filterPedidosRelease}
+                    onChange={(e) => setFilterPedidosRelease(e.target.value)}
+                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.4rem', width: '100%' }}
+                  >
+                    <option value="">Todas</option>
+                    <option value="liberados">Liberados</option>
+                    <option value="bloqueados">Bloqueados</option>
+                    <option value="autorizados">Com Autorização</option>
+                  </select>
+                </div>
+
+                <div style={{ minWidth: '110px', flex: '1 1 110px', maxWidth: '140px' }}>
+                  <select
+                    className="form-select"
+                    value={filterStage}
+                    onChange={(e) => setFilterStage(e.target.value)}
+                    style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.4rem', width: '100%' }}
+                  >
+                    <option value="">Todas as Etapas</option>
+                    {stages.map(s => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 {activeFiltersCount > 0 && (
-                  <span style={{
-                    backgroundColor: 'var(--primary)',
-                    color: '#ffffff',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    borderRadius: '99px',
-                    padding: '1px 5px',
-                    lineHeight: 1
-                  }}>
-                    {activeFiltersCount}
-                  </span>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ height: '34px', fontSize: '0.72rem', padding: '0.25rem 0.5rem', flexShrink: 0 }}
+                    onClick={() => {
+                      setFilterCustomer('');
+                      setFilterSeller('');
+                      setFilterSearchOrder('');
+                      setFilterContaAzulStatus('');
+                      setFilterPedidosRelease('');
+                      setFilterStage('');
+                      if (typeof window !== 'undefined') {
+                        localStorage.removeItem('pedidos_filter_customer');
+                        localStorage.removeItem('pedidos_filter_seller');
+                        localStorage.removeItem('pedidos_filter_search');
+                        localStorage.removeItem('pedidos_filter_conta_azul');
+                        localStorage.removeItem('pedidos_filter_release');
+                        localStorage.removeItem('pedidos_filter_stage');
+                      }
+                    }}
+                  >
+                    Limpar
+                  </button>
                 )}
-              </button>
+              </div>
 
               {/* Botão Seta (Recolher / Expandir Painel Superior) */}
               <button
                 onClick={() => {
                   const nextState = !isHeaderCollapsed;
                   setIsHeaderCollapsed(nextState);
-                  if (nextState) setIsMobileFiltersOpen(false);
                 }}
                 className="btn btn-secondary"
                 title={isHeaderCollapsed ? 'Expandir painel' : 'Ocultar topo (Modo Tela Cheia)'}
                 style={{
-                  height: '36px',
-                  width: '36px',
-                  minWidth: '36px',
+                  height: '34px',
+                  width: '34px',
+                  minWidth: '34px',
                   padding: 0,
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -3261,100 +3350,6 @@ export default function PedidosPage() {
                 {isHeaderCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
               </button>
 
-            </div>
-
-            {/* Grupo de Filtros Expandível (Desktop Inline / Mobile Collapsible) */}
-            <div className={`filter-bar-expandable ${isMobileFiltersOpen ? 'is-open' : ''}`}>
-              <div className="form-group">
-                <label className="form-label">Cliente</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Cliente..."
-                  value={filterCustomer}
-                  onChange={(e) => setFilterCustomer(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Vendedora</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Vendedora..."
-                  value={filterSeller}
-                  onChange={(e) => setFilterSeller(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Situação</label>
-                <select
-                  className="form-select"
-                  value={filterContaAzulStatus}
-                  onChange={(e) => setFilterContaAzulStatus(e.target.value)}
-                >
-                  <option value="">Todas</option>
-                  <option value="Aprovado">Aprovado</option>
-                  <option value="Cancelado">Cancelado</option>
-                  <option value="Em andamento">Em andamento</option>
-                  <option value="Faturado">Faturado</option>
-                  <option value="Recusado">Recusado</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Liberação</label>
-                <select
-                  className="form-select"
-                  value={filterPedidosRelease}
-                  onChange={(e) => setFilterPedidosRelease(e.target.value)}
-                >
-                  <option value="">Todas</option>
-                  <option value="liberados">Liberados</option>
-                  <option value="bloqueados">Bloqueados</option>
-                  <option value="autorizados">Com Autorização</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Etapa</label>
-                <select
-                  className="form-select"
-                  value={filterStage}
-                  onChange={(e) => setFilterStage(e.target.value)}
-                >
-                  <option value="">Todas as Etapas</option>
-                  {stages.map(s => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {activeFiltersCount > 0 && (
-                <button
-                  className="btn btn-secondary"
-                  style={{ height: '34px', fontSize: '0.75rem', padding: '0.3rem 0.6rem', alignSelf: 'flex-end' }}
-                  onClick={() => {
-                    setFilterCustomer('');
-                    setFilterSeller('');
-                    setFilterSearchOrder('');
-                    setFilterContaAzulStatus('');
-                    setFilterPedidosRelease('');
-                    setFilterStage('');
-                    if (typeof window !== 'undefined') {
-                      localStorage.removeItem('pedidos_filter_customer');
-                      localStorage.removeItem('pedidos_filter_seller');
-                      localStorage.removeItem('pedidos_filter_search');
-                      localStorage.removeItem('pedidos_filter_conta_azul');
-                      localStorage.removeItem('pedidos_filter_release');
-                      localStorage.removeItem('pedidos_filter_stage');
-                    }
-                  }}
-                >
-                  Limpar
-                </button>
-              )}
             </div>
           </div>
         );
@@ -3374,12 +3369,14 @@ export default function PedidosPage() {
             display: 'flex', 
             gap: '0.75rem', 
             width: '100%',
-            flex: 1,
+            flex: '1 1 0',
             minHeight: 0,
             alignItems: 'stretch',
             overflowX: 'auto',
+            overflowY: 'hidden',
+            paddingTop: '0.25rem',
             paddingBottom: '0.5rem',
-            marginTop: '1rem'
+            boxSizing: 'border-box'
           }}
         >
           {(() => {
@@ -3446,17 +3443,19 @@ export default function PedidosPage() {
                   flex: isEmpty ? '0 0 140px' : '1 1 280px',
                   minWidth: isEmpty ? '140px' : '260px',
                   maxWidth: isEmpty ? '140px' : '450px',
+                  alignSelf: 'stretch',
                   backgroundColor: isEmpty ? 'hsla(0, 0%, 50%, 0.02)' : 'var(--background)',
                   border: isVirtual 
                     ? '2px dashed var(--danger)' 
                     : isEmpty ? '1px dashed var(--border)' : '1px solid var(--border)',
                   borderRadius: 'var(--radius-md)',
-                  padding: '0.5rem',
+                  padding: '0.4rem 0.4rem 0.2rem 0.4rem',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.5rem',
+                  gap: '0.35rem',
                   height: '100%',
                   maxHeight: '100%',
+                  boxSizing: 'border-box',
                   transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                   overflow: 'hidden',
                   position: 'relative'
@@ -3597,7 +3596,8 @@ export default function PedidosPage() {
                     gap: '0.5rem', 
                     overflowY: 'auto',
                     flex: 1,
-                    minHeight: 0
+                    minHeight: 0,
+                    paddingBottom: '0.25rem'
                   }}
                 >
                   {stageItems.length === 0 ? (
@@ -4184,18 +4184,31 @@ export default function PedidosPage() {
                     );
                   })
                 )}
+                </div>
 
-                {dragOverStageId === stage.id &&
-                 draggedItemId &&
-                 stageItems.length > 0 &&
-                 (dragOverIndex === stageItems.length || dragOverIndex === null) &&
-                 !stageItems.some((i, idx) => i.id === draggedItemId && (dragOverIndex === idx || dragOverIndex === idx + 1)) && (
-                  <div className="kanban-drop-placeholder">
-                    Encaixar nesta etapa
-                  </div>
-                )}
+                {/* Rodapé da Coluna (Fixado na base da coluna, fora da rolagem de cards) */}
+                <div style={{
+                  borderTop: '1px solid var(--border)',
+                  paddingTop: '0.35rem',
+                  paddingBottom: '0.2rem',
+                  paddingLeft: '0.35rem',
+                  paddingRight: '0.35rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '0.65rem',
+                  color: 'var(--text-muted)',
+                  backgroundColor: 'var(--surface-subtle)',
+                  borderRadius: '0 0 var(--radius-md) var(--radius-md)',
+                  flexShrink: 0,
+                  marginTop: 'auto'
+                }}>
+                  <span style={{ fontWeight: 600 }}>
+                    {stageItems.length} {stageItems.length === 1 ? 'item' : 'itens'}
+                  </span>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: stage.color }} />
+                </div>
               </div>
-            </div>
 
             );
           })
@@ -6148,18 +6161,30 @@ export default function PedidosPage() {
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{
-              padding: '1.25rem 1.5rem',
+              padding: '1rem 1.5rem',
               borderBottom: '1px solid var(--border)',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center'
+              alignItems: 'center',
+              backgroundColor: 'var(--surface)'
             }}>
-              <h3 style={{ fontSize: '1.15rem' }}>
-                {modalType === 'create' ? 'Cadastrar Novo Pedido' : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
-              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <Image 
+                  src="/logo.png" 
+                  alt="Samppel Logo" 
+                  width={210} 
+                  height={55} 
+                  style={{ objectFit: 'contain', height: '52px', width: 'auto', maxHeight: '52px', flexShrink: 0 }}
+                  priority 
+                />
+                <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--border)', flexShrink: 0 }} />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
+                  {modalType === 'create' ? 'Cadastrar Novo Pedido' : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
+                </h3>
+              </div>
               <button 
                 onClick={() => setIsModalOpen(false)} 
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--text-muted)', lineHeight: 1 }}
               >
                 &times;
               </button>
@@ -6966,7 +6991,7 @@ export default function PedidosPage() {
                           if (error) {
                             alert('Erro ao excluir tipo de frete: ' + error.message);
                           } else {
-                            setShippingTypes(prev => prev.filter(s => s.id !== type.id));
+                            setShippingTypes(prev => prev.filter(t => t.id !== type.id));
                           }
                         } catch (err) {
                           console.error(err);
@@ -7059,30 +7084,41 @@ export default function PedidosPage() {
                 background: `linear-gradient(135deg, ${currentStage?.color || 'var(--primary)'}18 0%, transparent 100%)`,
                 borderLeft: `4px solid ${currentStage?.color || 'var(--primary)'}`
               }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 200px', minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)', wordBreak: 'break-all' }}>
-                      {detailItem.friendly_id || order.pv_number || '---'}
-                    </span>
-                    {currentStage && (
-                      <span style={{
-                        fontSize: '0.7rem', fontWeight: 700,
-                        backgroundColor: currentStage.color + '22',
-                        color: currentStage.color,
-                        padding: '2px 8px', borderRadius: '99px',
-                        border: `1px solid ${currentStage.color}55`,
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {currentStage.name}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 280px', minWidth: 0 }}>
+                  <Image 
+                    src="/logo.png" 
+                    alt="Samppel Logo" 
+                    width={210} 
+                    height={55} 
+                    style={{ objectFit: 'contain', height: '52px', width: 'auto', maxHeight: '52px', flexShrink: 0 }}
+                    priority 
+                  />
+                  <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--border)', flexShrink: 0 }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)', wordBreak: 'break-all' }}>
+                        {detailItem.friendly_id || order.pv_number || '---'}
                       </span>
-                    )}
-                    {isOverdue && (
-                      <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700, whiteSpace: 'nowrap' }}>Atrasado</span>
-                    )}
+                      {currentStage && (
+                        <span style={{
+                          fontSize: '0.7rem', fontWeight: 700,
+                          backgroundColor: currentStage.color + '22',
+                          color: currentStage.color,
+                          padding: '2px 8px', borderRadius: '99px',
+                          border: `1px solid ${currentStage.color}55`,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {currentStage.name}
+                        </span>
+                      )}
+                      {isOverdue && (
+                        <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700, whiteSpace: 'nowrap' }}>Atrasado</span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {customer.name || 'Cliente'} · {detailItem.name}
+                    </span>
                   </div>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {customer.name || 'Cliente'} · {detailItem.name}
-                  </span>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginLeft: 'auto' }}>
                   {(!user?.role || user.role !== 'Produção' || currentStage?.name === 'Em produção') && (

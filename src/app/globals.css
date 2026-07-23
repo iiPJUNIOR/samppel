@@ -184,6 +184,27 @@ h1, h2, h3, h4, h5, h6 {
   animation: fadeIn 0.3s ease;
 }
 
+/* Kanban mode: contain the layout to viewport height for column scroll */
+.app-container.kanban-mode {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-container.kanban-mode .main-content {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-container.kanban-mode .page-container {
+  flex: 1;
+  overflow: hidden;
+  height: 100%;
+  max-height: 100%;
+  animation: none;
+}
+
 @media (max-width: 768px) {
   .page-container {
     padding: 1rem;

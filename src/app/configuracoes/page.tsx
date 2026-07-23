@@ -50,7 +50,8 @@ import {
   Mail,
   Send,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  KeyRound
 } from 'lucide-react';
 
 export default function ConfiguracoesPage() {
@@ -64,6 +65,8 @@ export default function ConfiguracoesPage() {
   const [isSaved, setIsSaved] = useState(false);
   const [isEditingCredentials, setIsEditingCredentials] = useState(false);
   const [isConfigWarningModalOpen, setIsConfigWarningModalOpen] = useState(false);
+  const [isProducaoRoleNoticeModalOpen, setIsProducaoRoleNoticeModalOpen] = useState(false);
+  const [noticeModalUser, setNoticeModalUser] = useState('');
   const [userToDelete, setUserToDelete] = useState<any | null>(null);
   const [isDeletingUserLoading, setIsDeletingUserLoading] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -859,8 +862,6 @@ export default function ConfiguracoesPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Erro ao atualizar perfil.');
 
-      alert('Perfil do usuário atualizado com sucesso!');
-      
       // Atualiza o perfil no modal reativamente
       const updatedOp = profilesList.find(p => p.id === profileId);
       if (updatedOp) {
@@ -869,6 +870,14 @@ export default function ConfiguracoesPage() {
           role: isFactory ? 'Fábrica' : newRole,
           is_factory_account: isFactory
         });
+      }
+
+      if (newRole === 'Produção') {
+        const userName = updatedOp?.name || updatedOp?.full_name || 'do Operador';
+        setNoticeModalUser(userName);
+        setIsProducaoRoleNoticeModalOpen(true);
+      } else {
+        alert('Perfil do usuário atualizado com sucesso!');
       }
 
       fetchConfigAndLogs();
@@ -2608,6 +2617,91 @@ export default function ConfiguracoesPage() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AVISO AO ALTERAR PERFIL PARA PRODUÇÃO */}
+      {isProducaoRoleNoticeModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '1rem',
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div className="card" style={{
+            width: '100%',
+            maxWidth: '500px',
+            backgroundColor: 'var(--surface)',
+            borderRadius: '16px',
+            padding: '2.25rem 2rem',
+            textAlign: 'center',
+            position: 'relative',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.25rem'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(37, 99, 235, 0.1)',
+              color: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto'
+            }}>
+              <KeyRound size={32} />
+            </div>
+
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: '0 0 0.4rem 0', color: 'var(--text)' }}>
+                Perfil Alterado para Produção com Sucesso!
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', margin: 0 }}>
+                O colaborador agora possui o papel de Operador de Produção.
+              </p>
+            </div>
+
+            <div style={{
+              backgroundColor: 'rgba(234, 179, 8, 0.08)',
+              border: '1px solid rgba(234, 179, 8, 0.3)',
+              borderRadius: '12px',
+              padding: '1rem 1.25rem',
+              textAlign: 'left',
+              fontSize: '0.85rem',
+              color: 'var(--text)',
+              lineHeight: '1.5'
+            }}>
+              <strong style={{ color: '#b45309', display: 'block', marginBottom: '0.25rem' }}>
+                ⚠️ Ação necessária no primeiro acesso:
+              </strong>
+              Por favor, peça para o usuário <strong>{noticeModalUser}</strong> fazer login na conta dele e cadastrar um <strong>PIN de fábrica (4 a 6 dígitos numéricos)</strong> no perfil dele, pois sem o PIN ele não conseguirá movimentar os cartões de produção.
+            </div>
+
+            <button
+              onClick={() => setIsProducaoRoleNoticeModalOpen(false)}
+              className="btn btn-primary"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.9rem'
+              }}
+            >
+              Entendido / Ok
+            </button>
           </div>
         </div>
       )}

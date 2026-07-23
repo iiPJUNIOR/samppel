@@ -151,6 +151,27 @@ export default function OperadorPerfilPage() {
         </div>
       )}
 
+      {user.role === 'Produção' && !user.force_password_change && !user.pin && !success && (
+        <div style={{
+          backgroundColor: 'hsla(38, 92.1%, 50%, 0.1)',
+          color: 'var(--warning)',
+          padding: '1rem',
+          borderRadius: 'var(--radius-md)',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          gap: '0.75rem',
+          alignItems: 'flex-start',
+          fontSize: '0.875rem',
+          border: '1px solid hsla(38, 92.1%, 50%, 0.25)'
+        }}>
+          <ShieldAlert size={20} style={{ flexShrink: 0, color: 'var(--warning)', marginTop: '0.125rem' }} />
+          <div>
+            <strong style={{ display: 'block', marginBottom: '0.25rem', color: 'var(--text)' }}>Cadastro de PIN Necessário!</strong>
+            Seu perfil foi definido como <strong>Operador de Produção</strong>. Para conseguir movimentar cartões nos terminais da fábrica, cadastre um <strong>PIN de Fábrica (4 a 6 dígitos numéricos)</strong> no campo abaixo.
+          </div>
+        </div>
+      )}
+
       {success && (
         <div style={{
           backgroundColor: 'var(--success-bg)',

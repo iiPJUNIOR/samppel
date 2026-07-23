@@ -12,6 +12,8 @@ export default function RedefinirSenhaPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [pin, setPin] = useState('');
+  const [isProducaoRole, setIsProducaoRole] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +25,9 @@ export default function RedefinirSenhaPage() {
       if (searchParams.get('invite') === 'true' || searchParams.get('type') === 'invite') {
         setIsInvite(true);
       }
+      if (searchParams.get('role') === 'Produção') {
+        setIsProducaoRole(true);
+      }
 
       // Tenta recuperar sessão pelo hash da URL (#access_token=...&refresh_token=...)
       const hash = window.location.hash || '';
@@ -30,6 +35,19 @@ export default function RedefinirSenhaPage() {
         const hashParams = new URLSearchParams(hash.replace('#', '?'));
         const accessToken = hashParams.get('access_token');
         const refreshToken = hashParams.get('refresh_token');
+
+        if (accessToken) {
+          try {
+            const base64Url = accessToken.split('.')[1];
+            if (base64Url) {
+              const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+              const payload = JSON.parse(atob(base64));
+              if (payload?.user_metadata?.role === 'Produção' || payload?.role === 'Produção') {
+                setIsProducaoRole(true);
+              }
+            }
+          } catch (e) {}
+        }
 
         if (accessToken && refreshToken) {
           supabase.auth.setSession({
@@ -84,6 +102,11 @@ export default function RedefinirSenhaPage() {
       return;
     }
 
+    if (isProducaoRole && (!pin || !/^\d{4,6}$/.test(pin))) {
+      setError('Operadores de Produção precisam cadastrar um PIN de 4 a 6 dígitos numéricos.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -115,6 +138,9 @@ export default function RedefinirSenhaPage() {
                 if (payload) {
                   if (!targetUserId && payload.sub) targetUserId = payload.sub;
                   if (!targetEmail && payload.email) targetEmail = payload.email;
+                  if (payload.user_metadata?.role === 'Produção' || payload.role === 'Produção') {
+                    setIsProducaoRole(true);
+                  }
                 }
               }
             } catch (e) {
@@ -146,7 +172,8 @@ export default function RedefinirSenhaPage() {
             userId: targetUserId,
             email: targetEmail,
             accessToken: currentAccessToken,
-            password: password
+            password: password,
+            pin: pin || undefined
           })
         });
 
@@ -379,6 +406,35 @@ export default function RedefinirSenhaPage() {
                   }}
                 />
               </div>
+
+              {/* PIN de Fábrica para Operadores de Produção */}
+              {(isInvite || isProducaoRole) && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.4rem' }}>
+                    PIN de Fábrica (4 a 6 dígitos numéricos) {isProducaoRole ? '*' : '(opcional)'}
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    required={isProducaoRole}
+                    placeholder="Ex: 1234"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem 0.875rem',
+                      borderRadius: '8px',
+                      border: pin && /^\d{4,6}$/.test(pin) ? '1.5px solid #22c55e' : '1px solid #cbd5e1',
+                      fontSize: '0.925rem',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
+                    O PIN é utilizado para autenticação e movimentação de cartões nos terminais de fábrica.
+                  </span>
+                </div>
+              )}
 
               <button
                 type="submit"
