@@ -29,7 +29,11 @@ import {
   createOrderStage,
   updateOrderStage,
   deleteOrderStage,
-  getProfilesWithPermissions
+  getProfilesWithPermissions,
+  getFactoryLocations,
+  createFactoryLocation,
+  updateFactoryLocation,
+  deleteFactoryLocation
 } from '@/services/supabase';
 import { 
   ShieldAlert, 
@@ -51,7 +55,9 @@ import {
   Send,
   CheckCircle2,
   AlertCircle,
-  KeyRound
+  KeyRound,
+  Zap,
+  MapPin
 } from 'lucide-react';
 
 export default function ConfiguracoesPage() {
@@ -87,6 +93,13 @@ export default function ConfiguracoesPage() {
   const [teamStatus, setTeamStatus] = useState<'ATIVO' | 'INATIVO'>('ATIVO');
   const [editingTeam, setEditingTeam] = useState<any | null>(null);
   const [submittingTeam, setSubmittingTeam] = useState(false);
+
+  // States de Localizações Físicas na Fábrica
+  const [factoryLocations, setFactoryLocations] = useState<any[]>([]);
+  const [locationName, setLocationName] = useState('');
+  const [locationStatus, setLocationStatus] = useState<'ATIVO' | 'INATIVO'>('ATIVO');
+  const [editingLocation, setEditingLocation] = useState<any | null>(null);
+  const [submittingLocation, setSubmittingLocation] = useState(false);
 
   // States de Tipos de Material de Embalagem
   const [packagingMaterials, setPackagingMaterials] = useState<any[]>([]);
@@ -240,8 +253,73 @@ export default function ConfiguracoesPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [syncing24h, setSyncing24h] = useState(false);
+  const [sync24hStatus, setSync24hStatus] = useState<string | null>(null);
   const [wiping, setWiping] = useState(false);
   const [wipingSuccess, setWipingSuccess] = useState(false);
+
+  const handleSync24h = async () => {
+    setSyncing24h(true);
+    setSync24hStatus('Iniciando sincronização forçada das últimas 24h...');
+
+    try {
+      const now = new Date();
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const startDateStr = yesterday.toISOString().split('T')[0];
+      const endDateStr = now.toISOString().split('T')[0];
+
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const response = await fetch(`/api/sync/import-orders?tenantId=${tenantId}&startDate=${startDateStr}&endDate=${endDateStr}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userRole: user?.role })
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha ao conectar com o serviço de sincronização 24h.');
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value);
+          const lines = text.split('\n').filter(Boolean);
+          for (const line of lines) {
+            try {
+              const data = JSON.parse(line);
+              if (data.step) {
+                setSync24hStatus(data.step);
+              }
+              if (data.success !== undefined) {
+                if (data.success) {
+                  const msg = `Sincronização 24h concluída! Pedidos novos: ${data.imported || 0} | Atualizados/Forçados: ${data.updated || 0}`;
+                  setSync24hStatus(msg);
+                  alert(msg);
+                } else {
+                  throw new Error(data.error || 'Erro durante a sincronização 24h.');
+                }
+              }
+            } catch (pErr) {
+              // ignora parsing parcial
+            }
+          }
+        }
+      }
+
+      await fetchConfigAndLogs();
+    } catch (err: any) {
+      console.error('Erro na sincronização 24h:', err);
+      const errMsg = err.message || 'Erro ao sincronizar últimas 24h';
+      setSync24hStatus(`Erro: ${errMsg}`);
+      alert(errMsg);
+    } finally {
+      setSyncing24h(false);
+    }
+  };
 
   const fetchConfigAndLogs = async () => {
     setLoading(true);
@@ -249,7 +327,7 @@ export default function ConfiguracoesPage() {
       fetchInvites();
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
-      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes, operatorsRes, stagesRes, profilesRes] = await Promise.all([
+      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes, operatorsRes, stagesRes, profilesRes, locationsRes] = await Promise.all([
         getContaAzulConfig(),
         getIntegrationLogs(),
         getSyncQueue(),
@@ -259,7 +337,8 @@ export default function ConfiguracoesPage() {
         getPackagingSettings(tenantId),
         fetch(`/api/operators?tenantId=${tenantId}`).then(res => res.json()),
         getOrderStages(tenantId),
-        getProfilesWithPermissions(tenantId)
+        getProfilesWithPermissions(tenantId),
+        getFactoryLocations(tenantId)
       ]);
 
       const data = configRes.data;
@@ -274,6 +353,7 @@ export default function ConfiguracoesPage() {
       setQueue(queueRes.data || []);
       setMachines(machinesRes.data || []);
       setHandlingTeams(teamsRes.data || []);
+      setFactoryLocations(locationsRes.data || []);
       setPackagingMaterials(pmtRes.data || []);
       setOperatorsList(operatorsRes.data || []);
       setStages(stagesRes.data || []);
@@ -532,6 +612,55 @@ export default function ConfiguracoesPage() {
       const { error } = await deleteHandlingTeam(id);
       if (error) {
         alert('Erro ao excluir equipe: ' + error.message);
+      } else {
+        fetchConfigAndLogs();
+      }
+    }
+  };
+
+  const handleSaveLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!locationName.trim()) return;
+    setSubmittingLocation(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      if (editingLocation) {
+        const { error } = await updateFactoryLocation(editingLocation.id, {
+          name: locationName.trim(),
+          status: locationStatus
+        });
+        if (error) {
+          alert('Erro ao atualizar localização: ' + error.message);
+        } else {
+          setEditingLocation(null);
+          setLocationName('');
+          fetchConfigAndLogs();
+        }
+      } else {
+        const { error } = await createFactoryLocation({
+          tenant_id: tenantId,
+          name: locationName.trim(),
+          status: locationStatus
+        });
+        if (error) {
+          alert('Erro ao criar localização: ' + error.message);
+        } else {
+          setLocationName('');
+          fetchConfigAndLogs();
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao salvar localização:', err);
+    } finally {
+      setSubmittingLocation(false);
+    }
+  };
+
+  const handleDeleteLocation = async (id: string) => {
+    if (confirm('Deseja realmente excluir esta localização física da fábrica?')) {
+      const { error } = await deleteFactoryLocation(id);
+      if (error) {
+        alert('Erro ao excluir localização: ' + error.message);
       } else {
         fetchConfigAndLogs();
       }
@@ -1115,8 +1244,33 @@ export default function ConfiguracoesPage() {
                 </button>
                 
                 <button 
+                  type="button"
+                  onClick={handleSync24h}
+                  disabled={syncing24h || syncing}
+                  className="btn"
+                  style={{ 
+                    flex: 1, 
+                    minWidth: '160px', 
+                    backgroundColor: '#f59e0b',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 700,
+                    display: 'flex', 
+                    gap: '0.4rem', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    cursor: (syncing24h || syncing) ? 'not-allowed' : 'pointer',
+                    opacity: (syncing24h || syncing) ? 0.7 : 1
+                  }}
+                  title="Busca todos os pedidos criados ou alterados nas últimas 24 horas no Conta Azul e força a atualização de pagamentos/status"
+                >
+                  <Zap size={16} className={syncing24h ? 'spinner' : ''} />
+                  <span>{syncing24h ? 'Sincronizando 24h...' : '⚡ Sincronizar Últimas 24h'}</span>
+                </button>
+
+                <button 
                   onClick={handleTriggerSync} 
-                  disabled={syncing}
+                  disabled={syncing || syncing24h}
                   className="btn btn-secondary"
                   style={{ flex: 1, minWidth: '140px', display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -1135,6 +1289,25 @@ export default function ConfiguracoesPage() {
                   <span>{isEditingCredentials ? 'Bloquear API' : 'Configurar API'}</span>
                 </button>
               </div>
+
+              {sync24hStatus && (
+                <div style={{
+                  marginTop: '1rem',
+                  fontSize: '0.8rem',
+                  padding: '0.75rem 0.9rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  color: 'var(--text)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontWeight: 500
+                }}>
+                  <RefreshCw size={15} className={syncing24h ? 'spinner' : ''} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                  <span>{sync24hStatus}</span>
+                </div>
+              )}
 
               {syncResult && (
                 <div style={{ 
@@ -1710,6 +1883,130 @@ export default function ConfiguracoesPage() {
                       <tr>
                         <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                           Nenhuma equipe de manuseio cadastrada.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* LOCALIZAÇÕES FÍSICAS NA FÁBRICA */}
+          <div className="grid-responsive-2" style={{ gap: '1.5rem', marginBottom: '2rem' }}>
+            <div className="card">
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <MapPin size={18} style={{ color: 'var(--primary)' }} />
+                {editingLocation ? 'Editar Localização Física' : 'Cadastrar Localização Física na Fábrica'}
+              </h3>
+              
+              <form onSubmit={handleSaveLocation} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Nome da Localização *</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    required
+                    placeholder="Ex: Salão, Pátio, Prateleira A1, Máquina Flexo 2..."
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Status da Localização</label>
+                  <select 
+                    className="form-input"
+                    value={locationStatus}
+                    onChange={(e) => setLocationStatus(e.target.value as any)}
+                  >
+                    <option value="ATIVO">ATIVO</option>
+                    <option value="INATIVO">INATIVO</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {editingLocation && (
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setEditingLocation(null);
+                        setLocationName('');
+                      }} 
+                      className="btn btn-secondary"
+                      style={{ flex: 1 }}
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                  <button 
+                    type="submit" 
+                    disabled={submittingLocation}
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                  >
+                    {submittingLocation ? 'Salvando...' : (editingLocation ? 'Salvar Alteração' : 'Cadastrar Localização')}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="card">
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <MapPin size={18} style={{ color: 'var(--primary)' }} />
+                Localizações Físicas Ativas ({factoryLocations.length})
+              </h3>
+
+              <div className="table-responsive">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Nome do Local</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {factoryLocations.map((loc) => (
+                      <tr key={loc.id}>
+                        <td style={{ fontWeight: 600 }}>{loc.name}</td>
+                        <td>
+                          <span className={`badge ${
+                            loc.status === 'ATIVO' ? 'badge-success' : 'badge-danger'
+                          }`}>
+                            {loc.status === 'ATIVO' ? 'ATIVO' : 'INATIVO'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button 
+                              onClick={() => {
+                                setEditingLocation(loc);
+                                setLocationName(loc.name);
+                                setLocationStatus(loc.status);
+                              }}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                            >
+                              <Edit3 size={12} />
+                              <span>Editar</span>
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteLocation(loc.id)}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--danger)' }}
+                            >
+                              <Trash2 size={12} />
+                              <span>Excluir</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {factoryLocations.length === 0 && (
+                      <tr>
+                        <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                          Nenhuma localização física cadastrada.
                         </td>
                       </tr>
                     )}

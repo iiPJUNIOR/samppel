@@ -20,6 +20,8 @@ import {
   getCustomerProductStock,
   updateCustomerStockCredit,
   updateCustomerProductStock,
+  checkProductStock,
+  adjustStock,
   getFinancialTransactions,
   getProductionMachines,
   createProductionMachine,
@@ -42,6 +44,14 @@ import {
   type ShippingTypeConfig,
   getPendingAdjustment,
   resolvePendingAdjustment,
+  getFactoryLocations,
+  createFactoryLocation,
+  updateFactoryLocation,
+  deleteFactoryLocation,
+  getOrderItemHandlingTeams,
+  saveOrderItemHandlingTeams,
+  saveOrderShippingVolumes,
+  type OrderItemHandlingTeam,
   supabase
 } from '@/services/supabase';
 import { parseDeadlineFromNotes, isCardOverdue } from '@/services/deadline_service';
@@ -73,13 +83,19 @@ import {
   AlertTriangle,
   Download,
   Clock,
-  ArrowRightLeft
+  ArrowRightLeft,
+  MapPin,
+  Trash2,
+  Layers
 } from 'lucide-react';
 
 // Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
 const getStatusForStageName = (stageName: string): string => {
   if (stageName === 'Pedidos') return 'A produzir';
+  if (stageName === 'Produção') return 'Em produção';
+  if (stageName === 'Em produção') return 'Em produção';
   if (stageName === 'Embalagem') return 'Em revisão';
+  if (stageName === 'Coleta agendada') return 'Expedição'; // Ou um novo status se criarmos
   if (stageName === 'Concluído') return 'Entregue';
   return stageName;
 };
@@ -99,6 +115,52 @@ const extractProductionDeadline = (notes: string | null): string | null => {
   
   const altMatch = notes.match(/(ATÉ\s*\d+\s*DIAS\s*(?:APÓS|CORRIDOS)[^.\n\r]*)/i);
   return altMatch ? altMatch[1].trim() : null;
+};
+
+// Extrair detalhes estruturados do pedido
+const extractOrderDetails = (notes: string | null) => {
+  if (!notes) return null;
+  
+  // Cut the notes at "ABAIXO:" to ignore client-only info.
+  const relevantNotes = notes.split(/ABAIXO:/i)[0];
+  
+  const extract = (keyRegex: RegExp) => {
+    const match = relevantNotes.match(keyRegex);
+    return match ? match[1].trim() : null;
+  };
+
+  const cliche = extract(/Chichê:\s*([^\n\r]+)/i) || extract(/Clichê:\s*([^\n\r]+)/i);
+  const embalagem = extract(/Embalagem:\s*([^\n\r]+)/i);
+  const prazo = extract(/Prazo de entrega:\s*([^\n\r]+)/i);
+  const freteInfo = extract(/Frete:\s*([^\n\r]+)/i);
+  const meioPag = extract(/Meio de pag\.:\s*([^\n\r]+)/i) || extract(/Meio de pagamento:\s*([^\n\r]+)/i);
+  const formaPag = extract(/Forma de pag\.:\s*([^\n\r]+)/i) || extract(/Forma de pagamento:\s*([^\n\r]+)/i);
+
+  if (!cliche && !embalagem && !prazo && !freteInfo && !meioPag && !formaPag) return null;
+
+  return { cliche, embalagem, prazo, freteInfo, meioPag, formaPag };
+};
+
+// Helper para garantir primeira letra maiúscula em valores de especificações
+const capitalizeText = (val: any): string => {
+  if (val === null || val === undefined || val === '') return '—';
+  const str = String(val).trim();
+  if (str === '—') return '—';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
+// Helper para extrair a medida real do item (do campo ou do nome/descrição do produto)
+const getItemRealMeasure = (item: any): string => {
+  if (!item) return '—';
+  if (item.measure && item.measure !== '15x10x5 cm' && item.measure !== '—' && item.measure.trim().length > 0) {
+    return item.measure;
+  }
+  const text = item.name || item.art_name || item.product?.name || item.order?.product?.name || '';
+  const match = text.match(/\b([0-9]{1,3}(?:[.,][0-9])?\s*[xX]\s*[0-9]{1,3}(?:[.,][0-9])?(?:\s*[xX]\s*[0-9]{1,3}(?:[.,][0-9])?)?(?:\/[0-9]+\s*g)?\s*(?:cm|mm|m)?)\b/i);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return '—';
 };
 
 // Extrair quantidade de dias de prazo para cálculo de atrasos
@@ -390,6 +452,18 @@ export default function PedidosPage() {
   const [expeditionTransitionType, setExpeditionTransitionType] = useState<'NENHUM' | 'FALTA' | 'CORTESIA'>('NENHUM');
   const [expeditionTransitionQuantity, setExpeditionTransitionQuantity] = useState(0);
   const [expeditionTransitionNotes, setExpeditionTransitionNotes] = useState('');
+  
+  // Estados para Consolidação de Expedição (Irmãos e Frete)
+  const [expeditionSiblings, setExpeditionSiblings] = useState<any[]>([]);
+  const [expeditionSelectedSiblings, setExpeditionSelectedSiblings] = useState<string[]>([]);
+  const [expeditionFreightVolumes, setExpeditionFreightVolumes] = useState<number>(1);
+  const [expeditionFreightWeight, setExpeditionFreightWeight] = useState<string>('');
+  const [expeditionFreightWidth, setExpeditionFreightWidth] = useState<string>('');
+  const [expeditionFreightHeight, setExpeditionFreightHeight] = useState<string>('');
+  const [expeditionFreightLength, setExpeditionFreightLength] = useState<string>('');
+  const [expeditionFreightNotes, setExpeditionFreightNotes] = useState<string>('');
+  const [expeditionFreightPackagingTypeId, setExpeditionFreightPackagingTypeId] = useState<string>('');
+
   const expeditionTransitionMoveBypass = useRef(false);
 
   // Estados do Modal de Alerta de Produção (A partir de Faltas/Cortesias anteriores)
@@ -398,6 +472,133 @@ export default function PedidosPage() {
   const [productionAlertItem, setProductionAlertItem] = useState<any>(null);
   const [productionAlertTargetStageId, setProductionAlertTargetStageId] = useState<string>('');
   const productionAlertBypass = useRef(false);
+
+  // Estados do Modal de Coleta Agendada (Número da Nota, Coleta e Cotação)
+  const [isColetaAgendadaModalOpen, setIsColetaAgendadaModalOpen] = useState(false);
+  const [coletaAgendadaItem, setColetaAgendadaItem] = useState<any>(null);
+  const [coletaAgendadaTargetStageId, setColetaAgendadaTargetStageId] = useState<string>('');
+  const [coletaInvoiceNumber, setColetaInvoiceNumber] = useState<string>('');
+  const [coletaPickupNumber, setColetaPickupNumber] = useState<string>('');
+  const [coletaFreightQuotation, setColetaFreightQuotation] = useState<string>('');
+  const [coletaSiblings, setColetaSiblings] = useState<any[]>([]);
+  const [coletaSelectedSiblings, setColetaSelectedSiblings] = useState<string[]>([]);
+  const coletaAgendadaMoveBypass = useRef(false);
+
+  // Estados do Modal de Falta de Estoque na Movimentação
+  const [isInsufficientStockModalOpen, setIsInsufficientStockModalOpen] = useState(false);
+  const [insufficientStockData, setInsufficientStockData] = useState<any>(null);
+  const [selectedInsufficientItemIds, setSelectedInsufficientItemIds] = useState<string[]>([]);
+  const insufficientStockMoveBypass = useRef(false);
+
+  const handleConfirmInsufficientStockMove = async (selectedInsufficientItems: any[]) => {
+    if (!siblingMoveTargetStageId || !insufficientStockData) return;
+    const itemsToMove = [...(insufficientStockData.sufficientItems || []), ...selectedInsufficientItems];
+    
+    setIsInsufficientStockModalOpen(false);
+    setInsufficientStockData(null);
+    
+    insufficientStockMoveBypass.current = true;
+    siblingMoveBypass.current = true;
+    
+    for (const itm of itemsToMove) {
+      await moveOrderItemToStage(itm, siblingMoveTargetStageId);
+    }
+    setSiblingMoveItem(null);
+    setSiblingMoveTargetStageId('');
+    setSiblingMoveList([]);
+  };
+
+  const handleCancelInsufficientStockMove = () => {
+    setIsInsufficientStockModalOpen(false);
+    setInsufficientStockData(null);
+    setSiblingMoveItem(null);
+    setSiblingMoveTargetStageId('');
+    setSiblingMoveList([]);
+    setSelectedInsufficientItemIds([]);
+    resetAllBypasses();
+  };
+
+  // Estados do Modal de Agrupamento de Itens Irmãos (/1, /2, etc.) ao Mover de Fase
+  const [isSiblingMoveModalOpen, setIsSiblingMoveModalOpen] = useState(false);
+  const [siblingMoveItem, setSiblingMoveItem] = useState<any>(null);
+  const [siblingMoveTargetStageId, setSiblingMoveTargetStageId] = useState<string>('');
+  const [siblingMoveList, setSiblingMoveList] = useState<any[]>([]);
+  const [siblingMoveSelectedIds, setSiblingMoveSelectedIds] = useState<string[]>([]);
+  const siblingMoveBypass = useRef(false);
+
+  const handleConfirmSiblingMoveAll = async (moveSiblings: boolean) => {
+    if (!siblingMoveItem || !siblingMoveTargetStageId) return;
+    const item = siblingMoveItem;
+    const targetStageId = siblingMoveTargetStageId;
+    const selectedIds = siblingMoveSelectedIds;
+
+    setIsSiblingMoveModalOpen(false);
+
+    const itemsToMove = [item];
+    if (moveSiblings && selectedIds.length > 0) {
+      itemsToMove.push(...orderItems.filter(i => selectedIds.includes(i.id)));
+    }
+
+    // Check stock for all items BEFORE moving
+    const targetStage = stages.find(s => s.id === targetStageId);
+    const targetStageIdx = stages.findIndex(s => s.id === targetStageId);
+    const isEnteringProdOrStock = targetStageIdx === 1 || targetStageIdx === 6 || targetStage?.name === 'Em produção' || targetStage?.name === 'Produção' || targetStage?.name === 'Estoque';
+    let stockAlertData = null;
+    
+    if (!insufficientStockMoveBypass.current && isEnteringProdOrStock) {
+      const insufficientItems = [];
+      const sufficientItems = [];
+      
+      for (const itm of itemsToMove) {
+        const fromStageIdx = itm.stage_id ? stages.findIndex(s => s.id === itm.stage_id) : 0;
+        if (fromStageIdx === 0 && itm.product_id) {
+          const qtyRequired = itm.print_run || itm.quantity || 1;
+          const currentStock = await checkProductStock(itm.product_id);
+          if (currentStock - qtyRequired < 0) {
+            insufficientItems.push({
+              item: itm,
+              productName: itm.product?.name || itm.name || itm.art_name,
+              qtyRequired,
+              currentStock
+            });
+          } else {
+            sufficientItems.push(itm);
+          }
+        } else {
+          sufficientItems.push(itm);
+        }
+      }
+      
+      if (insufficientItems.length > 0) {
+        stockAlertData = { insufficientItems, sufficientItems };
+      }
+    }
+
+    if (stockAlertData) {
+      setInsufficientStockData(stockAlertData);
+      setSiblingMoveTargetStageId(targetStageId);
+      setIsInsufficientStockModalOpen(true);
+      return;
+    }
+
+    setSiblingMoveItem(null);
+    setSiblingMoveTargetStageId('');
+    setSiblingMoveList([]);
+
+    siblingMoveBypass.current = true;
+    insufficientStockMoveBypass.current = true; // Bypass stock check inside moveOrderItemToStage since we already checked it
+    for (const itm of itemsToMove) {
+      await moveOrderItemToStage(itm, targetStageId);
+    }
+  };
+
+  const handleCancelSiblingMove = () => {
+    setIsSiblingMoveModalOpen(false);
+    setSiblingMoveItem(null);
+    setSiblingMoveTargetStageId('');
+    setSiblingMoveList([]);
+    resetAllBypasses();
+  };
 
   // Estados do Modal de Conferência Física Obrigatória (Antes da Expedição)
   const [isConferencyModalOpen, setIsConferencyModalOpen] = useState(false);
@@ -433,6 +634,7 @@ export default function PedidosPage() {
   const [isBlockedPaymentModalOpen, setIsBlockedPaymentModalOpen] = useState(false);
   const [blockedPaymentItem, setBlockedPaymentItem] = useState<any>(null);
   const [blockedPaymentTargetStageId, setBlockedPaymentTargetStageId] = useState<string>('');
+  const [blockedSyncFeedback, setBlockedSyncFeedback] = useState<{ message: string; type: 'warning' | 'success' } | null>(null);
   const blockedPaymentBypass = useRef(false);
 
   const handleConfirmBlockedPaymentMove = async () => {
@@ -443,16 +645,18 @@ export default function PedidosPage() {
     setIsBlockedPaymentModalOpen(false);
     setBlockedPaymentItem(null);
     setBlockedPaymentTargetStageId('');
+    setBlockedSyncFeedback(null);
 
     blockedPaymentBypass.current = true;
     await moveOrderItemToStage(item, targetStageId);
-    blockedPaymentBypass.current = false;
   };
 
   const handleCancelBlockedPaymentMove = () => {
     setIsBlockedPaymentModalOpen(false);
     setBlockedPaymentItem(null);
     setBlockedPaymentTargetStageId('');
+    setBlockedSyncFeedback(null);
+    resetAllBypasses();
   };
 
   // Estados de Notificação Toast, Drag/Drop e Filtros Mobile
@@ -518,13 +722,122 @@ export default function PedidosPage() {
   // Ref que indica que o próximo move foi aprovado pelo Admin (bypass da verificação)
   const adminMoveOverride = useRef(false);
 
-  // Estados do Modal de Equipe de Manuseio Responsável
+  // Estados do Modal de Equipe de Manuseio (Desmembramento/Divisão por Equipe)
+  interface HandlingTeamRow {
+    handling_team_id: string;
+    quantity: number;
+  }
   const [isHandlingTeamModalOpen, setIsHandlingTeamModalOpen] = useState(false);
   const [handlingTeamModalItem, setHandlingTeamModalItem] = useState<any>(null);
   const [handlingTeamModalTargetStageId, setHandlingTeamModalTargetStageId] = useState<string>('');
   const [selectedHandlingTeamId, setSelectedHandlingTeamId] = useState<string>('');
+  const [handlingTeamAllocations, setHandlingTeamAllocations] = useState<HandlingTeamRow[]>([]);
+  const [itemHandlingTeamsMap, setItemHandlingTeamsMap] = useState<Map<string, OrderItemHandlingTeam[]>>(new Map());
   const handlingTeamMoveBypass = useRef(false);
   const currentOperator = useRef<{ id: string; name: string } | null>(null);
+
+  const handleOpenHandlingTeamModalForItem = async (item: any, targetStageId: string) => {
+    setHandlingTeamModalItem(item);
+    setHandlingTeamModalTargetStageId(targetStageId);
+
+    const totalQty = item.print_run || 1000;
+    try {
+      const { data } = await getOrderItemHandlingTeams(item.id);
+      if (data && data.length > 0) {
+        setHandlingTeamAllocations(data.map(d => ({
+          handling_team_id: d.handling_team_id,
+          quantity: d.quantity
+        })));
+      } else {
+        const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+        setHandlingTeamAllocations([
+          { handling_team_id: defaultTeam, quantity: totalQty }
+        ]);
+      }
+    } catch (err) {
+      const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+      setHandlingTeamAllocations([
+        { handling_team_id: defaultTeam, quantity: totalQty }
+      ]);
+    }
+    setIsHandlingTeamModalOpen(true);
+  };
+
+  // Estados de Localizações Físicas na Fábrica (CRUD)
+  const [factoryLocations, setFactoryLocations] = useState<any[]>([]);
+  const [isLocationCrudModalOpen, setIsLocationCrudModalOpen] = useState(false);
+  const [locationName, setLocationName] = useState('');
+  const [locationStatus, setLocationStatus] = useState<'ATIVO' | 'INATIVO'>('ATIVO');
+  const [editingLocation, setEditingLocation] = useState<any | null>(null);
+  const [submittingLocation, setSubmittingLocation] = useState(false);
+
+  const handleOpenLocationCrudModal = () => {
+    setLocationName('');
+    setLocationStatus('ATIVO');
+    setEditingLocation(null);
+    setIsLocationCrudModalOpen(true);
+  };
+
+  const handleSaveLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!locationName.trim()) return;
+    setSubmittingLocation(true);
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      if (editingLocation) {
+        const { data, error } = await updateFactoryLocation(editingLocation.id, {
+          name: locationName.trim(),
+          status: locationStatus
+        });
+        if (error) throw error;
+        setFactoryLocations(prev => prev.map(l => l.id === editingLocation.id ? data : l));
+        if (formPhysicalLocation === editingLocation.name) {
+          setFormPhysicalLocation(data.name);
+        }
+        showToast('Localização atualizada com sucesso!');
+      } else {
+        const { data, error } = await createFactoryLocation({
+          tenant_id: tenantId,
+          name: locationName.trim(),
+          status: locationStatus
+        });
+        if (error) throw error;
+        setFactoryLocations(prev => [...prev, data]);
+        setFormPhysicalLocation(data.name);
+        showToast(`Localização "${data.name}" criada e selecionada!`);
+      }
+      setLocationName('');
+      setLocationStatus('ATIVO');
+      setEditingLocation(null);
+    } catch (err: any) {
+      console.error('Erro ao salvar localização:', err);
+      alert('Erro ao salvar localização: ' + (err.message || 'Falha ao salvar'));
+    } finally {
+      setSubmittingLocation(false);
+    }
+  };
+
+  const handleEditLocationClick = (loc: any) => {
+    setEditingLocation(loc);
+    setLocationName(loc.name);
+    setLocationStatus(loc.status);
+  };
+
+  const handleDeleteLocationClick = async (id: string, name: string) => {
+    if (!confirm(`Tem certeza que deseja excluir a localização "${name}"?`)) return;
+    try {
+      const { error } = await deleteFactoryLocation(id);
+      if (error) throw error;
+      setFactoryLocations(prev => prev.filter(l => l.id !== id));
+      if (formPhysicalLocation === name) {
+        setFormPhysicalLocation('Salão');
+      }
+      showToast(`Localização "${name}" removida com sucesso.`);
+    } catch (err: any) {
+      console.error('Erro ao remover localização:', err);
+      alert('Erro ao remover localização: ' + (err.message || 'Falha ao excluir'));
+    }
+  };
 
   const getTimeInStage = (updatedAt: string) => {
     if (!updatedAt) return '—';
@@ -548,6 +861,12 @@ export default function PedidosPage() {
   const [formSeller, setFormSeller] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formInternalNotes, setFormInternalNotes] = useState('');
+  const [formCliche, setFormCliche] = useState('');
+  const [formEmbalagem, setFormEmbalagem] = useState('');
+  const [formPrazo, setFormPrazo] = useState('');
+  const [formFreteInfo, setFormFreteInfo] = useState('');
+  const [formMeioPag, setFormMeioPag] = useState('');
+  const [formFormaPag, setFormFormaPag] = useState('');
   const [formStatus, setFormStatus] = useState('A produzir');
   const [formStageId, setFormStageId] = useState('');
   const [formSector, setFormSector] = useState<'Impressão' | 'Corte e Vinco' | 'Colagem' | 'Manuseio' | 'Expedição' | 'Concluído' | 'Estoque'>('Impressão');
@@ -564,6 +883,7 @@ export default function PedidosPage() {
   const [formOverShortQuantity, setFormOverShortQuantity] = useState(0);
   const [formPhysicalLocation, setFormPhysicalLocation] = useState('Salão');
   const [formProductionStartDate, setFormProductionStartDate] = useState('');
+  const [formInitialDestination, setFormInitialDestination] = useState<'PRODUCAO' | 'ESTOQUE'>('PRODUCAO');
 
   const [formSelectedProductStock, setFormSelectedProductStock] = useState<number | null>(null);
   const [formMachineId, setFormMachineId] = useState('');
@@ -607,13 +927,14 @@ export default function PedidosPage() {
       setFinancialTransactions(finRes.data || []);
 
       // Chamadas opcionais — tabelas que podem não existir ainda (migração pendente)
-      const [machResult, teamsResult, pmtResult, settingsResult, sectorsResult, shippingTypesResult] = await Promise.allSettled([
+      const [machResult, teamsResult, pmtResult, settingsResult, sectorsResult, shippingTypesResult, locationsResult] = await Promise.allSettled([
         getProductionMachines(tenantId),
         getHandlingTeams(tenantId),
         getPackagingMaterialTypes(tenantId),
         getPackagingSettings(tenantId),
         getProductionSectors(tenantId),
-        getShippingTypesConfig(tenantId)
+        getShippingTypesConfig(tenantId),
+        getFactoryLocations(tenantId)
       ]);
 
       if (machResult.status === 'fulfilled') setProductionMachines(machResult.value.data || []);
@@ -624,16 +945,25 @@ export default function PedidosPage() {
       if (pmtResult.status === 'fulfilled') setPackagingMaterialTypes(pmtResult.value.data || []);
       if (shippingTypesResult.status === 'fulfilled') setShippingTypes(shippingTypesResult.value.data || []);
       if (settingsResult.status === 'fulfilled') setPackagingSettings(settingsResult.value.data || null);
+      if (locationsResult.status === 'fulfilled') setFactoryLocations(locationsResult.value.data || []);
 
-      // Pré-carregar cache de quais itens já têm embalagem registrada
+      // Pré-carregar cache de embalagens e alocações de equipes de manuseio
       const itemIds: string[] = (itemsRes.data || []).map((i: any) => i.id);
       if (itemIds.length > 0) {
         const packaged = new Set<string>();
+        const teamsMap = new Map<string, OrderItemHandlingTeam[]>();
+
         await Promise.allSettled(itemIds.map(async (id) => {
-          const { data } = await getOrderItemPackaging(id);
-          if (data && data.length > 0) packaged.add(id);
+          const [pkgRes, teamsRes] = await Promise.all([
+            getOrderItemPackaging(id),
+            getOrderItemHandlingTeams(id)
+          ]);
+          if (pkgRes.data && pkgRes.data.length > 0) packaged.add(id);
+          if (teamsRes.data && teamsRes.data.length > 0) teamsMap.set(id, teamsRes.data);
         }));
+
         setItemsWithPackaging(packaged);
+        setItemHandlingTeamsMap(teamsMap);
       }
       return ordersRes.data || [];
     } catch (e) {
@@ -863,16 +1193,17 @@ export default function PedidosPage() {
     expeditionMoveBypass.current = false;
     handlingTeamMoveBypass.current = false;
     expeditionTransitionMoveBypass.current = false;
+    coletaAgendadaMoveBypass.current = false;
     inProgressOrderBypass.current = false;
+    blockedPaymentBypass.current = false;
+    siblingMoveBypass.current = false;
+    insufficientStockMoveBypass.current = false;
+    adminMoveOverride.current = false;
     currentOperator.current = null;
   };
 
   // Movimentar item de pedido para uma etapa
   const moveOrderItemToStage = async (item: any, targetStageId: string, operatorId?: string | null, operatorName?: string | null) => {
-    if (user?.role === 'Vendedor') {
-      alert('Acesso de Leitura: Vendedores não podem movimentar cards no Kanban.');
-      return;
-    }
     // ---------------------------------------------------------------
     // RESOLVER OPERADOR AUTENTICADO DA MOVIMENTAÇÃO CORRENTE
     // ---------------------------------------------------------------
@@ -913,26 +1244,6 @@ export default function PedidosPage() {
       setInProgressItem(item);
       setInProgressTargetStageId(targetStageId);
       setIsOrderInProgressModalOpen(true);
-      return;
-    }
-
-    // ---------------------------------------------------------------
-    // REGRA DE VALIDAÇÃO DE FRETE (Qualquer etapa -> Expedição) - TRAVA ANTERIOR
-    // ---------------------------------------------------------------
-    if (targetStage.name === 'Expedição' && !freightBypass.current) {
-      setFreightItem(item);
-      setFreightTargetStageId(targetStageId);
-      
-      setFreightWeight(parentOrder?.package_weight !== undefined && parentOrder?.package_weight !== null ? String(parentOrder.package_weight) : '');
-      setFreightLength(parentOrder?.package_length !== undefined && parentOrder?.package_length !== null ? String(parentOrder.package_length) : '');
-      setFreightWidth(parentOrder?.package_width !== undefined && parentOrder?.package_width !== null ? String(parentOrder.package_width) : '');
-      setFreightHeight(parentOrder?.package_height !== undefined && parentOrder?.package_height !== null ? String(parentOrder.package_height) : '');
-      
-      setSelectedShippingType(parentOrder?.shipping_type || '');
-      setFreightBoxesCount(item.boxes_count !== undefined && item.boxes_count !== null ? String(item.boxes_count) : (parentOrder?.boxes_count !== undefined && parentOrder?.boxes_count !== null ? String(parentOrder.boxes_count) : ''));
-      setFreightQtyPerBox(item.quantity_per_box !== undefined && item.quantity_per_box !== null ? String(item.quantity_per_box) : (parentOrder?.quantity_per_box !== undefined && parentOrder?.quantity_per_box !== null ? String(parentOrder.quantity_per_box) : ''));
-      
-      setIsFreightModalOpen(true);
       return;
     }
 
@@ -998,38 +1309,64 @@ export default function PedidosPage() {
       }
     }
 
-    // Alerta de itens vinculados na expedição
-    if (targetStage.name === 'Expedição' && !expeditionMoveBypass.current) {
-      const siblingItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id);
-      if (siblingItems.length > 0) {
-        setLinkedItemsWarningData({ item, targetStageId, siblings: siblingItems });
-        setIsLinkedItemsWarningOpen(true);
-        return;
-      }
-    }
-
-    // REGRA DE MANUSEIO: Vincular equipe de manuseio ao entrar na etapa 'Manuseio' vindos de 'Em produção' ou 'Estoque'
+    // REGRA DE MANUSEIO: Desmembrar / Vincular equipes de manuseio ao entrar na etapa 'Manuseio'
     if (targetStage.name === 'Manuseio' && 
         (currentStage?.name === 'Em produção' || currentStage?.name === 'Estoque') && 
         !handlingTeamMoveBypass.current) {
       
-      setHandlingTeamModalItem(item);
-      setHandlingTeamModalTargetStageId(targetStageId);
-      setSelectedHandlingTeamId(item.handling_team_id || '');
-      setIsHandlingTeamModalOpen(true);
+      handleOpenHandlingTeamModalForItem(item, targetStageId);
       return;
     }
 
-    // REGRA DE ENTRADA NA EXPEDIÇÃO: Perguntar sobre ocorrências de falta ou cortesia
-    if (targetStage.name === 'Expedição' && 
-        !expeditionTransitionMoveBypass.current) {
+    // ---------------------------------------------------------------
+    // REGRA DE CONSOLIDAÇÃO DE EXPEDIÇÃO:
+    // Ao entrar na Expedição, consolidar itens irmãos, coletar falta/cortesia e dados de frete.
+    // ---------------------------------------------------------------
+    if (targetStage.name === 'Expedição' && !expeditionTransitionMoveBypass.current) {
+      const siblingItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && i.stage_id !== targetStageId);
       
       setExpeditionTransitionItem(item);
       setExpeditionTransitionTargetStageId(targetStageId);
+      
+      // Ocorrências
       setExpeditionTransitionType('NENHUM');
       setExpeditionTransitionQuantity(0);
       setExpeditionTransitionNotes(item.expedition_notes || '');
+      
+      // Irmãos (Consolidação)
+      setExpeditionSiblings(siblingItems);
+      setExpeditionSelectedSiblings(siblingItems.map(s => s.id)); // Default todos
+      
+      // Frete Consolidado
+      setSelectedShippingType(parentOrder?.shipping_type || '');
+      setExpeditionFreightVolumes(1);
+      setExpeditionFreightWeight(parentOrder?.package_weight !== undefined && parentOrder?.package_weight !== null ? String(parentOrder.package_weight) : '');
+      setExpeditionFreightWidth(parentOrder?.package_width !== undefined && parentOrder?.package_width !== null ? String(parentOrder.package_width) : '');
+      setExpeditionFreightHeight(parentOrder?.package_height !== undefined && parentOrder?.package_height !== null ? String(parentOrder.package_height) : '');
+      setExpeditionFreightLength(parentOrder?.package_length !== undefined && parentOrder?.package_length !== null ? String(parentOrder.package_length) : '');
+      setExpeditionFreightNotes('');
+      setExpeditionFreightPackagingTypeId('');
+
       setIsExpeditionTransitionModalOpen(true);
+      return;
+    }
+
+    // ---------------------------------------------------------------
+    // REGRA DE TRANSIÇÃO PARA COLETA AGENDADA:
+    // Exige preenchimento do Número da Nota, Número da Coleta e Cotação.
+    // ---------------------------------------------------------------
+    if ((targetStage.name === 'Coleta agendada' || targetStage.name === 'Coleta Agendada') && !coletaAgendadaMoveBypass.current) {
+      const siblingItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && i.stage_id !== targetStageId);
+
+      setColetaAgendadaItem(item);
+      setColetaAgendadaTargetStageId(targetStageId);
+      setColetaInvoiceNumber(parentOrder?.invoice_number || '');
+      setColetaPickupNumber(parentOrder?.pickup_number || '');
+      setColetaFreightQuotation(parentOrder?.freight_quotation || '');
+      setColetaSiblings(siblingItems);
+      setColetaSelectedSiblings(siblingItems.map(s => s.id));
+
+      setIsColetaAgendadaModalOpen(true);
       return;
     }
 
@@ -1197,23 +1534,61 @@ export default function PedidosPage() {
       }
     }
 
-    // Regra básica de negócio: Alerta didático de pedido bloqueado (sem sinal) ao mover para produção
-    const isProductionStage = ['Em produção', 'Manuseio', 'Em revisão', 'Expedição', 'Concluído', 'Atrasado'].includes(targetStage.name);
+    // Regra de negócio: Alerta didático de pedido bloqueado (sem sinal ou em atraso) ao mover para Produção, Estoque ou qualquer etapa
+    const isParentPaid = !!parentOrder?.first_payment_date;
+    const isOverdue = hasOverdueInstallments(item.order_id) || checkIsDelayed(item, stages);
     
-    if (isProductionStage) {
-      const isParentPaid = !!item.order?.first_payment_date;
-      const isOverdue = hasOverdueInstallments(item.order_id);
-      
-      if (!isParentPaid && !blockedPaymentBypass.current) {
-        setBlockedPaymentItem(item);
-        setBlockedPaymentTargetStageId(targetStageId);
-        setIsBlockedPaymentModalOpen(true);
+    if ((!isParentPaid || isOverdue) && !blockedPaymentBypass.current) {
+      setBlockedPaymentItem(item);
+      setBlockedPaymentTargetStageId(targetStageId);
+      setIsBlockedPaymentModalOpen(true);
+      return;
+    }
+
+    // ---------------------------------------------------------------
+    // REGRA DE AGRUPAMENTO DE IRMÃOS (/1, /2, etc.):
+    // Pergunta se deseja mover todos os outros itens do mesmo pedido para a nova etapa
+    // ---------------------------------------------------------------
+    if (targetStage.name !== 'Expedição' && targetStage.name !== 'Coleta agendada' && targetStage.name !== 'Coleta Agendada' && !siblingMoveBypass.current) {
+      const siblingItems = orderItems.filter(
+        i => i.order_id === item.order_id && i.id !== item.id && i.stage_id !== targetStageId && i.product?.bind_to_first_item !== true
+      );
+
+      if (siblingItems.length > 0) {
+        setSiblingMoveItem(item);
+        setSiblingMoveTargetStageId(targetStageId);
+        setSiblingMoveList(siblingItems);
+        setSiblingMoveSelectedIds(siblingItems.map(s => s.id));
+        setIsSiblingMoveModalOpen(true);
         return;
       }
-      
-      if (isOverdue && user?.role !== 'Administrador') {
-        alert(`Bloqueio de Produção: O pedido ${item.order?.pv_number || 'PV'} possui parcelas em atraso financeiro no Conta Azul.`);
-        return;
+    }
+
+    // ---------------------------------------------------------------
+    // REGRA DE ESTOQUE: VERIFICAR E BAIXAR AO ENTRAR EM PRODUÇÃO OU ESTOQUE
+    // A baixa ocorre ao sair da primeira coluna (Pedidos/A produzir) para "Em produção" ou "Estoque"
+    // ---------------------------------------------------------------
+    const fromStageIdxStock = currentStageId ? stages.findIndex(s => s.id === currentStageId) : 0;
+    const targetStageIdxStock = stages.findIndex(s => s.id === targetStageId);
+    const isEnteringProductionOrStock = fromStageIdxStock === 0 && (targetStageIdxStock === 1 || targetStageIdxStock === 6 || targetStage.name === 'Em produção' || targetStage.name === 'Produção' || targetStage.name === 'Estoque');
+    
+    if (isEnteringProductionOrStock && item.product_id && !insufficientStockMoveBypass.current) {
+      const qtyRequired = item.print_run || item.quantity || 1;
+      const currentStock = await checkProductStock(item.product_id);
+
+      if ((currentStock - qtyRequired) < 0) {
+        setInsufficientStockData({
+          insufficientItems: [{
+            item: item,
+            productName: item.product?.name || item.name || item.art_name,
+            qtyRequired,
+            currentStock
+          }],
+          sufficientItems: []
+        });
+        setSiblingMoveTargetStageId(targetStageId);
+        setIsInsufficientStockModalOpen(true);
+        return; // Interrompe para abrir o modal didático
       }
     }
 
@@ -1269,6 +1644,25 @@ export default function PedidosPage() {
         if (fromStageIdx === 0 && targetStageIdx > 0 && !item.order?.production_start_date) {
           const todayStr = new Date().toISOString().split('T')[0];
           await updateOrder(item.order_id, { production_start_date: todayStr });
+        }
+
+        // BAIXA AUTOMÁTICA DE ESTOQUE
+        if (isEnteringProductionOrStock && item.product_id) {
+          const qtyRequired = item.print_run || item.quantity || 1;
+          const userTenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+          try {
+            await adjustStock(
+              item.product_id,
+              -qtyRequired, // negative because it's a deduction
+              'PEDIDO',
+              `Baixa automática pelo Pedido ${item.order?.pv_number || item.order_id} - Entrou em ${targetStage.name}`,
+              userTenantId,
+              user?.id || null,
+              true // allow negative
+            );
+          } catch (stockErr) {
+            console.error('Erro ao baixar estoque automaticamente:', stockErr);
+          }
         }
 
         if (item.production_sector !== targetSector) {
@@ -1364,6 +1758,35 @@ export default function PedidosPage() {
                       setOrders(ordersRes.data);
                       const match = ordersRes.data.find((o: any) => o.id === orderId);
                       if (match) setSelectedOrder(match);
+
+                      if (isBlockedPaymentModalOpen && blockedPaymentItem) {
+                        const targetOrderId = blockedPaymentItem.order_id || blockedPaymentItem.order?.id;
+                        const updatedOrder = ordersRes.data.find((o: any) => o.id === targetOrderId);
+                        if (updatedOrder) {
+                          const updatedItem = (updatedOrder.items || []).find((i: any) => i.id === blockedPaymentItem.id) || {
+                            ...blockedPaymentItem,
+                            order: updatedOrder
+                          };
+                          
+                          const isPaid = !!updatedOrder.first_payment_date;
+                          const isStillOverdue = hasOverdueInstallments(updatedOrder.id) || checkIsDelayed(updatedItem, stages);
+
+                          if (isPaid && !isStillOverdue) {
+                            setIsBlockedPaymentModalOpen(false);
+                            setBlockedPaymentItem(null);
+                            setBlockedSyncFeedback(null);
+                            showToast('Pedido sincronizado com sucesso! O pagamento foi identificado no Conta Azul e o pedido foi liberado.');
+                            blockedPaymentBypass.current = true;
+                            moveOrderItemToStage(updatedItem, blockedPaymentTargetStageId);
+                          } else {
+                            setBlockedPaymentItem(updatedItem);
+                            setBlockedSyncFeedback({
+                              message: 'Sincronização concluída com sucesso! No entanto, o pagamento do sinal ainda não consta no ERP ou o pedido permanece em atraso financeiro. O status de bloqueio continua mantido.',
+                              type: 'warning'
+                            });
+                          }
+                        }
+                      }
                     }
                     if (finRes.data) {
                       setFinancialTransactions(finRes.data);
@@ -1654,16 +2077,13 @@ export default function PedidosPage() {
       // Fechar modal de embalagem
       setIsPackagingModalOpen(false);
 
-      // Abrir o modal de ajuste/conferência (próximo passo obrigatório)
-      setAdjustmentItem(packagingModalItem);
-      setAdjustmentTargetStageId(packagingModalTargetStageId);
-      setProducedQuantity(packagingModalItem.print_run || 1000);
-      setAdjustmentAction('CREDITO_PROXIMO_PEDIDO');
-      setAdjustmentNotes('');
-      setIsAdjustmentModalOpen(true);
-
+      const itemToMove = packagingModalItem;
+      const targetStageId = packagingModalTargetStageId;
       setPackagingModalItem(null);
       setPackagingVolumes([]);
+
+      // Chamar transição para Expedição que abrirá o modal de Consolidação e Sobras/Faltas
+      await moveOrderItemToStage(itemToMove, targetStageId);
     } catch (err) {
       console.error('Erro ao salvar embalagem:', err);
       alert('Erro inesperado ao salvar dados de embalagem.');
@@ -2196,6 +2616,7 @@ export default function PedidosPage() {
     setFormSeller(user?.role === 'Comercial' ? user.full_name.split(' ')[0] : '');
     setFormNotes('');
     setFormInternalNotes('');
+    setFormInitialDestination('PRODUCAO');
     
     // Inicia na primeira etapa
     const firstStage = stages[0];
@@ -2570,7 +2991,7 @@ export default function PedidosPage() {
       
       setFormCustomer(order.customer_id || '');
       setFormProduct(entity.product_id || '');
-      setFormMeasure(entity.measure || '');
+      setFormMeasure(getItemRealMeasure(entity));
       setFormPrintRun(entity.print_run || 1000);
       setFormBoxes(entity.boxes_count || 1);
       setFormFreight(Number(order.freight_value || 0));
@@ -2594,6 +3015,14 @@ export default function PedidosPage() {
       setFormOverShortQuantity(entity.over_short_quantity || 0);
       setFormPhysicalLocation(entity.physical_location || 'Salão');
       setFormProductionStartDate(order.production_start_date || '');
+
+      const specDetails = extractOrderDetails(entity.notes || order.notes);
+      setFormCliche(specDetails?.cliche || '');
+      setFormEmbalagem(specDetails?.embalagem || '');
+      setFormPrazo(specDetails?.prazo || '');
+      setFormFreteInfo(specDetails?.freteInfo || '');
+      setFormMeioPag(specDetails?.meioPag || '');
+      setFormFormaPag(specDetails?.formaPag || '');
     } else {
       // É um pedido macro vindo da listagem
       setSelectedOrder(entity);
@@ -2601,7 +3030,7 @@ export default function PedidosPage() {
       if (correspondingItem) {
         setSelectedItem(correspondingItem);
         setFormProduct(correspondingItem.product_id || '');
-        setFormMeasure(correspondingItem.measure || '');
+        setFormMeasure(getItemRealMeasure(correspondingItem));
         setFormPrintRun(correspondingItem.print_run || 1000);
         setFormBoxes(correspondingItem.boxes_count || 1);
         setFormNotes(correspondingItem.notes || '');
@@ -2617,7 +3046,7 @@ export default function PedidosPage() {
       } else {
         setSelectedItem(null);
         setFormProduct(entity.product_id || '');
-        setFormMeasure(entity.measure || '');
+        setFormMeasure(getItemRealMeasure(entity));
         setFormPrintRun(entity.print_run || 1000);
         setFormBoxes(entity.boxes_count || 1);
         setFormNotes(entity.notes || '');
@@ -2652,6 +3081,15 @@ export default function PedidosPage() {
 
     const activeOpId = opId || currentOperator.current?.id || user?.id;
 
+    const specLines = [
+      formCliche ? `Chichê: ${formCliche}` : '',
+      formEmbalagem ? `Embalagem: ${formEmbalagem}` : '',
+      formPrazo ? `Prazo de entrega: ${formPrazo}` : '',
+      formFreteInfo ? `Frete: ${formFreteInfo}` : '',
+      formMeioPag ? `Meio de pag.: ${formMeioPag}` : '',
+      formFormaPag ? `Forma de pag.: ${formFormaPag}` : ''
+    ].filter(Boolean).join('\n');
+
     // 1. Atualizar campos do item de pedido
     const itemPayload = {
       name: formArtName,
@@ -2667,7 +3105,7 @@ export default function PedidosPage() {
       handling_team_id: formHandlingTeamId || null,
       physical_location: formPhysicalLocation,
       over_short_quantity: Number(formOverShortQuantity),
-      notes: formNotes
+      notes: specLines || formNotes
     };
 
     // 2. Atualizar campos do pedido macro
@@ -2742,6 +3180,19 @@ export default function PedidosPage() {
     e.preventDefault();
 
     if (modalType === 'create') {
+      let targetStage = stages[0];
+      let targetStatus = 'A produzir';
+      let targetSector: any = 'Impressão';
+
+      if (formInitialDestination === 'ESTOQUE') {
+        const estoqueStage = stages.find(s => s.name === 'Estoque');
+        if (estoqueStage) {
+          targetStage = estoqueStage;
+          targetStatus = 'Estoque';
+          targetSector = 'Estoque';
+        }
+      }
+
       const orderPayload = {
         customer_id: formCustomer,
         product_id: formProduct || null,
@@ -2752,9 +3203,9 @@ export default function PedidosPage() {
         seller_name: formSeller || 'Vendas Samppel',
         notes: formNotes,
         internal_notes: formInternalNotes,
-        status: formStatus,
-        stage_id: formStageId || null,
-        production_sector: formSector,
+        status: targetStatus,
+        stage_id: targetStage?.id || null,
+        production_sector: targetSector,
         order_date: new Date().toISOString(),
 
         pv_number: formPvNumber || `PV-${Date.now().toString().substring(8)}`,
@@ -2880,8 +3331,8 @@ export default function PedidosPage() {
     }
   };
 
-  const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
-  const isVendedor = user?.role === 'Comercial' && !isSupervisor;
+  const isSupervisor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
+  const isVendedor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && !isSupervisor;
   const hideMonetaryValues = user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isSupervisor);
 
   const cleanPvForMatch = (pv: string) => {
@@ -2911,6 +3362,12 @@ export default function PedidosPage() {
     if (item.product?.bind_to_first_item === true) return false;
 
     const parentOrder = item.order || {};
+
+    // Não exibir cards de pedidos que constam como 'Em andamento' (Orçamento) ou 'Recusado' no Conta Azul
+    const caStatusLower = (parentOrder.conta_azul_status || '').toLowerCase();
+    if ((caStatusLower === 'em andamento' || caStatusLower.includes('andamento') || caStatusLower.includes('recusad') || caStatusLower.includes('rejeitad')) && filterContaAzulStatus !== parentOrder.conta_azul_status) {
+      return false;
+    }
 
     if (isVendedor && user) {
       const userFirstName = user.full_name.split(' ')[0].toLowerCase();
@@ -2989,11 +3446,11 @@ export default function PedidosPage() {
     return true;
   });
 
-  const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial';
+  const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial' || user?.role === 'Vendedor';
   
   const isReadOnlyForForm = (field: string) => {
     if (modalType === 'create') return false;
-    if (user?.role === 'Administrador' || user?.role === 'Comercial') return false;
+    if (user?.role === 'Administrador' || user?.role === 'Comercial' || user?.role === 'Vendedor') return false;
     
     // Se o usuário for Produção ou Fábrica:
     if (user?.role === 'Produção' || user?.role === 'Fábrica') {
@@ -3163,145 +3620,296 @@ export default function PedidosPage() {
           <div
             className="filter-bar"
             style={{
-              padding: '0.3rem 0.85rem',
-              marginBottom: '0.25rem',
+              padding: '0.65rem 1rem',
+              marginBottom: '0.5rem',
               flexShrink: 0,
-              background: 'linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--primary) 4%, var(--surface)) 100%)',
-              borderBottom: '2px solid color-mix(in srgb, var(--primary) 25%, var(--border))',
-              borderRadius: '10px',
-              boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
-              backdropFilter: 'blur(4px)'
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: 'var(--shadow-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.65rem'
             }}
           >
-            <div style={{ display: 'flex', gap: '0.6rem', width: '100%', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+            {/* ═══ SESSÃO 1: CABEÇALHO SUPERIOR (ALINHADO DA ESQUERDA) ═══ */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', width: '100%', flexWrap: 'wrap' }}>
+              
+              {/* Esquerda: Logo + Ações alinhadas sequencialmente a partir da esquerda */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', flex: 1 }}>
+                
+                {/* Logo da Samppel */}
+                <div className="filterbar-logo" style={{ display: 'flex', alignItems: 'center', paddingRight: '0.75rem', borderRight: '1px solid var(--border)', flexShrink: 0 }}>
+                  <Image
+                    src="/logo.png"
+                    alt="Samppel Logo"
+                    width={320}
+                    height={85}
+                    style={{ objectFit: 'contain', height: '32px', width: 'auto', maxHeight: '32px' }}
+                    priority
+                  />
+                </div>
 
-              {/* LOGO DA SAMPPEL — só quando sidebar está recolhida */}
-              <div className="filterbar-logo" style={{ display: 'flex', alignItems: 'center', paddingRight: '0.85rem', borderRight: '2px solid color-mix(in srgb, var(--primary) 20%, var(--border))', flexShrink: 0 }}>
-                <Image
-                  src="/logo.png"
-                  alt="Samppel Logo"
-                  width={320}
-                  height={85}
-                  style={{ objectFit: 'contain', height: '36px', width: 'auto', maxHeight: '36px' }}
-                  priority
-                />
+                {/* Botão Novo Pedido */}
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="btn btn-primary"
+                  style={{
+                    height: '32px', display: 'inline-flex', gap: '0.4rem', alignItems: 'center',
+                    padding: '0.35rem 0.85rem', fontSize: '0.78rem', fontWeight: 700,
+                    backgroundColor: '#10b981', borderColor: '#10b981', color: '#ffffff',
+                    whiteSpace: 'nowrap', flexShrink: 0, borderRadius: 'var(--radius-md)', boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                  }}
+                  title="Cadastrar Novo Pedido Manualmente (Produção ou Estoque)"
+                >
+                  <Plus size={16} />
+                  <span>Novo Pedido</span>
+                </button>
+
+                {/* Card de Importação Conta Azul */}
+                {viewMode === 'kanban' && !['Produção', 'Fábrica'].includes(user?.role || '') && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0,
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)', padding: '0.25rem 0.6rem'
+                  }}>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
+                      Conta Azul
+                    </span>
+                    <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)' }} />
+
+                    {/* Importar por Período */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <input
+                        type="date"
+                        value={importStartDate}
+                        onChange={(e) => setImportStartDate(e.target.value)}
+                        disabled={importing}
+                        style={{
+                          height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem',
+                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '110px'
+                        }}
+                      />
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>→</span>
+                      <input
+                        type="date"
+                        value={importEndDate}
+                        onChange={(e) => setImportEndDate(e.target.value)}
+                        disabled={importing}
+                        style={{
+                          height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem',
+                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '110px'
+                        }}
+                      />
+                      <button
+                        onClick={handleImportOrders}
+                        disabled={importing}
+                        className="btn btn-primary"
+                        style={{
+                          height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center',
+                          padding: '0.18rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0,
+                          borderRadius: 'var(--radius-sm)'
+                        }}
+                      >
+                        <RefreshCw size={11} className={importing ? 'spinner' : ''} />
+                        <span>{importing ? 'Sincronizando...' : 'Por Período'}</span>
+                      </button>
+                    </div>
+
+                    <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)' }} />
+
+                    {/* Importar por Pedido Nº */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <input
+                        type="text"
+                        placeholder="Nº PV..."
+                        value={pullOrderNumber}
+                        onChange={(e) => setPullOrderNumber(e.target.value)}
+                        disabled={importing}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSyncOrderByNumber(pullOrderNumber);
+                        }}
+                        style={{
+                          height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem', width: '65px',
+                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none'
+                        }}
+                      />
+                      <button
+                        onClick={() => handleSyncOrderByNumber(pullOrderNumber)}
+                        disabled={importing || !pullOrderNumber.trim()}
+                        className="btn btn-secondary"
+                        style={{
+                          height: '26px', display: 'flex', gap: '0.25rem', alignItems: 'center',
+                          padding: '0.18rem 0.55rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0,
+                          borderRadius: 'var(--radius-sm)'
+                        }}
+                      >
+                        <Download size={11} />
+                        <span>Importar</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Toggle Kanban / Lista */}
+              {/* Direita: Segmented Control Modo de Exibição & Collapse */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                <div style={{
+                  display: 'flex',
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '2px',
+                  height: '32px',
+                  alignItems: 'center'
+                }}>
+                  <button
+                    onClick={() => setViewMode('kanban')}
+                    className="btn"
+                    title="Visualização em Kanban"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      padding: '0.25rem 0.7rem', fontSize: '0.78rem', border: 'none', height: '100%',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: viewMode === 'kanban' ? 'var(--primary)' : 'transparent',
+                      color: viewMode === 'kanban' ? '#ffffff' : 'var(--text-muted)',
+                      fontWeight: viewMode === 'kanban' ? 700 : 500,
+                      boxShadow: viewMode === 'kanban' ? '0 1px 4px rgba(0,0,0,0.15)' : 'none'
+                    }}
+                  >
+                    <LayoutGrid size={14} />
+                    <span className="desktop-only-inline">Kanban</span>
+                  </button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className="btn"
+                    title="Visualização em Lista"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      padding: '0.25rem 0.7rem', fontSize: '0.78rem', border: 'none', height: '100%',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: viewMode === 'list' ? 'var(--primary)' : 'transparent',
+                      color: viewMode === 'list' ? '#ffffff' : 'var(--text-muted)',
+                      fontWeight: viewMode === 'list' ? 700 : 500,
+                      boxShadow: viewMode === 'list' ? '0 1px 4px rgba(0,0,0,0.15)' : 'none'
+                    }}
+                  >
+                    <List size={14} />
+                    <span className="desktop-only-inline">Lista</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
+                  className="btn btn-secondary"
+                  title={isHeaderCollapsed ? 'Expandir painel de filtros' : 'Ocultar filtros'}
+                  style={{
+                    height: '32px', width: '32px', minWidth: '32px', padding: 0,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: isHeaderCollapsed ? 'var(--primary)' : 'var(--surface)',
+                    color: isHeaderCollapsed ? '#ffffff' : 'var(--text-muted)',
+                    borderColor: 'var(--border)'
+                  }}
+                >
+                  {isHeaderCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                </button>
+              </div>
+            </div>
+
+            {/* ═══ SESSÃO 2: PAINEL DE FILTROS & BUSCA ORGANIZADO EM CARDS ═══ */}
+            {!isHeaderCollapsed && (
               <div style={{
                 display: 'flex',
-                backgroundColor: 'var(--background)',
-                border: '1px solid var(--border)',
-                borderRadius: '8px',
-                padding: '2px',
-                height: '32px',
                 alignItems: 'center',
-                flexShrink: 0,
-                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.06)'
+                gap: '0.5rem',
+                width: '100%',
+                flexWrap: 'wrap',
+                paddingTop: '0.45rem',
+                borderTop: '1px solid var(--border)',
+                backgroundColor: 'var(--background)',
+                padding: '0.5rem 0.65rem',
+                borderRadius: 'var(--radius-md)'
               }}>
-                <button
-                  onClick={() => setViewMode('kanban')}
-                  className="btn"
-                  title="Kanban"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.3rem',
-                    padding: '0.3rem 0.65rem', fontSize: '0.78rem', border: 'none', height: '100%',
-                    borderRadius: '6px',
-                    backgroundColor: viewMode === 'kanban' ? 'var(--primary)' : 'transparent',
-                    color: viewMode === 'kanban' ? '#fff' : 'var(--text-muted)',
-                    boxShadow: viewMode === 'kanban' ? '0 1px 6px rgba(var(--primary-rgb),0.35)' : 'none',
-                    fontWeight: viewMode === 'kanban' ? 700 : 500,
-                    transition: 'all 0.18s ease'
-                  }}
-                >
-                  <LayoutGrid size={14} />
-                  <span className="desktop-only-inline">Kanban</span>
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className="btn"
-                  title="Lista"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.3rem',
-                    padding: '0.3rem 0.65rem', fontSize: '0.78rem', border: 'none', height: '100%',
-                    borderRadius: '6px',
-                    backgroundColor: viewMode === 'list' ? 'var(--primary)' : 'transparent',
-                    color: viewMode === 'list' ? '#fff' : 'var(--text-muted)',
-                    boxShadow: viewMode === 'list' ? '0 1px 6px rgba(var(--primary-rgb),0.35)' : 'none',
-                    fontWeight: viewMode === 'list' ? 700 : 500,
-                    transition: 'all 0.18s ease'
-                  }}
-                >
-                  <List size={14} />
-                  <span className="desktop-only-inline">Lista</span>
-                </button>
-              </div>
-
-              {/* Divisor */}
-              <div style={{ width: '1px', height: '32px', background: 'linear-gradient(to bottom, transparent, var(--border), transparent)', flexShrink: 0 }} />
-
-              {/* Busca PV / OP */}
-              <div style={{ flex: '1 1 140px', minWidth: '120px', maxWidth: '190px', position: 'relative' }}>
-                <div style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}>
-                  <Search size={13} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.2rem' }}>
+                  <Filter size={13} />
+                  <span>Filtros:</span>
                 </div>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Pesquisar PV/OP..."
-                  value={filterSearchOrder}
-                  onChange={(e) => setFilterSearchOrder(e.target.value)}
-                  style={{ height: '32px', fontSize: '0.78rem', padding: '0.3rem 0.55rem 0.3rem 1.9rem', width: '100%', borderRadius: '7px' }}
-                />
-              </div>
 
-              {/* ─── GRUPO DE FILTROS ─── */}
-              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flex: 1 }}>
+                {/* Busca PV / OP */}
+                <div style={{ position: 'relative', flex: '1 1 150px', minWidth: '130px', maxWidth: '190px' }}>
+                  <div style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                    <Search size={13} />
+                  </div>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Pesquisar PV/OP..."
+                    value={filterSearchOrder}
+                    onChange={(e) => setFilterSearchOrder(e.target.value)}
+                    style={{ height: '30px', fontSize: '0.78rem', padding: '0.2rem 0.5rem 0.2rem 1.9rem', width: '100%', borderRadius: 'var(--radius-sm)' }}
+                  />
+                </div>
+
+                {/* Cliente */}
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Cliente..."
+                  placeholder="Filtrar Cliente..."
                   value={filterCustomer}
                   onChange={(e) => setFilterCustomer(e.target.value)}
-                  style={{ height: '32px', fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '90px', flex: '1 1 90px', maxWidth: '150px', borderRadius: '7px' }}
+                  style={{ height: '30px', fontSize: '0.78rem', padding: '0.2rem 0.55rem', flex: '1 1 110px', minWidth: '90px', maxWidth: '160px', borderRadius: 'var(--radius-sm)' }}
                 />
+
+                {/* Vendedora */}
                 <input
                   type="text"
                   className="form-input"
                   placeholder="Vendedora..."
                   value={filterSeller}
                   onChange={(e) => setFilterSeller(e.target.value)}
-                  style={{ height: '32px', fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '90px', flex: '1 1 90px', maxWidth: '130px', borderRadius: '7px' }}
+                  style={{ height: '30px', fontSize: '0.78rem', padding: '0.2rem 0.55rem', flex: '1 1 100px', minWidth: '85px', maxWidth: '140px', borderRadius: 'var(--radius-sm)' }}
                 />
+
+                {/* Status Conta Azul */}
                 <select
                   className="form-select"
                   value={filterContaAzulStatus}
                   onChange={(e) => setFilterContaAzulStatus(e.target.value)}
-                  style={{ height: '32px', fontSize: '0.73rem', padding: '0.25rem 0.4rem', minWidth: '100px', flex: '1 1 100px', maxWidth: '130px', borderRadius: '7px' }}
+                  style={{ height: '30px', fontSize: '0.76rem', padding: '0.2rem 0.45rem', flex: '1 1 110px', minWidth: '95px', maxWidth: '140px', borderRadius: 'var(--radius-sm)' }}
                 >
-                  <option value="">Todas</option>
+                  <option value="">Status CA (Todos)</option>
                   <option value="Aprovado">Aprovado</option>
                   <option value="Cancelado">Cancelado</option>
                   <option value="Em andamento">Em andamento</option>
                   <option value="Faturado">Faturado</option>
                   <option value="Recusado">Recusado</option>
                 </select>
+
+                {/* Liberações (Financeiro/Sinal) */}
                 <select
                   className="form-select"
                   value={filterPedidosRelease}
                   onChange={(e) => setFilterPedidosRelease(e.target.value)}
-                  style={{ height: '32px', fontSize: '0.73rem', padding: '0.25rem 0.4rem', minWidth: '100px', flex: '1 1 100px', maxWidth: '130px', borderRadius: '7px' }}
+                  style={{ height: '30px', fontSize: '0.76rem', padding: '0.2rem 0.45rem', flex: '1 1 110px', minWidth: '95px', maxWidth: '140px', borderRadius: 'var(--radius-sm)' }}
                 >
-                  <option value="">Todas</option>
+                  <option value="">Liberações (Todas)</option>
                   <option value="liberados">Liberados</option>
                   <option value="bloqueados">Bloqueados</option>
                   <option value="autorizados">Com Autorização</option>
                 </select>
+
+                {/* Etapas Kanban */}
                 <select
                   className="form-select"
                   value={filterStage}
                   onChange={(e) => setFilterStage(e.target.value)}
-                  style={{ height: '32px', fontSize: '0.73rem', padding: '0.25rem 0.4rem', minWidth: '110px', flex: '1 1 110px', maxWidth: '145px', borderRadius: '7px' }}
+                  style={{ height: '30px', fontSize: '0.76rem', padding: '0.2rem 0.45rem', flex: '1 1 120px', minWidth: '105px', maxWidth: '150px', borderRadius: 'var(--radius-sm)' }}
                 >
                   <option value="">Todas as Etapas</option>
                   {stages.map(s => (
@@ -3309,16 +3917,16 @@ export default function PedidosPage() {
                   ))}
                 </select>
 
-                {/* Badge com contagem de filtros ativos + Limpar */}
+                {/* Limpar Filtros Button */}
                 {activeFiltersCount > 0 && (
                   <button
                     className="btn"
                     style={{
-                      height: '32px', fontSize: '0.72rem', padding: '0.2rem 0.6rem',
-                      flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      height: '30px', fontSize: '0.75rem', padding: '0.2rem 0.65rem',
+                      flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.35rem',
                       backgroundColor: 'rgba(var(--primary-rgb), 0.1)',
                       color: 'var(--primary)', border: '1px solid rgba(var(--primary-rgb), 0.25)',
-                      borderRadius: '7px', fontWeight: 600, whiteSpace: 'nowrap'
+                      borderRadius: 'var(--radius-sm)', fontWeight: 600, whiteSpace: 'nowrap'
                     }}
                     onClick={() => {
                       setFilterCustomer('');
@@ -3338,130 +3946,16 @@ export default function PedidosPage() {
                     }}
                   >
                     <span style={{
-                      backgroundColor: 'var(--primary)', color: '#fff',
+                      backgroundColor: 'var(--primary)', color: '#ffffff',
                       borderRadius: '50%', width: '16px', height: '16px',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '0.65rem', fontWeight: 700, lineHeight: 1
+                      fontSize: '0.65rem', fontWeight: 700
                     }}>{activeFiltersCount}</span>
-                    Limpar
+                    Limpar Filtros
                   </button>
                 )}
               </div>
-
-              {/* ═══ SINCRONIZAÇÃO CONTA AZUL (Kanban + roles autorizados) ═══ */}
-              {viewMode === 'kanban' && !['Produção', 'Fábrica'].includes(user?.role || '') && (
-                <>
-                  {/* Divisor */}
-                  <div style={{ width: '1px', height: '32px', background: 'linear-gradient(to bottom, transparent, var(--border), transparent)', flexShrink: 0 }} />
-
-                  {/* Importar por Período */}
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0,
-                    backgroundColor: 'rgba(var(--primary-rgb), 0.04)',
-                    border: '1px solid rgba(var(--primary-rgb), 0.15)',
-                    borderRadius: '8px', padding: '0.3rem 0.6rem'
-                  }}>
-                    <span style={{ fontSize: '0.6rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>
-                      Período
-                    </span>
-                    <input
-                      type="date"
-                      value={importStartDate}
-                      onChange={(e) => setImportStartDate(e.target.value)}
-                      disabled={importing}
-                      style={{
-                        height: '26px', padding: '0.18rem 0.35rem', fontSize: '0.72rem',
-                        border: '1px solid var(--border)', borderRadius: '6px',
-                        backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '112px'
-                      }}
-                    />
-                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 500 }}>→</span>
-                    <input
-                      type="date"
-                      value={importEndDate}
-                      onChange={(e) => setImportEndDate(e.target.value)}
-                      disabled={importing}
-                      style={{
-                        height: '26px', padding: '0.18rem 0.35rem', fontSize: '0.72rem',
-                        border: '1px solid var(--border)', borderRadius: '6px',
-                        backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '112px'
-                      }}
-                    />
-                    <button
-                      onClick={handleImportOrders}
-                      disabled={importing}
-                      className="btn btn-primary"
-                      style={{
-                        height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center',
-                        padding: '0.2rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0
-                      }}
-                    >
-                      <RefreshCw size={11} className={importing ? 'spinner' : ''} />
-                      <span>{importing ? 'Sincronizando...' : 'Importar Conta Azul'}</span>
-                    </button>
-                  </div>
-
-                  {/* Importar Pedido por Número */}
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0,
-                    backgroundColor: 'rgba(var(--primary-rgb), 0.04)',
-                    border: '1px solid rgba(var(--primary-rgb), 0.15)',
-                    borderRadius: '8px', padding: '0.3rem 0.6rem'
-                  }}>
-                    <span style={{ fontSize: '0.6rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>
-                      Pedido Nº
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="406..."
-                      value={pullOrderNumber}
-                      onChange={(e) => setPullOrderNumber(e.target.value)}
-                      disabled={importing}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSyncOrderByNumber(pullOrderNumber);
-                      }}
-                      style={{
-                        height: '26px', padding: '0.18rem 0.35rem', fontSize: '0.72rem', width: '70px',
-                        border: '1px solid var(--border)', borderRadius: '6px',
-                        backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none'
-                      }}
-                    />
-                    <button
-                      onClick={() => handleSyncOrderByNumber(pullOrderNumber)}
-                      disabled={importing || !pullOrderNumber.trim()}
-                      className="btn btn-secondary"
-                      style={{ height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.18rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0 }}
-                    >
-                      <Download size={11} />
-                      <span>Importar</span>
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {/* Botão Colapsar */}
-              <button
-                onClick={() => {
-                  const nextState = !isHeaderCollapsed;
-                  setIsHeaderCollapsed(nextState);
-                }}
-                className="btn btn-secondary"
-                title={isHeaderCollapsed ? 'Expandir painel' : 'Ocultar topo (Modo Tela Cheia)'}
-                style={{
-                  height: '32px', width: '32px', minWidth: '32px', padding: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  borderRadius: '8px',
-                  backgroundColor: isHeaderCollapsed ? 'var(--primary)' : 'rgba(var(--primary-rgb), 0.06)',
-                  color: isHeaderCollapsed ? '#ffffff' : 'var(--primary)',
-                  borderColor: isHeaderCollapsed ? 'var(--primary)' : 'rgba(var(--primary-rgb), 0.2)',
-                  flexShrink: 0,
-                  transition: 'all 0.18s ease'
-                }}
-              >
-                {isHeaderCollapsed ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
-              </button>
-
-            </div>
+            )}
           </div>
         );
       })()}
@@ -3870,6 +4364,32 @@ export default function PedidosPage() {
                             </div>
                           </div>
 
+                          {/* Destahes Estruturados do Pedido (Extraídos das Observações) */}
+                          {(() => {
+                            const details = extractOrderDetails(item.notes || parentOrder.notes);
+                            if (!details) return null;
+                            return (
+                              <div style={{
+                                marginTop: '4px',
+                                padding: '4px',
+                                backgroundColor: 'var(--background)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '4px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px',
+                                fontSize: '0.6rem',
+                                color: 'var(--text-muted)'
+                              }}>
+                                {details.embalagem && <div><strong style={{ color: 'var(--text)' }}>Emb:</strong> {capitalizeText(details.embalagem)}</div>}
+                                {details.prazo && <div><strong style={{ color: 'var(--text)' }}>Prazo:</strong> {capitalizeText(details.prazo)}</div>}
+                                {details.freteInfo && <div><strong style={{ color: 'var(--text)' }}>Frete:</strong> {capitalizeText(details.freteInfo)}</div>}
+                                {details.meioPag && <div><strong style={{ color: 'var(--text)' }}>Meio Pgto:</strong> {capitalizeText(details.meioPag)}</div>}
+                                {details.formaPag && <div><strong style={{ color: 'var(--text)' }}>Forma Pgto:</strong> {capitalizeText(details.formaPag)}</div>}
+                              </div>
+                            );
+                          })()}
+
                           {/* Destaque de Autorização (AUT.) se houver nas observações */}
                           {(() => {
                             const authNum = extractAuthorization(item.notes || parentOrder.notes);
@@ -4116,32 +4636,84 @@ export default function PedidosPage() {
                             </button>
                           </div>
 
-                          {/* Badge de Equipe de Manuseio */}
-                          {item.production_sector === 'Manuseio' && (
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
-                              marginTop: '2px',
-                              padding: '2px 5px',
-                              borderRadius: '4px',
-                              background: item.handling_team_id
-                                ? 'hsla(271, 91.2%, 65.1%, 0.12)'
-                                : 'hsla(0, 84.2%, 60.2%, 0.08)',
-                              border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`,
-                            }}>
-                              <span style={{ 
-                                fontSize: '0.6rem', 
-                                fontWeight: 700,
-                                color: item.handling_team_id ? 'hsl(271, 91.2%, 55%)' : 'hsl(0, 84.2%, 50%)'
-                              }}>
-                                {item.handling_team_id
-                                  ? (handlingTeams.find(t => t.id === item.handling_team_id)?.name || 'Equipe desconhecida')
-                                  : 'Sem equipe vinculada'
-                                }
-                              </span>
-                            </div>
-                          )}
+                          {/* Badge(s) de Equipe(s) de Manuseio com Suporte a Múltiplas Equipes e Quantidades */}
+                          {(item.production_sector === 'Manuseio' || stage.name === 'Manuseio') && (() => {
+                            const itemAllocations = itemHandlingTeamsMap.get(item.id) || [];
+                            
+                            if (itemAllocations.length > 0) {
+                              return (
+                                <div 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenHandlingTeamModalForItem(item, item.stage_id);
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: '0.2rem',
+                                    marginTop: '3px',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Clique para gerenciar / alterar divisão de equipes de manuseio"
+                                >
+                                  {itemAllocations.map((alloc) => {
+                                    const teamName = alloc.team?.name || handlingTeams.find(t => t.id === alloc.handling_team_id)?.name || 'Equipe';
+                                    return (
+                                      <div key={alloc.id || alloc.handling_team_id} style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.2rem',
+                                        padding: '1px 5px',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.12)',
+                                        border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)',
+                                        fontSize: '0.6rem',
+                                        fontWeight: 700,
+                                        color: 'hsl(271, 91.2%, 55%)'
+                                      }}>
+                                        <Users size={10} />
+                                        <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenHandlingTeamModalForItem(item, item.stage_id);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  marginTop: '3px',
+                                  padding: '2px 5px',
+                                  borderRadius: '4px',
+                                  background: item.handling_team_id
+                                    ? 'hsla(271, 91.2%, 65.1%, 0.12)'
+                                    : 'hsla(0, 84.2%, 60.2%, 0.08)',
+                                  border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`,
+                                  cursor: 'pointer'
+                                }}
+                                title="Clique para vincular / dividir equipes de manuseio"
+                              >
+                                <span style={{ 
+                                  fontSize: '0.6rem', 
+                                  fontWeight: 700,
+                                  color: item.handling_team_id ? 'hsl(271, 91.2%, 55%)' : 'hsl(0, 84.2%, 50%)'
+                                }}>
+                                  {item.handling_team_id
+                                    ? (handlingTeams.find(t => t.id === item.handling_team_id)?.name || 'Equipe desconhecida')
+                                    : 'Sem equipe vinculada (Clique para definir)'
+                                  }
+                                </span>
+                              </div>
+                            );
+                          })()}
                           {/* Badge de Embalagem — aparece somente em "Em revisão" */}
                           {stage.name === 'Em revisão' && (
                             <button
@@ -4645,76 +5217,292 @@ export default function PedidosPage() {
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
-            padding: '1.5rem', maxWidth: '500px', width: '100%',
+            padding: '1.5rem', maxWidth: '780px', width: '100%',
+            maxHeight: '88vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-              <Truck size={22} style={{ color: 'var(--primary)' }} />
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
-                Ocorrências de Expedição
-              </h2>
-            </div>
-
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: '1.25rem' }}>
-              O item <strong>{expeditionTransitionItem.friendly_id}</strong> está sendo enviado para a Expedição. Houve alguma falta ou cortesia a registrar na remessa deste pedido?
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label" style={{ fontWeight: 600 }}>Tipo de Ocorrência *</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.4rem' }}>
-                  {[
-                    { type: 'NENHUM', label: 'Não houve falta ou cortesia (Entrega normal)' },
-                    { type: 'FALTA', label: 'Falta na Entrega (Entregue a menos que o pedido)' },
-                    { type: 'CORTESIA', label: 'Cortesia / Brinde (Entregue a mais como cortesia)' }
-                  ].map((opt) => (
-                    <label key={opt.type} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text)' }}>
-                      <input 
-                        type="radio" 
-                        name="expeditionType" 
-                        checked={expeditionTransitionType === opt.type}
-                        onChange={() => {
-                          setExpeditionTransitionType(opt.type as any);
-                          if (opt.type === 'NENHUM') setExpeditionTransitionQuantity(0);
-                        }}
-                        style={{ accentColor: 'var(--primary)' }}
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  ))}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ backgroundColor: 'rgba(37, 99, 235, 0.1)', padding: '0.5rem', borderRadius: 'var(--radius-md)' }}>
+                  <Truck size={24} style={{ color: 'var(--primary)' }} />
+                </div>
+                <div>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
+                    Consolidação de Expedição e Frete
+                  </h2>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Pedido #{expeditionTransitionItem.order?.pv_number || expeditionTransitionItem.friendly_id} · {expeditionTransitionItem.order?.customer?.name || 'Cliente'}
+                  </span>
                 </div>
               </div>
+            </div>
 
-              {expeditionTransitionType !== 'NENHUM' && (
-                <div className="form-group" style={{ margin: 0, animation: 'fadeIn 0.2s ease' }}>
-                  <label className="form-label" style={{ fontWeight: 600 }}>
-                    {expeditionTransitionType === 'FALTA' ? 'Quantidade Faltante (unidades) *' : 'Quantidade de Cortesia (unidades) *'}
-                  </label>
-                  <input 
-                    type="number"
-                    className="form-input"
-                    min="1"
-                    required
-                    value={expeditionTransitionQuantity || ''}
-                    onChange={(e) => setExpeditionTransitionQuantity(Math.max(1, parseInt(e.target.value) || 0))}
-                    placeholder="Insira a quantidade de unidades..."
-                    style={{ padding: '0.45rem 0.6rem', fontSize: '0.85rem', marginTop: '0.25rem' }}
-                  />
+            <div style={{ display: 'grid', gridTemplateColumns: expeditionSiblings.length > 0 ? '1fr 1fr' : '1fr', gap: '1.25rem', marginBottom: '1.25rem' }}>
+              
+              {/* COLUNA 1: CHECKLIST DE AGRUPAMENTO DE ITENS NA MESMA CAIXA/FRETE */}
+              {expeditionSiblings.length > 0 && (
+                <div style={{
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)' }}>
+                        📦 Agrupar Itens na Mesma Caixa / Frete
+                      </span>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4, margin: 0 }}>
+                    Este pedido foi desmembrado para produção. <strong>Marque abaixo os outros itens que você deseja colocar nesta mesma caixa/envio</strong> para irem juntos à Expedição:
+                  </p>
+
+                  {/* BOTOES DE AÇÃO RAPIDA MARCAR/DESMARCAR */}
+                  <div style={{ display: 'flex', gap: '0.5rem', margin: '0.25rem 0' }}>
+                    <button
+                      type="button"
+                      onClick={() => setExpeditionSelectedSiblings(expeditionSiblings.map(s => s.id))}
+                      style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}
+                    >
+                      ✓ Marcar Todos (Juntar Pedido Inteiro)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpeditionSelectedSiblings([])}
+                      style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text-muted)', cursor: 'pointer' }}
+                    >
+                      Desmarcar Todos (Enviar Só Este)
+                    </button>
+                  </div>
+
+                  {/* LISTA DE ITENS */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '220px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {/* Item Principal (Sempre selecionado) */}
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', alignItems: 'center',
+                      padding: '0.5rem 0.6rem', borderRadius: 'var(--radius-sm)', backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                      border: '1px solid rgba(37, 99, 235, 0.2)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input type="checkbox" checked disabled style={{ accentColor: 'var(--primary)' }} />
+                        <div>
+                          <strong style={{ color: 'var(--text)', display: 'block', fontSize: '0.8rem' }}>
+                            {expeditionTransitionItem.friendly_id} · {expeditionTransitionItem.name}
+                          </strong>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 600 }}>Item atual sendo movido</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Itens Irmãos */}
+                    {expeditionSiblings.map((sib: any) => {
+                      const sibStage = stages.find(s => s.id === sib.stage_id);
+                      const isChecked = expeditionSelectedSiblings.includes(sib.id);
+                      return (
+                        <label key={sib.id} style={{
+                          display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', alignItems: 'center', cursor: 'pointer',
+                          padding: '0.45rem 0.6rem', borderRadius: 'var(--radius-sm)',
+                          backgroundColor: isChecked ? 'var(--surface)' : 'transparent',
+                          border: `1px solid ${isChecked ? 'var(--border)' : 'transparent'}`
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input 
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setExpeditionSelectedSiblings([...expeditionSelectedSiblings, sib.id]);
+                                } else {
+                                  setExpeditionSelectedSiblings(expeditionSelectedSiblings.filter(id => id !== sib.id));
+                                }
+                              }}
+                              style={{ accentColor: 'var(--primary)' }}
+                            />
+                            <div>
+                              <span style={{ color: 'var(--text)', fontWeight: 600, display: 'block' }}>
+                                {sib.friendly_id || '—'} · {sib.name}
+                              </span>
+                              <span style={{ fontSize: '0.7rem', color: isChecked ? 'var(--success)' : 'var(--text-muted)' }}>
+                                {isChecked ? '↳ Será enviado junto nesta caixa' : '↳ Continuará na etapa atual'}
+                              </span>
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '99px',
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            backgroundColor: (sibStage?.color || '#888') + '22',
+                            color: sibStage?.color || 'var(--text-muted)',
+                            border: `1px solid ${(sibStage?.color || '#888')}55`,
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {sibStage?.name || 'A produzir'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label" style={{ fontWeight: 600 }}>Observações da Expedição</label>
-                <textarea
-                  className="form-input"
-                  rows={2}
-                  value={expeditionTransitionNotes}
-                  onChange={(e) => setExpeditionTransitionNotes(e.target.value)}
-                  placeholder="Insira notas sobre a entrega, transportadora, sobra ou observações gerais..."
-                  style={{ padding: '0.45rem 0.6rem', fontSize: '0.85rem', marginTop: '0.25rem', resize: 'vertical' }}
-                />
+              {/* COLUNA 2: DADOS TÉCNICOS DE FRETE E EMBALAGEM */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '1rem', backgroundColor: 'var(--surface-subtle)' }}>
+                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Truck size={16} /> Dados Técnicos de Frete Consolidados
+                  </h3>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Tipo de Frete *</label>
+                      <select
+                        className="form-input"
+                        required
+                        value={selectedShippingType}
+                        onChange={(e) => setSelectedShippingType(e.target.value)}
+                        style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                      >
+                        <option value="">Selecione...</option>
+                        {shippingTypes.filter(s => s.status === 'ATIVO').map((type) => (
+                          <option key={type.id} value={type.name}>{type.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Volumes/Caixas *</label>
+                      <input 
+                        type="number"
+                        className="form-input"
+                        min="1"
+                        required
+                        value={expeditionFreightVolumes || ''}
+                        onChange={(e) => setExpeditionFreightVolumes(parseInt(e.target.value) || 1)}
+                        style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                        placeholder="Ex: 1"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Peso (kg)</label>
+                      <input type="number" step="0.01" className="form-input" value={expeditionFreightWeight} onChange={e => setExpeditionFreightWeight(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0.00" />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Comp (cm)</label>
+                      <input type="number" step="0.1" className="form-input" value={expeditionFreightLength} onChange={e => setExpeditionFreightLength(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Larg (cm)</label>
+                      <input type="number" step="0.1" className="form-input" value={expeditionFreightWidth} onChange={e => setExpeditionFreightWidth(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Alt (cm)</label>
+                      <input type="number" step="0.1" className="form-input" value={expeditionFreightHeight} onChange={e => setExpeditionFreightHeight(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* OCORRÊNCIAS DE EMBALAGEM / SOBRAS & FALTAS */}
+                <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '0.85rem 1rem', backgroundColor: 'var(--surface)' }}>
+                  <h3 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Conferência de Sobras & Faltas</span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      Tiragem Contratada: <strong>{(expeditionTransitionItem.print_run || 0).toLocaleString('pt-BR')} un</strong>
+                    </span>
+                  </h3>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', alignItems: 'center' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.75rem' }}>Qtd Produzida Final *</label>
+                      <input 
+                        type="number"
+                        min="0"
+                        required
+                        className="form-input"
+                        value={producedQuantity}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setProducedQuantity(val);
+                          const diff = val - (expeditionTransitionItem.print_run || 0);
+                          if (diff > 0) {
+                            setAdjustmentAction('CREDITO_PROXIMO_PEDIDO');
+                          } else if (diff < 0) {
+                            setAdjustmentAction('PENDENCIA_ENTREGA');
+                          } else {
+                            setAdjustmentAction('OUTRO');
+                          }
+                        }}
+                        style={{ padding: '0.4rem 0.5rem', fontSize: '0.82rem' }}
+                      />
+                    </div>
+
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>Saldo Calculado:</span>
+                      {(() => {
+                        const diff = producedQuantity - (expeditionTransitionItem.print_run || 0);
+                        if (diff === 0) {
+                          return <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>0 (Sem sobras ou faltas)</span>;
+                        } else if (diff > 0) {
+                          return <span style={{ fontSize: '0.78rem', color: 'hsl(142.1, 76.2%, 36.3%)', fontWeight: 700 }}>+{diff.toLocaleString('pt-BR')} un (Sobra / Cortesia)</span>;
+                        } else {
+                          return <span style={{ fontSize: '0.78rem', color: 'hsl(346.8, 77.2%, 49.8%)', fontWeight: 700 }}>{diff.toLocaleString('pt-BR')} un (Falta)</span>;
+                        }
+                      })()}
+                    </div>
+                  </div>
+
+                  {producedQuantity - (expeditionTransitionItem.print_run || 0) !== 0 && (
+                    <div className="form-group" style={{ marginTop: '0.65rem', margin: '0.65rem 0 0 0' }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.75rem' }}>Tratamento do Saldo *</label>
+                      <select
+                        className="form-select"
+                        value={adjustmentAction}
+                        onChange={(e) => setAdjustmentAction(e.target.value)}
+                        style={{ padding: '0.35rem 0.5rem', fontSize: '0.78rem' }}
+                      >
+                        {producedQuantity - (expeditionTransitionItem.print_run || 0) > 0 ? (
+                          <>
+                            <option value="CREDITO_PROXIMO_PEDIDO">Cortesia / Crédito para o Próximo Pedido</option>
+                            <option value="GUARDAR_ESTOQUE_CLIENTE">Guardar no Estoque de Personalizados (Fábrica)</option>
+                            <option value="COBRADO_ADICIONAL">Cobrar Valor Adicional do Cliente</option>
+                            <option value="OUTRO">Outro / Tratar Manualmente</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="PENDENCIA_ENTREGA">Registrar Pendência de Entrega (Gerar Crédito)</option>
+                            <option value="REPRODUCAO_PENDENTE">Programar Reprodução Pendente (Lote Corretivo)</option>
+                            <option value="CANCELADO_DESCONTO">Gerar Desconto Proporcional no Faturamento</option>
+                            <option value="OUTRO">Outro / Tratar Manualmente</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* OBSERVAÇÕES */}
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Observações da Expedição</label>
+                  <textarea
+                    className="form-input"
+                    rows={2}
+                    value={expeditionTransitionNotes}
+                    onChange={(e) => setExpeditionTransitionNotes(e.target.value)}
+                    placeholder="Instruções de envio, notas de embalagem ou sobra/falta..."
+                    style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem', marginTop: '0.2rem', resize: 'vertical' }}
+                  />
+                </div>
               </div>
+
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
@@ -4734,18 +5522,25 @@ export default function PedidosPage() {
                 className="btn btn-primary"
                 disabled={loading}
                 onClick={async () => {
-                  if (expeditionTransitionType !== 'NENHUM' && !expeditionTransitionQuantity) {
-                    alert('Por favor, insira a quantidade de unidades da ocorrência.');
+                  if (!selectedShippingType) {
+                    alert('Por favor, informe o Tipo de Frete consolidado.');
                     return;
                   }
 
-                  const updates: any = {};
-                  if (expeditionTransitionType === 'FALTA') {
-                    updates.shortage_quantity = expeditionTransitionQuantity;
+                  const orderedQty = expeditionTransitionItem.print_run || 0;
+                  const diffQty = producedQuantity - orderedQty;
+
+                  const updates: any = {
+                    over_short_quantity: diffQty,
+                    expedition_notes: expeditionTransitionNotes || null
+                  };
+
+                  if (diffQty < 0) {
+                    updates.shortage_quantity = Math.abs(diffQty);
                     updates.courtesy_quantity = 0;
                     updates.adjustment_resolved = false;
-                  } else if (expeditionTransitionType === 'CORTESIA') {
-                    updates.courtesy_quantity = expeditionTransitionQuantity;
+                  } else if (diffQty > 0) {
+                    updates.courtesy_quantity = diffQty;
                     updates.shortage_quantity = 0;
                     updates.adjustment_resolved = false;
                   } else {
@@ -4753,10 +5548,12 @@ export default function PedidosPage() {
                     updates.courtesy_quantity = 0;
                     updates.adjustment_resolved = true;
                   }
-                  updates.expedition_notes = expeditionTransitionNotes || null;
 
                   setLoading(true);
                   try {
+                    const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
+                    // 1. Atualizar Ocorrência do Item Principal
                     const { error } = await updateOrderItem(expeditionTransitionItem.id, updates);
                     if (error) {
                       alert('Erro ao salvar ocorrências de expedição: ' + error.message);
@@ -4764,56 +5561,81 @@ export default function PedidosPage() {
                       return;
                     }
 
-                    // Se houve falta ou cortesia, grava o saldo acumulado (crédito/débito) de forma imediata!
-                    if (expeditionTransitionType !== 'NENHUM') {
-                      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-                      const creditType = expeditionTransitionType === 'FALTA' ? 'PENDENCIA_ENTREGA' : 'CORTESIA_SOBRA';
-                      const adjType = expeditionTransitionType === 'FALTA' ? 'FALTA' : 'SOBRA';
-                      const actionTaken = 'CREDITO_PROXIMO_PEDIDO';
-                      
-                      // Criar registro na tabela de créditos/pendências
-                      const { data: creditData, error: creditError } = await createCustomerStockCredit({
+                    // 2. Gravar Log de Auditoria do Saldo (order_balance_adjustments)
+                    if (diffQty !== 0) {
+                      const adjType = diffQty >= 0 ? 'SOBRA' : 'FALTA';
+                      await createOrderBalanceAdjustment({
                         tenant_id: tenantId,
+                        order_id: expeditionTransitionItem.order_id,
+                        order_item_id: expeditionTransitionItem.id,
                         customer_id: expeditionTransitionItem.order?.customer_id,
                         product_id: expeditionTransitionItem.product_id,
-                        credit_type: creditType,
-                        original_quantity: expeditionTransitionQuantity,
-                        remaining_quantity: expeditionTransitionQuantity,
-                        source_order_id: expeditionTransitionItem.order_id,
-                        source_adjustment_id: null,
-                        status: 'ATIVO',
-                        notes: expeditionTransitionNotes || `Registrado na entrada da Expedição (${expeditionTransitionType === 'FALTA' ? 'Falta' : 'Cortesia'})`
+                        ordered_quantity: orderedQty,
+                        produced_quantity: producedQuantity,
+                        difference_quantity: diffQty,
+                        adjustment_type: adjType,
+                        action_taken: adjustmentAction,
+                        notes: expeditionTransitionNotes || `Registrado na consolidação da Expedição (${adjType})`,
+                        created_by_name: user?.full_name || user?.email || 'Sistema'
                       });
 
-                      if (creditError) {
-                        console.error('Erro ao registrar saldo acumulado:', creditError.message);
-                      } else if (creditData) {
-                        // Grava log de ajuste de saldo para auditoria
-                        const orderedQty = expeditionTransitionItem.print_run || 0;
-                        const differenceQty = expeditionTransitionType === 'FALTA' ? -expeditionTransitionQuantity : expeditionTransitionQuantity;
-                        const producedQty = orderedQty + differenceQty;
+                      // 3. Se a ação gera crédito/pendência para o cliente, salvar em customer_stock_credits
+                      if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(adjustmentAction)) {
+                        const creditType = diffQty < 0 ? 'PENDENCIA_ENTREGA' : 'CORTESIA_SOBRA';
+                        const absQty = Math.abs(diffQty);
 
-                        await createOrderBalanceAdjustment({
+                        const { error: creditError } = await createCustomerStockCredit({
                           tenant_id: tenantId,
-                          order_id: expeditionTransitionItem.order_id,
-                          order_item_id: expeditionTransitionItem.id,
                           customer_id: expeditionTransitionItem.order?.customer_id,
                           product_id: expeditionTransitionItem.product_id,
-                          ordered_quantity: orderedQty,
-                          produced_quantity: Math.max(0, producedQty),
-                          difference_quantity: differenceQty,
-                          adjustment_type: adjType,
-                          action_taken: actionTaken,
-                          notes: expeditionTransitionNotes || `${expeditionTransitionType === 'FALTA' ? 'Falta' : 'Cortesia/Bonificação'} registrada pela Embalagem na entrada da Expedição`,
-                          created_by_name: user?.full_name || user?.email || 'Sistema'
+                          credit_type: creditType,
+                          original_quantity: absQty,
+                          remaining_quantity: absQty,
+                          source_order_id: expeditionTransitionItem.order_id,
+                          source_adjustment_id: null,
+                          status: 'ATIVO',
+                          notes: expeditionTransitionNotes || `Registrado na Expedição (${diffQty < 0 ? 'Falta' : 'Cortesia'})`
                         });
+
+                        if (creditError) {
+                          console.error('Erro ao registrar saldo acumulado do cliente:', creditError.message);
+                        }
                       }
                     }
 
-                    // Prossegue para a expedição com o bypass ativo
+                    // 4. Salvar Dados Técnicos de Frete (Consolidado)
+                    await updateOrder(expeditionTransitionItem.order_id, {
+                      shipping_type: selectedShippingType as any,
+                      notes: expeditionFreightNotes ? (expeditionTransitionItem.order?.notes + '\n' + expeditionFreightNotes) : expeditionTransitionItem.order?.notes
+                    });
+
+                    await saveOrderShippingVolumes(expeditionTransitionItem.order_id, [{
+                      order_id: expeditionTransitionItem.order_id,
+                      volume_number: expeditionFreightVolumes,
+                      weight_kg: parseFloat(expeditionFreightWeight) || null,
+                      width_cm: parseFloat(expeditionFreightWidth) || null,
+                      height_cm: parseFloat(expeditionFreightHeight) || null,
+                      length_cm: parseFloat(expeditionFreightLength) || null,
+                      packaging_type_id: expeditionFreightPackagingTypeId || null,
+                      notes: expeditionFreightNotes || null
+                    }], tenantId);
+
+                    // 5. Mover Item Principal para a Expedição
                     expeditionTransitionMoveBypass.current = true;
                     setIsExpeditionTransitionModalOpen(false);
                     await moveOrderItemToStage(expeditionTransitionItem, expeditionTransitionTargetStageId);
+                    
+                    // 6. Mover Itens Irmãos Selecionados
+                    if (expeditionSelectedSiblings.length > 0) {
+                      for (const sibId of expeditionSelectedSiblings) {
+                        const siblingItem = orderItems.find(i => i.id === sibId);
+                        if (siblingItem) {
+                          expeditionTransitionMoveBypass.current = true;
+                          await moveOrderItemToStage(siblingItem, expeditionTransitionTargetStageId);
+                        }
+                      }
+                    }
+
                     setExpeditionTransitionItem(null);
                   } catch (err) {
                     console.error(err);
@@ -4822,9 +5644,207 @@ export default function PedidosPage() {
                   }
                 }}
               >
-                {loading ? 'Processando...' : 'Confirmar e Mover para Expedição'}
+                {loading ? 'Processando...' : 'Confirmar Expedição'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* MODAL DE DADOS DA COLETA AGENDADA (NOTA, COLETA E COTAÇÃO) */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {isColetaAgendadaModalOpen && coletaAgendadaItem && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '1.5rem', maxWidth: '650px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
+              <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '0.5rem', borderRadius: 'var(--radius-md)' }}>
+                <Clock size={24} style={{ color: '#10b981' }} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
+                  Dados da Coleta Agendada
+                </h2>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Pedido #{coletaAgendadaItem.order?.pv_number || coletaAgendadaItem.friendly_id} · {coletaAgendadaItem.order?.customer?.name || 'Cliente'}
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: '1.25rem' }}>
+              Preencha os dados do despacho de <strong>{coletaAgendadaItem.friendly_id}</strong> para agendar a coleta:
+            </p>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setLoading(true);
+              try {
+                // 1. Atualizar informações de Coleta no Pedido Principal
+                await updateOrder(coletaAgendadaItem.order_id, {
+                  invoice_number: coletaInvoiceNumber || null,
+                  pickup_number: coletaPickupNumber || null,
+                  freight_quotation: coletaFreightQuotation || null
+                });
+
+                // 2. Mover Item Principal para Coleta Agendada
+                coletaAgendadaMoveBypass.current = true;
+                setIsColetaAgendadaModalOpen(false);
+                await moveOrderItemToStage(coletaAgendadaItem, coletaAgendadaTargetStageId);
+
+                // 3. Mover Itens Irmãos Selecionados
+                if (coletaSelectedSiblings.length > 0) {
+                  for (const sibId of coletaSelectedSiblings) {
+                    const sibItem = orderItems.find(i => i.id === sibId);
+                    if (sibItem) {
+                      coletaAgendadaMoveBypass.current = true;
+                      await moveOrderItemToStage(sibItem, coletaAgendadaTargetStageId);
+                    }
+                  }
+                }
+
+                setColetaAgendadaItem(null);
+              } catch (err) {
+                console.error('Erro ao salvar dados da coleta agendada:', err);
+                alert('Ocorreu um erro ao salvar os dados da coleta.');
+              } finally {
+                setLoading(false);
+              }
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.85rem' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Número da Nota (NF-e) *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={coletaInvoiceNumber}
+                    onChange={(e) => setColetaInvoiceNumber(e.target.value)}
+                    placeholder="Ex: 12345"
+                    style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Número da Coleta *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={coletaPickupNumber}
+                    onChange={(e) => setColetaPickupNumber(e.target.value)}
+                    placeholder="Ex: COL-98765"
+                    style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Cotação de Frete *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={coletaFreightQuotation}
+                    onChange={(e) => setColetaFreightQuotation(e.target.value)}
+                    placeholder="Ex: COT-44521 ou R$ 150"
+                    style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                  />
+                </div>
+              </div>
+
+              {/* CHECKLIST DE ITENS IRMÃOS PARA COLETA AGENDADA */}
+              {coletaSiblings.length > 0 && (
+                <div style={{
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem'
+                }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)' }}>
+                    📦 Mover outros itens deste pedido para Coleta Agendada juntos ({coletaSiblings.length})
+                  </span>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '180px', overflowY: 'auto' }}>
+                    {coletaSiblings.map((sib: any) => {
+                      const sibStage = stages.find(s => s.id === sib.stage_id);
+                      const isChecked = coletaSelectedSiblings.includes(sib.id);
+                      return (
+                        <label key={sib.id} style={{
+                          display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', alignItems: 'center', cursor: 'pointer',
+                          padding: '0.45rem 0.6rem', borderRadius: 'var(--radius-sm)',
+                          backgroundColor: isChecked ? 'var(--surface)' : 'transparent',
+                          border: `1px solid ${isChecked ? 'var(--border)' : 'transparent'}`
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input 
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setColetaSelectedSiblings([...coletaSelectedSiblings, sib.id]);
+                                } else {
+                                  setColetaSelectedSiblings(coletaSelectedSiblings.filter(id => id !== sib.id));
+                                }
+                              }}
+                              style={{ accentColor: '#10b981' }}
+                            />
+                            <span style={{ color: 'var(--text)', fontWeight: 600 }}>
+                              {sib.friendly_id || '—'} · {sib.name}
+                            </span>
+                          </div>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '99px',
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            backgroundColor: (sibStage?.color || '#888') + '22',
+                            color: sibStage?.color || 'var(--text-muted)',
+                            border: `1px solid ${(sibStage?.color || '#888')}55`,
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {sibStage?.name || 'Expedição'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setIsColetaAgendadaModalOpen(false);
+                    setColetaAgendadaItem(null);
+                    resetAllBypasses();
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={loading}
+                >
+                  {loading ? 'Agendando...' : 'Confirmar e Agendar Coleta'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -6304,6 +7324,49 @@ export default function PedidosPage() {
             <form onSubmit={handleSubmit} style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 
+                {/* Seleção do Destino Inicial (Obrigatório na Criação) */}
+                {modalType === 'create' && (
+                  <div className="form-group" style={{ backgroundColor: 'rgba(37, 99, 235, 0.05)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                    <label className="form-label" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.85rem', marginBottom: '0.4rem', display: 'block' }}>
+                      Destino Inicial Obrigatório do Pedido *
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <label style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.8rem',
+                        borderRadius: 'var(--radius-sm)', border: `1.5px solid ${formInitialDestination === 'PRODUCAO' ? 'var(--primary)' : 'var(--border)'}`,
+                        backgroundColor: formInitialDestination === 'PRODUCAO' ? 'var(--surface)' : 'transparent',
+                        cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem'
+                      }}>
+                        <input
+                          type="radio"
+                          name="initialDestination"
+                          value="PRODUCAO"
+                          checked={formInitialDestination === 'PRODUCAO'}
+                          onChange={() => setFormInitialDestination('PRODUCAO')}
+                          style={{ accentColor: 'var(--primary)' }}
+                        />
+                        <span>🏭 Entra em Produção (A Produzir)</span>
+                      </label>
+                      <label style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.8rem',
+                        borderRadius: 'var(--radius-sm)', border: `1.5px solid ${formInitialDestination === 'ESTOQUE' ? 'var(--primary)' : 'var(--border)'}`,
+                        backgroundColor: formInitialDestination === 'ESTOQUE' ? 'var(--surface)' : 'transparent',
+                        cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem'
+                      }}>
+                        <input
+                          type="radio"
+                          name="initialDestination"
+                          value="ESTOQUE"
+                          checked={formInitialDestination === 'ESTOQUE'}
+                          onChange={() => setFormInitialDestination('ESTOQUE')}
+                          style={{ accentColor: 'var(--primary)' }}
+                        />
+                        <span>📦 Entra em Estoque (Pronta Entrega)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 {/* Número do PV */}
                 <div className="form-group">
                   <label className="form-label">Número do PV (ERP Conta Azul) *</label>
@@ -6494,17 +7557,67 @@ export default function PedidosPage() {
                   />
                 </div>
 
-                {/* Localização Física */}
+                {/* Localização Física com Dropdown + Botão '+' para CRUD */}
                 <div className="form-group">
-                  <label className="form-label">Localização Física na Fábrica</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Ex: Máquina Flexo 2, Salão, Pátio"
-                    value={formPhysicalLocation}
-                    disabled={isReadOnlyForForm('physicalLocation')}
-                    onChange={(e) => setFormPhysicalLocation(e.target.value)}
-                  />
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Localização Física na Fábrica</span>
+                    <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', fontWeight: 400 }}>Selecione ou crie um local</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <select
+                      className="form-input"
+                      value={formPhysicalLocation}
+                      disabled={isReadOnlyForForm('physicalLocation')}
+                      onChange={(e) => setFormPhysicalLocation(e.target.value)}
+                      style={{ flex: 1 }}
+                    >
+                      {/* Garantir que o valor atual apareça caso seja um texto personalizado legado */}
+                      {formPhysicalLocation && !factoryLocations.some(l => l.name === formPhysicalLocation) && (
+                        <option value={formPhysicalLocation}>{formPhysicalLocation} (Personalizado)</option>
+                      )}
+                      
+                      {factoryLocations
+                        .filter(l => l.status === 'ATIVO' || l.name === formPhysicalLocation)
+                        .map(loc => (
+                          <option key={loc.id} value={loc.name}>
+                            {loc.name}
+                          </option>
+                        ))
+                      }
+
+                      {factoryLocations.length === 0 && (
+                        <>
+                          <option value="Salão">Salão</option>
+                          <option value="Pátio">Pátio</option>
+                          <option value="Máquina Flexo 1">Máquina Flexo 1</option>
+                          <option value="Máquina Coladeira 2">Máquina Coladeira 2</option>
+                          <option value="Prateleira A1">Prateleira A1</option>
+                          <option value="Depósito de Materiais">Depósito de Materiais</option>
+                        </>
+                      )}
+                    </select>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleOpenLocationCrudModal}
+                      disabled={isReadOnlyForForm('physicalLocation')}
+                      title="Gerenciar / Cadastrar Localizações Físicas na Fábrica"
+                      style={{
+                        padding: '0.6rem 0.85rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 'var(--radius-md, 8px)',
+                        fontWeight: 700,
+                        color: 'var(--primary)',
+                        borderColor: 'var(--primary-light, #3b82f6)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.08)'
+                      }}
+                    >
+                      <Plus size={18} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Cortesia ou Falta */}
@@ -6518,6 +7631,63 @@ export default function PedidosPage() {
                     disabled={isReadOnlyForForm('overShortQuantity')}
                     onChange={(e) => setFormOverShortQuantity(Number(e.target.value))}
                   />
+                </div>
+
+                {/* ESPECIFICAÇÕES DO CARD (LEITURA / DETALHES DE PRODUÇÃO) */}
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label" style={{ fontWeight: 700, color: 'var(--primary)' }}>Especificações do Item / Leitura de Pedido</label>
+                  <div className="grid-responsive-3" style={{ gap: '0.65rem', marginTop: '0.35rem' }}>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Embalagem (Especificação)</span>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        placeholder="Ex: 10 pacotes / 10 caixas"
+                        value={formEmbalagem}
+                        onChange={(e) => setFormEmbalagem(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Prazo de Entrega</span>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        placeholder="Ex: 15 dias"
+                        value={formPrazo}
+                        onChange={(e) => setFormPrazo(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Frete / Envio (Obs)</span>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        placeholder="Ex: Transportadora / Correio / Retira"
+                        value={formFreteInfo}
+                        onChange={(e) => setFormFreteInfo(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Meio de Pagamento</span>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        placeholder="Ex: Boleto / PIX / Cartão"
+                        value={formMeioPag}
+                        onChange={(e) => setFormMeioPag(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Forma de Pagamento</span>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        placeholder="Ex: Faturado / Parcelado / À vista"
+                        value={formFormaPag}
+                        onChange={(e) => setFormFormaPag(e.target.value)}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -6711,30 +7881,6 @@ export default function PedidosPage() {
                     )}
                   </div>
                 )}
-              </div>
-
-              {/* Observações Públicas */}
-              <div className="form-group" style={{ marginTop: '1rem' }}>
-                <label className="form-label">Observações do Pedido (Cliente/Layout)</label>
-                <textarea 
-                  className="form-textarea" 
-                  placeholder="Instruções de personalização, acabamento ou dados da transportadora..."
-                  value={formNotes}
-                  disabled={isReadOnlyForForm('notes')}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                />
-              </div>
-
-              {/* Observações Internas */}
-              <div className="form-group" style={{ marginTop: '1rem', borderLeft: '3px solid var(--primary)', paddingLeft: '0.75rem' }}>
-                <label className="form-label" style={{ color: 'var(--primary)', fontWeight: 600 }}>Anotações Internas (Uso Exclusivo Samppel)</label>
-                <textarea 
-                  className="form-textarea" 
-                  placeholder="Detalhamento operacional interno, histórico de pagamentos, logs da fábrica, etc..."
-                  value={formInternalNotes}
-                  disabled={isReadOnlyForForm('internalNotes')}
-                  onChange={(e) => setFormInternalNotes(e.target.value)}
-                />
               </div>
 
               <footer style={{
@@ -7294,6 +8440,9 @@ export default function PedidosPage() {
                       { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
                       { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—' },
                       { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
+                      { label: 'Nota Fiscal (NF-e)', value: order.invoice_number || '—' },
+                      { label: 'Número da Coleta', value: order.pickup_number || '—' },
+                      { label: 'Cotação de Frete', value: order.freight_quotation || '—' },
                     ].map(({ label, value }) => (
                       <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
                         <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
@@ -7355,22 +8504,32 @@ export default function PedidosPage() {
                     Especificações deste Item / Card
                   </div>
                   <div className="grid-responsive-3" style={{ gap: '0.65rem' }}>
-                    {[
-                      { label: 'Tiragem', value: (detailItem.print_run || 0).toLocaleString('pt-BR') + ' un' },
-                      { label: 'Caixas', value: `${detailItem.boxes_count || 0} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` },
-                      { label: 'Medida', value: detailItem.measure || '—' },
-                      { label: 'Setor', value: detailItem.production_sector || '—' },
-                      { label: 'Máquina Vinculada', value: machineName },
-                      { label: 'Localização', value: detailItem.physical_location || 'Salão' },
-                      { label: 'Sobra/Falta Produção', value: detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : detailItem.over_short_quantity < 0 ? `${detailItem.over_short_quantity}` : '—' },
-                      { label: 'Falta na Entrega', value: detailItem.shortage_quantity ? `${detailItem.shortage_quantity} un` : '—' },
-                      { label: 'Cortesia/Brinde', value: detailItem.courtesy_quantity ? `${detailItem.courtesy_quantity} un` : '—' },
-                    ].map(({ label, value }) => (
-                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 600 }}>{value}</span>
-                      </div>
-                    ))}
+                    {(() => {
+                      const specDetails = extractOrderDetails(detailItem.notes || order.notes);
+                      const packagingText = specDetails?.embalagem || (detailItem.boxes_count ? `${detailItem.boxes_count} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null);
+
+                      const specsList = [
+                        { label: 'Tiragem', value: detailItem.print_run ? detailItem.print_run.toLocaleString('pt-BR') + ' un' : '—' },
+                        { label: 'Embalagem', value: capitalizeText(packagingText) },
+                        { label: 'Medida', value: capitalizeText(getItemRealMeasure(detailItem)) },
+                        { label: 'Prazo de Entrega', value: capitalizeText(specDetails?.prazo) },
+                        { label: 'Frete', value: capitalizeText(specDetails?.freteInfo) },
+                        { label: 'Meio de Pagamento', value: capitalizeText(specDetails?.meioPag) },
+                        { label: 'Forma de Pagamento', value: capitalizeText(specDetails?.formaPag) },
+                        { label: 'Máquina Vinculada', value: capitalizeText(machineName) },
+                        { label: 'Localização', value: capitalizeText(detailItem.physical_location) },
+                        { label: 'Sobra/Falta Produção', value: detailItem.over_short_quantity ? (detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : `${detailItem.over_short_quantity}`) : '—' },
+                        { label: 'Falta na Entrega', value: detailItem.shortage_quantity ? `${detailItem.shortage_quantity} un` : '—' },
+                        { label: 'Cortesia/Brinde', value: detailItem.courtesy_quantity ? `${detailItem.courtesy_quantity} un` : '—' },
+                      ];
+
+                      return specsList.map(({ label, value }) => (
+                        <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>
+                          <span style={{ fontSize: '0.82rem', color: 'var(--text)', fontWeight: 600 }}>{value}</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </section>
 
@@ -7711,35 +8870,6 @@ export default function PedidosPage() {
                   </div>
                 </section>
 
-                {/* Card: Observações e Anotações */}
-                {(order.notes || order.internal_notes) && (
-                  <section style={{
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md, 10px)',
-                    padding: '1rem 1.15rem',
-                    backgroundColor: 'var(--surface)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.75rem'
-                  }}>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#eab308', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ width: '4px', height: '14px', backgroundColor: '#eab308', borderRadius: '2px', display: 'inline-block' }} />
-                      Observações & Anotações
-                    </div>
-                    {order.notes && (
-                      <div>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Obs. do Pedido / Pagamento</span>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap', margin: 0 }}>{order.notes}</p>
-                      </div>
-                    )}
-                    {order.internal_notes && (
-                      <div style={{ borderLeft: '3px solid var(--primary)', paddingLeft: '0.6rem' }}>
-                        <span style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>Anotações Internas</span>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text)', marginTop: '2px', whiteSpace: 'pre-wrap', margin: 0 }}>{order.internal_notes}</p>
-                      </div>
-                    )}
-                  </section>
-                )}
 
               </div>
 
@@ -8300,138 +9430,503 @@ export default function PedidosPage() {
         </div>
       )}
 
-      {/* MODAL DIDÁTICO: ALERTA DE PEDIDO BLOQUEADO (AGUARDANDO PAGAMENTO / SINAL) */}
-      {isBlockedPaymentModalOpen && blockedPaymentItem && (
+      {/* ═══ MODAL DE ESTOQUE INSUFICIENTE ═══ */}
+      {isInsufficientStockModalOpen && insufficientStockData && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
-          backdropFilter: 'blur(4px)'
+          backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, padding: '1rem', animation: 'fadeIn 0.2s ease-out'
         }}>
           <div style={{
-            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
-            maxWidth: '540px', width: '90%', overflow: 'hidden',
-            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
-            animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
+            width: '100%', maxWidth: '550px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+            border: '1px solid var(--border)', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column'
           }}>
-            {/* Cabeçalho de Alerta Destacado */}
             <div style={{
-              backgroundColor: '#ef4444',
-              color: '#ffffff',
-              padding: '1.25rem 1.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem'
+              padding: '1.5rem', borderBottom: '1px solid var(--border)',
+              backgroundColor: 'rgba(239, 68, 68, 0.05)', display: 'flex', alignItems: 'center', gap: '0.75rem'
             }}>
               <div style={{
-                backgroundColor: 'rgba(255,255,255,0.2)',
-                borderRadius: '50%',
-                padding: '0.5rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
+                width: '40px', height: '40px', borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
               }}>
-
-                <AlertTriangle size={24} color="#ffffff" />
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#ffffff' }}>
-                  Atenção: Este pedido está Bloqueado
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--text)' }}>
+                  Atenção: Estoque Insuficiente
                 </h3>
-                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', opacity: 0.9 }}>
-                  Aguardando Pagamento / Sinal Financeiro
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Alguns produtos não possuem saldo suficiente para este avanço.
                 </p>
               </div>
             </div>
-
-            {/* Conteúdo Explicativo Didático */}
-            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
+              <p style={{ fontSize: '0.9rem', lineHeight: 1.5, margin: 0 }}>
+                Os itens abaixo não possuem estoque suficiente. <strong>Selecione os que você deseja forçar o avanço</strong> (o estoque ficará negativo). Os que não forem selecionados <strong>permanecerão em Pedidos</strong>.
+              </p>
               
-              {/* Informações Resumidas do Card */}
-              <div style={{
-                backgroundColor: 'var(--surface-subtle, #f8fafc)',
-                border: '1px solid var(--border, #e2e8f0)',
-                borderRadius: '10px',
-                padding: '1rem'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text)' }}>
-                    {blockedPaymentItem.friendly_id || blockedPaymentItem.order?.pv_number || 'Pedido'}
-                  </span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)' }}>
-                    {blockedPaymentItem.name || blockedPaymentItem.art_name}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
-                  Cliente: <strong>{blockedPaymentItem.order?.customer?.name || 'Cliente não informado'}</strong>
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {insufficientStockData.insufficientItems.map((stk: any) => {
+                  const isSelected = selectedInsufficientItemIds.includes(stk.item.id);
+                  return (
+                    <label key={stk.item.id} style={{
+                      display: 'flex', alignItems: 'center', gap: '0.75rem',
+                      padding: '0.75rem', border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                      backgroundColor: isSelected ? 'rgba(var(--primary-rgb), 0.05)' : 'var(--bg-body)',
+                      transition: 'all 0.2s'
+                    }}>
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedInsufficientItemIds(prev => [...prev, stk.item.id]);
+                          } else {
+                            setSelectedInsufficientItemIds(prev => prev.filter(id => id !== stk.item.id));
+                          }
+                        }}
+                        style={{ width: '1.1rem', height: '1.1rem', cursor: 'pointer' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>
+                          {stk.productName}
+                        </span>
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.25rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Necessário: <strong style={{ color: '#ef4444' }}>{stk.qtyRequired}</strong>
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Em Estoque: <strong>{stk.currentStock}</strong>
+                          </span>
+                          {isSelected && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              Ficará: <strong style={{ color: '#ef4444' }}>{stk.currentStock - stk.qtyRequired}</strong>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
+            </div>
 
-              {/* Explicação Didática sobre Riscos */}
-              <div style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.06)',
-                borderLeft: '4px solid #ef4444',
-                borderRadius: '6px',
-                padding: '0.85rem 1rem',
-                fontSize: '0.85rem',
-                color: 'var(--text)',
-                lineHeight: '1.5'
-              }}>
-                <strong style={{ color: '#dc2626', display: 'block', marginBottom: '0.3rem' }}>
-                  Por que o pedido está bloqueado?
-                </strong>
-                Este pedido ainda não possui a confirmação da data do primeiro pagamento ou sinal financeiro no Conta Azul. Iniciar a produção sem o recebimento do sinal pode gerar custos operacionais sem garantia de recebimento.
-              </div>
-
-              <div style={{
-                textAlign: 'center',
-                padding: '0.5rem 0',
-                fontWeight: 700,
-                fontSize: '0.95rem',
-                color: 'var(--text)'
-              }}>
-                Deseja colocar este pedido em produção mesmo assim?
-              </div>
-
-              {/* Botões Didáticos de Ação */}
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleCancelBlockedPaymentMove}
-                  style={{ padding: '0.65rem 1.15rem', fontSize: '0.85rem', fontWeight: 600, flex: 1 }}
-                >
-                  Não, Manter Bloqueado
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={handleConfirmBlockedPaymentMove}
-                  style={{
-                    backgroundColor: '#ef4444',
-                    color: '#ffffff',
-                    border: 'none',
-                    padding: '0.65rem 1.15rem',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    borderRadius: 'var(--radius-md, 8px)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.4rem',
-                    flex: 1
-                  }}
-                >
-                  <span>Sim, Colocar em Produção</span>
-                </button>
-
-              </div>
-
+            <div style={{ padding: '1.25rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '0.75rem', backgroundColor: 'var(--bg-body)' }}>
+              <button 
+                onClick={() => {
+                  const selectedItems = insufficientStockData.insufficientItems
+                    .filter((stk: any) => selectedInsufficientItemIds.includes(stk.item.id))
+                    .map((stk: any) => stk.item);
+                  handleConfirmInsufficientStockMove(selectedItems);
+                }}
+                className="btn btn-primary"
+                style={{ flex: 1, height: '38px', fontSize: '0.85rem', fontWeight: 600, color: '#fff', backgroundColor: 'var(--primary)', border: 'none' }}
+              >
+                Confirmar Avanço
+              </button>
+              <button 
+                onClick={handleCancelInsufficientStockMove}
+                className="btn btn-secondary"
+                style={{ flex: 1, height: '38px', fontSize: '0.85rem', fontWeight: 600, border: '1px solid var(--border)', backgroundColor: 'transparent' }}
+              >
+                Cancelar Movimentação
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ═══ MODAL DE CONFIRMAÇÃO DE MOVIMENTAÇÃO DE ITENS IRMÃOS DE UM MESMO PEDIDO ═══ */}
+      {isSiblingMoveModalOpen && siblingMoveItem && (() => {
+        const targetStg = stages.find(s => s.id === siblingMoveTargetStageId);
+        const targetStageName = targetStg?.name || 'etapa selecionada';
+        const parentOrd = orders.find(o => o.id === siblingMoveItem.order_id) || siblingMoveItem.order;
+
+        return (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+            backdropFilter: 'blur(4px)', padding: '1rem'
+          }}>
+            <div style={{
+              backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
+              maxWidth: '560px', width: '100%', overflow: 'hidden',
+              border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+              animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+            }}>
+              {/* Header */}
+              <div style={{
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                padding: '1.25rem 1.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem'
+              }}>
+                <div style={{
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  borderRadius: '50%',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Layers size={22} color="#ffffff" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#ffffff' }}>
+                    Mover Outros Itens deste Pedido?
+                  </h3>
+                  <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', opacity: 0.9 }}>
+                    Este pedido possui múltiplos cards vinculados ({siblingMoveList.length + 1} no total).
+                  </p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                
+                {/* Resumo do Pedido */}
+                <div style={{
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '10px',
+                  padding: '0.85rem 1rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--primary)' }}>
+                      PV: {parentOrd?.pv_number || 'Pedido'}
+                    </span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                      Etapa Destino: <strong style={{ color: 'var(--text)' }}>{targetStageName}</strong>
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    Cliente: <strong>{parentOrd?.customer?.name || 'Cliente não informado'}</strong>
+                  </div>
+                </div>
+
+                {/* Pergunta Explicativa */}
+                <div style={{ fontSize: '0.86rem', color: 'var(--text)', lineHeight: 1.5 }}>
+                  Você está movendo o item <strong>{siblingMoveItem.name || siblingMoveItem.art_name}</strong>. Marque os outros itens deste pedido que também devem ser movidos para a etapa <strong>{targetStageName}</strong>:
+                </div>
+
+                {/* Lista dos Itens do Pedido com Checkboxes */}
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: '0.5rem',
+                  maxHeight: '220px', overflowY: 'auto',
+                  border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem'
+                }}>
+                  {/* Item Atual (Fixo e Checado) */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.6rem',
+                    padding: '0.45rem 0.65rem', borderRadius: '6px',
+                    backgroundColor: 'rgba(var(--primary-rgb), 0.08)',
+                    border: '1px solid rgba(var(--primary-rgb), 0.2)'
+                  }}>
+                    <input type="checkbox" checked disabled style={{ accentColor: 'var(--primary)' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--primary)' }}>
+                        {siblingMoveItem.name || siblingMoveItem.art_name} (Item Principal)
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        Sendo movido agora para {targetStageName}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Outros Itens Irmãos */}
+                  {siblingMoveList.map((sib: any) => {
+                    const currentStg = stages.find(s => s.id === sib.stage_id);
+                    const isChecked = siblingMoveSelectedIds.includes(sib.id);
+
+                    return (
+                      <label
+                        key={sib.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          padding: '0.45rem 0.65rem', borderRadius: '6px',
+                          border: `1px solid ${isChecked ? 'var(--primary)' : 'var(--border)'}`,
+                          backgroundColor: isChecked ? 'var(--surface)' : 'transparent',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSiblingMoveSelectedIds([...siblingMoveSelectedIds, sib.id]);
+                            } else {
+                              setSiblingMoveSelectedIds(siblingMoveSelectedIds.filter(id => id !== sib.id));
+                            }
+                          }}
+                          style={{ accentColor: 'var(--primary)' }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)' }}>
+                            {sib.name || sib.art_name}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            Fase atual: {currentStg?.name || 'Desconhecida'}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {/* Botões de Ação */}
+                <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleCancelSiblingMove}
+                    style={{ padding: '0.55rem 0.95rem', fontSize: '0.8rem', fontWeight: 600 }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleConfirmSiblingMoveAll(false)}
+                    style={{ padding: '0.55rem 0.95rem', fontSize: '0.8rem', fontWeight: 600 }}
+                  >
+                    Mover Apenas Este Item
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleConfirmSiblingMoveAll(true)}
+                    disabled={siblingMoveSelectedIds.length === 0}
+                    style={{ padding: '0.55rem 1.1rem', fontSize: '0.8rem', fontWeight: 700 }}
+                  >
+                    Mover Selecionados ({siblingMoveSelectedIds.length + 1})
+                  </button>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL DIDÁTICO: ALERTA DE PEDIDO BLOQUEADO (AGUARDANDO PAGAMENTO / SINAL) */}
+      {isBlockedPaymentModalOpen && blockedPaymentItem && (() => {
+        const targetStg = stages.find(s => s.id === blockedPaymentTargetStageId);
+        const targetStageName = targetStg?.name || 'etapa selecionada';
+        const isParentPaid = !!blockedPaymentItem.order?.first_payment_date;
+        const isOverdue = hasOverdueInstallments(blockedPaymentItem.order_id) || checkIsDelayed(blockedPaymentItem, stages);
+
+        return (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+            backdropFilter: 'blur(4px)'
+          }}>
+            <div style={{
+              backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
+              maxWidth: '560px', width: '90%', overflow: 'hidden',
+              border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+              animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+            }}>
+              {/* Cabeçalho de Alerta Destacado */}
+              <div style={{
+                backgroundColor: '#ef4444',
+                color: '#ffffff',
+                padding: '1.25rem 1.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem'
+              }}>
+                <div style={{
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  borderRadius: '50%',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <AlertTriangle size={24} color="#ffffff" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#ffffff' }}>
+                    Confirmação Necessária: Pedido Bloqueado
+                  </h3>
+                  <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', opacity: 0.9 }}>
+                    {!isParentPaid && isOverdue
+                      ? 'Aguardando Pagamento / Sinal Financeiro E Possui Pendência de Atraso'
+                      : !isParentPaid
+                      ? 'Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal)'
+                      : 'Pedido com Parcelas ou Prazo em Atraso Financeiro'
+                    }
+                  </p>
+                </div>
+              </div>
+
+              {/* Conteúdo Explicativo Didático */}
+              <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                
+                {/* Informações Resumidas do Card */}
+                <div style={{
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '10px',
+                  padding: '1rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text)' }}>
+                      PV / OP: {blockedPaymentItem.friendly_id || blockedPaymentItem.order?.pv_number || 'Pedido'}
+                    </span>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--primary)' }}>
+                      {blockedPaymentItem.name || blockedPaymentItem.art_name}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.83rem', color: 'var(--text-muted)' }}>
+                    Cliente: <strong>{blockedPaymentItem.order?.customer?.name || 'Cliente não informado'}</strong>
+                  </div>
+                </div>
+
+                {/* Explicação Didática sobre Riscos */}
+                <div style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                  borderLeft: '4px solid #ef4444',
+                  borderRadius: '8px',
+                  padding: '0.95rem 1.15rem',
+                  fontSize: '0.86rem',
+                  color: 'var(--text)',
+                  lineHeight: '1.55'
+                }}>
+                  <strong style={{ color: '#dc2626', display: 'block', marginBottom: '0.35rem', fontSize: '0.9rem' }}>
+                    Motivo do Alerta de Confirmação:
+                  </strong>
+                  {!isParentPaid && isOverdue
+                    ? 'Este pedido consta como BLOQUEADO (Aguardando Pagamento/Sinal) E também possui parcelas em atraso no Conta Azul ou prazo de fabricação estourado.'
+                    : !isParentPaid
+                    ? 'Este pedido está registrado como BLOQUEADO (Aguardando Pagamento/Sinal). A confirmação do primeiro pagamento ou sinal financeiro ainda NÃO foi lançada no Conta Azul. Movimentar este pedido sem a devida liberação do financeiro pode acarretar custos operacionais e de matéria-prima sem garantia de pagamento.'
+                    : 'Este pedido possui parcelas em atraso financeiro no Conta Azul ou ultrapassou o prazo limite estimado para produção.'
+                  }
+                </div>
+
+                {/* Botão de Re-sincronização no Conta Azul para Checagem Rápida */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: 'rgba(var(--primary-rgb), 0.05)',
+                  border: '1px solid rgba(var(--primary-rgb), 0.2)',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1rem',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap'
+                }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text)', flex: 1 }}>
+                    <strong>Deseja re-verificar no Conta Azul?</strong>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Caso o sinal já tenha sido pago recentemente no ERP, sincronize para checar a liberação.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={importing}
+                    onClick={() => handleSyncSingleOrder(blockedPaymentItem.order_id || blockedPaymentItem.order?.id)}
+                    style={{
+                      height: '32px',
+                      padding: '0.3rem 0.8rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      whiteSpace: 'nowrap',
+                      borderRadius: '6px'
+                    }}
+                  >
+                    <RefreshCw size={14} className={importing ? 'spinner' : ''} />
+                    <span>{importing ? 'Sincronizando...' : 'Sincronizar Pedido'}</span>
+                  </button>
+                </div>
+
+                {/* Alerta de resultado da sincronização quando o status permanece mantido */}
+                {blockedSyncFeedback && (
+                  <div style={{
+                    backgroundColor: blockedSyncFeedback.type === 'warning' ? 'rgba(234, 179, 8, 0.12)' : 'rgba(34, 197, 94, 0.12)',
+                    border: `1px solid ${blockedSyncFeedback.type === 'warning' ? 'rgba(234, 179, 8, 0.4)' : 'rgba(34, 197, 94, 0.4)'}`,
+                    color: blockedSyncFeedback.type === 'warning' ? '#b45309' : '#15803d',
+                    borderRadius: '8px',
+                    padding: '0.85rem 1rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    lineHeight: '1.45',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    animation: 'fadeIn 0.2s ease-in-out'
+                  }}>
+                    <AlertCircle size={18} style={{ flexShrink: 0 }} />
+                    <span>{blockedSyncFeedback.message}</span>
+                  </div>
+                )}
+
+                <div style={{
+                  textAlign: 'center',
+                  padding: '0.2rem 0',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  color: 'var(--text)'
+                }}>
+                  Deseja confirmar a movimentação deste pedido para <u>{targetStageName}</u> mesmo assim?
+                </div>
+
+                {/* Botões Didáticos de Ação */}
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleCancelBlockedPaymentMove}
+                    style={{ padding: '0.65rem 1.15rem', fontSize: '0.85rem', fontWeight: 600, flex: 1 }}
+                  >
+                    Manter Bloqueado
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={handleConfirmBlockedPaymentMove}
+                    style={{
+                      backgroundColor: '#ef4444',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '0.65rem 1.15rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      borderRadius: 'var(--radius-md, 8px)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.4rem',
+                      flex: 1
+                    }}
+                  >
+                    <span>Confirmar e Mover Pedido</span>
+                  </button>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MODAL DE MOVER PEDIDO DE ETAPA (MOBILE / MANUAL) */}
       {isMoveStageModalOpen && itemToMoveStage && (
@@ -8556,12 +10051,156 @@ export default function PedidosPage() {
         </div>
       )}
 
-      {/* COMPONENTE DE NOTIFICAÇÃO TOAST FLUTUANTE */}
-      {toastNotification && (
-        <div className="toast-container-floating">
-          <div className="toast-card-item">
-            <CheckCircle2 size={18} color="#10b981" />
-            <span>{toastNotification.message}</span>
+      {/* MODAL CRUD: GERENCIAR LOCALIZAÇÕES FÍSICAS NA FÁBRICA */}
+      {isLocationCrudModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
+            maxWidth: '560px', width: '92%', overflow: 'hidden',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+          }}>
+            {/* Cabeçalho */}
+            <div style={{
+              padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              backgroundColor: 'var(--surface-subtle, #f8fafc)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <MapPin size={22} style={{ color: 'var(--primary)' }} />
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+                  Gerenciar Localizações Físicas na Fábrica
+                </h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsLocationCrudModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form de Criação/Edição */}
+            <form onSubmit={handleSaveLocation} style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>
+                {editingLocation ? `Editar Localização: "${editingLocation.name}"` : '➕ Nova Localização Física'}
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ flex: 2, minWidth: '180px' }}>
+                  <label className="form-label">Nome do Local / Setor / Prateleira *</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="Ex: Prateleira B2, Setor de Tintas, Salão..."
+                    required
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                  />
+                </div>
+                <div className="form-group" style={{ flex: 1, minWidth: '120px' }}>
+                  <label className="form-label">Status</label>
+                  <select 
+                    className="form-input" 
+                    value={locationStatus}
+                    onChange={(e) => setLocationStatus(e.target.value as any)}
+                  >
+                    <option value="ATIVO">ATIVO</option>
+                    <option value="INATIVO">INATIVO</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                {editingLocation && (
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary"
+                    onClick={() => { setEditingLocation(null); setLocationName(''); setLocationStatus('ATIVO'); }}
+                  >
+                    Cancelar Edição
+                  </button>
+                )}
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={submittingLocation}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  {submittingLocation ? <Loader2 size={16} className="spinner" /> : (editingLocation ? <Edit3 size={16} /> : <Plus size={16} />)}
+                  <span>{editingLocation ? 'Salvar Alteração' : 'Adicionar Local'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Lista / Tabela de Locais Existentes */}
+            <div style={{ padding: '1.25rem 1.5rem', maxHeight: '260px', overflowY: 'auto' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                Locais Cadastrados ({factoryLocations.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {factoryLocations.map((loc) => (
+                  <div 
+                    key={loc.id} 
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '0.65rem 0.85rem', borderRadius: '8px',
+                      backgroundColor: 'var(--surface-subtle, #f8fafc)', border: '1px solid var(--border)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <MapPin size={16} style={{ color: loc.status === 'ATIVO' ? 'var(--primary)' : 'var(--text-muted)' }} />
+                      <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text)' }}>{loc.name}</span>
+                      <span className={`badge ${loc.status === 'ATIVO' ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '0.7rem' }}>
+                        {loc.status}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        onClick={() => handleEditLocationClick(loc)}
+                        style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                        title="Editar localização"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button 
+                        type="button" 
+                        className="btn btn-danger" 
+                        onClick={() => handleDeleteLocationClick(loc.id, loc.name)}
+                        style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                        title="Excluir localização"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {factoryLocations.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    Nenhuma localização física cadastrada ainda.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Rodapé */}
+            <div style={{ padding: '1rem 1.5rem', backgroundColor: 'var(--surface-subtle)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button 
+                type="button" 
+                className="btn btn-primary"
+                onClick={() => setIsLocationCrudModalOpen(false)}
+              >
+                Concluído
+              </button>
+            </div>
           </div>
         </div>
       )}

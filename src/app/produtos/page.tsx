@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getProducts, createProduct, updateProduct, adjustStock } from '@/services/supabase';
+import { getProducts, createProduct, updateProduct, adjustStock, getStockTransactions } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History } from 'lucide-react';
 
 export default function ProdutosPage() {
   const { user } = useAuth();
@@ -18,6 +18,25 @@ export default function ProdutosPage() {
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'create' | 'edit'>('create');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+
+  // Stock History Modal
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [stockHistory, setStockHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const handleOpenHistory = async (product: any) => {
+    setSelectedProduct(product);
+    setIsHistoryModalOpen(true);
+    setHistoryLoading(true);
+    try {
+      const { data } = await getStockTransactions(product.id, user?.tenant_id);
+      setStockHistory(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   // Form Fields
   const [formName, setFormName] = useState('');
@@ -395,6 +414,23 @@ export default function ProdutosPage() {
                           <span>Estoque</span>
                         </button>
 
+                        <button
+                          onClick={() => handleOpenHistory(product)}
+                          title="Histórico de movimentações"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                            padding: '0.375rem 0.75rem', background: 'transparent',
+                            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                            fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                            cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                        >
+                          <History size={12} />
+                          <span>Histórico</span>
+                        </button>
+
                         {canEditDetails && (
                           <button
                             onClick={() => handleOpenEdit(product)}
@@ -723,6 +759,68 @@ export default function ProdutosPage() {
                 height: '100%',
                 transition: 'width 0.3s ease'
               }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE HISTÓRICO DE ESTOQUE */}
+      {isHistoryModalOpen && selectedProduct && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 10000,
+          padding: '1rem'
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '700px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0 }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <History size={18} />
+                  Extrato de Movimentações
+                </h3>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Produto: {selectedProduct.name}
+                </p>
+              </div>
+              <button onClick={() => setIsHistoryModalOpen(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                ✖
+              </button>
+            </div>
+            
+            <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1 }}>
+              {historyLoading ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Carregando extrato...</div>
+              ) : stockHistory.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Nenhuma movimentação registrada para este produto.</div>
+              ) : (
+                <table className="table" style={{ width: '100%', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Tipo</th>
+                      <th>Qtd</th>
+                      <th>Motivo / Descrição</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockHistory.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{new Date(tx.created_at).toLocaleString('pt-BR')}</td>
+                        <td>
+                          <span className={`badge ${tx.type === 'ENTRADA' ? 'badge-success' : tx.type === 'SAIDA' ? 'badge-danger' : tx.type === 'PEDIDO' ? 'badge-warning' : 'badge-primary'}`}>
+                            {tx.type}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 'bold', color: tx.quantity > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {tx.quantity > 0 ? `+${tx.quantity}` : tx.quantity}
+                        </td>
+                        <td style={{ maxWidth: '300px', whiteSpace: 'normal' }}>{tx.description || '---'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>

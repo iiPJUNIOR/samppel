@@ -36,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const isLoadingRef = useRef(true);
+  const isFetchingProfileRef = useRef(false);
 
   // Monitora o estado de autenticacao real do Supabase
   useEffect(() => {
@@ -45,26 +46,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Timeout de segurança: se ficar em loading por mais de 8s, desbloqueia
+    // Timeout de segurança rápido (3.5s): se ficar travado por latência de rede, força o desbloqueio
     const safetyTimer = setTimeout(() => {
       if (isLoadingRef.current) {
-        console.warn('[Auth] Timeout de segurança atingido — forçando saída do loading.');
+        console.warn('[Auth] Timeout de segurança atingido (3.5s) — liberando carregamento da interface.');
         setIsLoading(false);
         isLoadingRef.current = false;
       }
-    }, 8000);
+    }, 3500);
 
-    // Busca sessao ativa inicial
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      } else {
-        setIsLoading(false);
-        isLoadingRef.current = false;
-      }
-    });
-
-    // Registra listener para mudancas de autenticacao
+    // Registra listener para mudanças de autenticação (dispara INITIAL_SESSION automaticamente)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         await fetchProfile(session.user.id);
@@ -81,25 +72,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Page Visibility API: reconecta quando a aba volta ao foco (sleep do PC, celular desbloqueado)
+  // Page Visibility API: reconecta quando a aba volta ao foco sem forçar reloads infinitos
   useEffect(() => {
     if (!supabase) return;
 
     const handleVisibilityChange = async () => {
       if (document.visibilityState !== 'visible') return;
 
-      // Se o app ainda estava em loading quando a aba voltou → recarregar
-      if (isLoadingRef.current) {
-        console.warn('[Auth] Aba voltou ao foco durante loading — recarregando.');
-        window.location.reload();
-        return;
-      }
-
-      // App já estava carregado: reverificar sessão silenciosamente
+      // App já carregado: reverificar sessão silenciosamente no background
       try {
         const { data: { session } } = await supabase!.auth.getSession();
-        if (!session) {
-          // Sessão expirou enquanto estava em background → desloga
+        if (!session && user) {
           setUser(null);
         }
       } catch {
@@ -111,25 +94,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [user]);
 
-  // Busca as informacoes complementares do perfil no banco de dados
+  // Busca as informacoes complementares do perfil no banco de dados com proteção de concorrência e timeout
   const fetchProfile = async (userId: string) => {
+    if (isFetchingProfileRef.current) return;
+    isFetchingProfileRef.current = true;
+
     try {
-      const { data, error } = await supabase!
+      // Query do perfil com timeout de corrida de 3 segundos
+      const profilePromise = supabase!
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
 
-      if (error) throw error;
+      const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error('Timeout profile fetch') }), 3000)
+      );
+
+      const { data, error } = await Promise.race([profilePromise, timeoutPromise]);
+
+      if (error) {
+        console.warn('Alerta/Timeout ao buscar perfil no Supabase:', error.message);
+      }
       
       if (data) {
         const profile = {
           ...data,
           actual_role: data.role
         } as UserProfile;
-        // Se for admin, verifica se ha um papel temporario salvo na sessao
+
+        // Se for admin, verifica se há um papel temporário salvo na sessão
         if (data.role === 'Administrador' && typeof window !== 'undefined') {
           const savedRole = sessionStorage.getItem('active_role') as UserRole;
           if (savedRole) {
@@ -137,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         setUser(profile);
+
         if (profile.force_password_change && typeof window !== 'undefined') {
           const currentPath = window.location.pathname;
           if (currentPath !== '/redefinir-senha' && currentPath !== '/operador-perfil') {
@@ -144,14 +141,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } else {
-        setUser(null);
+        // Se a busca falhou ou o perfil não existe, cria um objeto mínimo baseado na sessão para evitar travamentos
+        const { data: sessionData } = await supabase!.auth.getSession();
+        const currentSessionUser = sessionData?.session?.user;
+        if (currentSessionUser) {
+          setUser({
+            id: currentSessionUser.id,
+            tenant_id: DEFAULT_TENANT_ID,
+            full_name: currentSessionUser.user_metadata?.full_name || currentSessionUser.email?.split('@')[0] || 'Usuário',
+            role: (currentSessionUser.user_metadata?.role as UserRole) || 'Produção',
+            actual_role: (currentSessionUser.user_metadata?.role as UserRole) || 'Produção',
+            email: currentSessionUser.email || ''
+          });
+        } else {
+          setUser(null);
+        }
       }
     } catch (err) {
-      console.error('Erro ao carregar perfil do usuario:', err);
+      console.error('Erro ao carregar perfil do usuário:', err);
       setUser(null);
     } finally {
       setIsLoading(false);
       isLoadingRef.current = false;
+      isFetchingProfileRef.current = false;
     }
   };
 

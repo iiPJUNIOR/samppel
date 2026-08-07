@@ -223,12 +223,12 @@ export async function updateProduct(id: string, updates: any) {
   return { data, error };
 }
 
-export async function adjustStock(productId: string, quantity: number, type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', description: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', operatorId?: string | null) {
+export async function adjustStock(productId: string, quantity: number, type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', description: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', operatorId?: string | null, allowNegative = true) {
   if (isMockMode) {
     mockProducts = mockProducts.map(p => {
       if (p.id === productId) {
         const newQty = p.stock_quantity + quantity;
-        return { ...p, stock_quantity: newQty < 0 ? 0 : newQty };
+        return { ...p, stock_quantity: !allowNegative && newQty < 0 ? 0 : newQty };
       }
       return p;
     });
@@ -237,17 +237,45 @@ export async function adjustStock(productId: string, quantity: number, type: 'EN
   const { data: prod } = await getDbClient().from('products').select('stock_quantity').eq('id', productId).single();
   if (prod) {
     const newQty = (prod.stock_quantity || 0) + quantity;
-    await getDbClient().from('products').update({ stock_quantity: newQty < 0 ? 0 : newQty }).eq('id', productId);
+    const finalQty = !allowNegative && newQty < 0 ? 0 : newQty;
+    
+    // Check if operator_id column exists by omitting it first if it fails, but let's just omit it since it's not in schema.sql
+    await getDbClient().from('products').update({ stock_quantity: finalQty }).eq('id', productId);
+    
+    // We omit operator_id because it was not found in schema.sql for stock_transactions
     await getDbClient().from('stock_transactions').insert([{
       tenant_id: tenantId,
       product_id: productId,
       quantity,
       type,
-      description,
-      operator_id: operatorId || null
+      description
     }]);
   }
   return { error: null };
+}
+
+export async function getStockTransactions(productId: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) return { data: [], error: null };
+  const { data, error } = await getDbClient()
+    .from('stock_transactions')
+    .select('*')
+    .eq('product_id', productId)
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false });
+  return { data, error };
+}
+
+export async function checkProductStock(productId: string): Promise<number> {
+  if (isMockMode) {
+    const p = mockProducts.find(p => p.id === productId);
+    return p ? (p.stock_quantity || 0) : 0;
+  }
+  const { data } = await getDbClient()
+    .from('products')
+    .select('stock_quantity')
+    .eq('id', productId)
+    .single();
+  return data?.stock_quantity || 0;
 }
 
 // Pedidos (Orders)
@@ -2336,6 +2364,166 @@ export async function deleteHandlingTeam(id: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// OPERAÇÕES: DIVISÃO DE EQUIPES DE MANUSEIO POR ITEM
+// ─────────────────────────────────────────────────────────────────
+
+export interface OrderItemHandlingTeam {
+  id: string;
+  tenant_id: string;
+  order_item_id: string;
+  handling_team_id: string;
+  quantity: number;
+  team?: HandlingTeam;
+  created_at?: string;
+  updated_at?: string;
+}
+
+let mockOrderItemHandlingTeams: OrderItemHandlingTeam[] = [];
+
+export async function getOrderItemHandlingTeams(orderItemId: string) {
+  if (isMockMode) {
+    const list = mockOrderItemHandlingTeams.filter(t => t.order_item_id === orderItemId);
+    return { data: list, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('order_item_handling_teams')
+    .select('*, team:handling_teams(*)')
+    .eq('order_item_id', orderItemId);
+  return { data: data || [], error };
+}
+
+export async function saveOrderItemHandlingTeams(
+  orderItemId: string,
+  teams: { handling_team_id: string; quantity: number }[],
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+) {
+  if (isMockMode) {
+    mockOrderItemHandlingTeams = mockOrderItemHandlingTeams.filter(t => t.order_item_id !== orderItemId);
+    for (const t of teams) {
+      if (t.handling_team_id && t.quantity > 0) {
+        mockOrderItemHandlingTeams.push({
+          id: Math.random().toString(36).substring(2),
+          tenant_id: tenantId,
+          order_item_id: orderItemId,
+          handling_team_id: t.handling_team_id,
+          quantity: t.quantity
+        });
+      }
+    }
+    return { data: true, error: null };
+  }
+
+  // Remove alocações antigas desse item
+  await getDbClient()
+    .from('order_item_handling_teams')
+    .delete()
+    .eq('order_item_id', orderItemId);
+
+  // Filtra itens com equipe válida e quantidade > 0
+  const validTeams = teams.filter(t => t.handling_team_id && t.quantity > 0);
+  if (validTeams.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const payload = validTeams.map(t => ({
+    tenant_id: tenantId,
+    order_item_id: orderItemId,
+    handling_team_id: t.handling_team_id,
+    quantity: Number(t.quantity)
+  }));
+
+  const { data, error } = await getDbClient()
+    .from('order_item_handling_teams')
+    .insert(payload)
+    .select('*, team:handling_teams(*)');
+
+  return { data, error };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// OPERAÇÕES: LOCALIZAÇÕES FÍSICAS NA FÁBRICA
+// ─────────────────────────────────────────────────────────────────
+
+export interface FactoryLocation {
+  id: string;
+  tenant_id: string;
+  name: string;
+  status: 'ATIVO' | 'INATIVO';
+  created_at: string;
+  updated_at: string;
+}
+
+let mockFactoryLocations: FactoryLocation[] = [
+  { id: 'loc-1', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Salão', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc-2', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Pátio', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc-3', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Máquina Flexo 1', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc-4', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Máquina Coladeira 2', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc-5', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Prateleira A1', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc-6', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Depósito de Materiais', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+];
+
+export async function getFactoryLocations(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    const list = mockFactoryLocations.filter(l => l.tenant_id === tenantId);
+    return { data: list, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('factory_locations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('name', { ascending: true });
+  return { data, error };
+}
+
+export async function createFactoryLocation(loc: Omit<FactoryLocation, 'id' | 'created_at' | 'updated_at'>) {
+  const tenantId = loc.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+  if (isMockMode) {
+    const newLoc: FactoryLocation = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+      ...loc,
+      tenant_id: tenantId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    mockFactoryLocations.push(newLoc);
+    return { data: newLoc, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('factory_locations')
+    .insert([{ ...loc, tenant_id: tenantId }])
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function updateFactoryLocation(id: string, updates: Partial<FactoryLocation>) {
+  if (isMockMode) {
+    mockFactoryLocations = mockFactoryLocations.map(l => l.id === id ? { ...l, ...updates, updated_at: new Date().toISOString() } : l);
+    const updated = mockFactoryLocations.find(l => l.id === id);
+    return { data: updated, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('factory_locations')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function deleteFactoryLocation(id: string) {
+  if (isMockMode) {
+    mockFactoryLocations = mockFactoryLocations.filter(l => l.id !== id);
+    return { data: true, error: null };
+  }
+  const { error } = await getDbClient()
+    .from('factory_locations')
+    .delete()
+    .eq('id', id);
+  return { data: !error, error };
+}
+
+// ─────────────────────────────────────────────────────────────────
 // OPERAÇÕES: TIPOS DE MATERIAL DE EMBALAGEM
 // ─────────────────────────────────────────────────────────────────
 
@@ -3018,6 +3206,87 @@ export async function deleteShippingTypeConfig(id: string) {
   return { error };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// OPERAÇÕES: VOLUMES DE EXPEDIÇÃO CONSOLIDADOS (PEDIDO)
+// ─────────────────────────────────────────────────────────────────
+
+export interface OrderShippingVolume {
+  id: string;
+  tenant_id: string;
+  order_id: string;
+  volume_number: number;
+  weight_kg?: number | null;
+  width_cm?: number | null;
+  height_cm?: number | null;
+  length_cm?: number | null;
+  packaging_type_id?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+let mockOrderShippingVolumes: OrderShippingVolume[] = [];
+
+export async function getOrderShippingVolumes(orderId: string) {
+  if (isMockMode) {
+    const list = mockOrderShippingVolumes.filter(v => v.order_id === orderId);
+    return { data: list, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('order_shipping_volumes')
+    .select('*, packaging_type:packaging_material_types(*)')
+    .eq('order_id', orderId)
+    .order('volume_number', { ascending: true });
+  return { data: data || [], error };
+}
+
+export async function saveOrderShippingVolumes(
+  orderId: string, 
+  volumes: Omit<OrderShippingVolume, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>[], 
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+) {
+  if (isMockMode) {
+    mockOrderShippingVolumes = mockOrderShippingVolumes.filter(v => v.order_id !== orderId);
+    for (const v of volumes) {
+      mockOrderShippingVolumes.push({
+        id: Math.random().toString(36).substring(2),
+        tenant_id: tenantId,
+        ...v
+      });
+    }
+    return { data: true, error: null };
+  }
+
+  // Substituição completa dos volumes do pedido
+  await getDbClient()
+    .from('order_shipping_volumes')
+    .delete()
+    .eq('order_id', orderId);
+
+  if (volumes.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const payload = volumes.map(v => ({
+    tenant_id: tenantId,
+    order_id: orderId,
+    volume_number: v.volume_number,
+    weight_kg: v.weight_kg ? Number(v.weight_kg) : null,
+    width_cm: v.width_cm ? Number(v.width_cm) : null,
+    height_cm: v.height_cm ? Number(v.height_cm) : null,
+    length_cm: v.length_cm ? Number(v.length_cm) : null,
+    packaging_type_id: v.packaging_type_id || null,
+    notes: v.notes || null
+  }));
+
+  const { data, error } = await getDbClient()
+    .from('order_shipping_volumes')
+    .insert(payload)
+    .select();
+
+  return { data, error };
+}
+
 // Histórico de transições de etapas do Kanban
 export async function getOrderItemStageHistory(orderItemId: string) {
   if (isMockMode) {
@@ -3037,7 +3306,7 @@ export async function getAllStageHistory(tenantId = 'd3b07384-d113-4ec8-a5c6-e91
   }
   const { data, error } = await getDbClient()
     .from('order_item_stage_history')
-    .select('*, from_stage:from_stage_id(*), to_stage:to_stage_id(*)')
+    .select('*, from_stage:from_stage_id(*), to_stage:to_stage_id(*), changed_by:changed_by_profile_id(*)')
     .eq('tenant_id', tenantId)
     .order('changed_at', { ascending: true });
   return { data, error };

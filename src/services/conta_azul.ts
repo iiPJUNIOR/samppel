@@ -11,6 +11,42 @@ function extractOpNumber(notes: string): string | null {
   return match ? match[0].trim() : null;
 }
 
+export function isSaleEmAndamento(sale: any): boolean {
+  if (!sale) return false;
+
+  const checkVal = (val: any): boolean => {
+    if (!val) return false;
+    if (typeof val === 'string') {
+      const s = val.toUpperCase();
+      return (
+        s === 'EM_ANDAMENTO' || s.includes('ANDAMENTO') ||
+        s === 'ORCAMENTO' || s.includes('ORÇAMENTO') ||
+        s === 'RECUSADO' || s.includes('RECUSAD') ||
+        s === 'REJEITADO' || s.includes('REJEITAD')
+      );
+    }
+    if (typeof val === 'object') {
+      const nome = (val.nome || val.status || val.descricao || val.situacao || '').toString().toUpperCase();
+      const desc = (val.descricao || '').toString().toUpperCase();
+      return (
+        nome === 'EM_ANDAMENTO' || nome.includes('ANDAMENTO') ||
+        nome === 'ORCAMENTO' || desc.includes('ANDAMENTO') || desc.includes('ORÇAMENTO') ||
+        nome === 'RECUSADO' || desc.includes('RECUSAD') ||
+        nome === 'REJEITADO' || desc.includes('REJEITAD')
+      );
+    }
+    return false;
+  };
+
+  return (
+    checkVal(sale.situacao) ||
+    checkVal(sale.venda?.situacao) ||
+    checkVal(sale.situacao_venda) ||
+    checkVal(sale.venda?.situacao_venda) ||
+    checkVal(sale.status)
+  );
+}
+
 interface ContaAzulTokens {
   access_token: string;
   refresh_token: string;
@@ -965,7 +1001,6 @@ export class ContaAzulService {
           sku: code,
           description: desc,
           price: price,
-          stock_quantity: stockQty,
           conta_azul_id: caId || undefined
         };
 
@@ -979,7 +1014,7 @@ export class ContaAzulService {
         } else {
           const { error } = await dbClient
             .from('products')
-            .insert([{ tenant_id: this.tenantId, ...payload }]);
+            .insert([{ tenant_id: this.tenantId, ...payload, stock_quantity: 0 }]);
           if (error) console.error('Erro ao inserir produto:', error);
           else imported++;
         }
@@ -1062,8 +1097,11 @@ export class ContaAzulService {
       for (const saleSummary of items) {
         currentIdx++;
         const pct = 15 + Math.floor((currentIdx / items.length) * 80);
-        const statusStr = (saleSummary.situacao?.nome || '').toUpperCase();
-        if (statusStr === 'CANCELADO') continue;
+        const statusStr = (saleSummary.situacao?.nome || saleSummary.situacao?.descricao || saleSummary.situacao || '').toString().toUpperCase();
+        if (statusStr === 'CANCELADO' || isSaleEmAndamento(saleSummary)) {
+          console.log(`[importOrders] Ignorando PV-${saleSummary.numero} por estar em orçamento ("Em andamento") no Conta Azul.`);
+          continue;
+        }
 
         onProgress?.(`PV-${saleSummary.numero || currentIdx}: Puxando detalhes do pedido...`, pct);
         // Endpoint oficial /v1/venda/{id} da API v2 da Conta Azul
@@ -1075,6 +1113,10 @@ export class ContaAzulService {
           continue;
         }
         const saleDetail = await saleRes.json();
+        if (isSaleEmAndamento(saleDetail) || isSaleEmAndamento(saleDetail.venda)) {
+          console.log(`[importOrders] Ignorando PV-${saleSummary.numero} por estar em orçamento ("Em andamento") no Conta Azul.`);
+          continue;
+        }
 
         onProgress?.(`PV-${saleSummary.numero || currentIdx}: Puxando itens do pedido...`, pct);
         // Endpoint oficial /v1/venda/{id}/itens da API v2 da Conta Azul
@@ -1235,32 +1277,10 @@ export class ContaAzulService {
           ? (installments?.[0]?.data_vencimento || saleSummary.data || new Date().toISOString().split('T')[0])
           : null;
 
-        let measure = '15x10x5 cm';
-        let boxesCount = 1;
-        const mainItemDesc = (mainItem.descricao || '').toLowerCase();
+        const notesStr = [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n');
+        const mainItemDesc = (mainItem.descricao || mainItem.nome || '').toLowerCase();
+        const measure = this.extractMeasure([mainItem.nome, mainItem.descricao, notesStr]);
         
-        const measureMatch = mainItemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
-        if (measureMatch && measureMatch[1]) {
-          measure = measureMatch[1].trim();
-        }
-
-        const boxesMatch = mainItemDesc.match(/caixas?:\s*(\d+)/i);
-        if (boxesMatch && boxesMatch[1]) {
-          boxesCount = parseInt(boxesMatch[1], 10);
-        }
-
-        const resolvedShippingType = this.parseShippingType(saleDetail);
-        
-        let resolvedPackagingType: 'CAIXA' | 'PACOTE' = 'CAIXA';
-        if (resolvedShippingType === 'RETIRADA' || resolvedShippingType === 'LALAMOVE' || resolvedShippingType === 'MOTOBOY') {
-          resolvedPackagingType = 'PACOTE';
-        }
-        if (mainItemDesc.includes('pacote')) {
-          resolvedPackagingType = 'PACOTE';
-        } else if (mainItemDesc.includes('caixa')) {
-          resolvedPackagingType = 'CAIXA';
-        }
-
         const getSituacaoDesc = (situacao: any) => {
           if (!situacao) return 'Aprovado';
           if (situacao.descricao) return situacao.descricao;
@@ -1274,7 +1294,8 @@ export class ContaAzulService {
         };
         const contaAzulStatus = getSituacaoDesc(saleDetail.venda?.situacao || saleSummary.situacao);
 
-        const notesStr = [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n');
+        const resolvedShippingType = this.parseShippingType(saleDetail);
+        const { boxesCount, packagingType: resolvedPackagingType } = this.parsePackagingDetails(notesStr, mainItemDesc, resolvedShippingType);
         const opNumber = extractOpNumber(notesStr);
 
         const orderPayload: any = {
@@ -1503,17 +1524,10 @@ export class ContaAzulService {
             }
           }
 
-          let itemMeasure = '15x10x5 cm';
-          let itemBoxesCount = 1;
           const itemDesc = (item.description || item.descricao || '').toLowerCase();
-          
-          const measureMatch = itemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
-          if (measureMatch && measureMatch[1]) {
-            itemMeasure = measureMatch[1].trim();
-          } else {
-            itemMeasure = measure; // Fallback para medida do pedido principal
-          }
+          const itemMeasure = this.extractMeasure([item.name || item.nome, item.description || item.descricao, notesStr, measure]);
 
+          let itemBoxesCount = 1;
           const boxesMatch = itemDesc.match(/caixas?:\s*(\d+)/i);
           if (boxesMatch && boxesMatch[1]) {
             itemBoxesCount = parseInt(boxesMatch[1], 10);
@@ -1640,7 +1654,10 @@ export class ContaAzulService {
 
   private parseShippingType(saleDetail: any): 'RETIRADA' | 'ENTREGA_PROPRIA' | 'TRANSPORTADORA' | 'LALAMOVE' | 'MOTOBOY' | 'TRANSPORTADORA_LONGA' {
     const freightValue = saleDetail.venda?.composicao_valor?.frete || 0;
-    const notes = (saleDetail.venda?.observacoes || '').toLowerCase();
+    const notes = [
+      saleDetail.venda?.observacoes,
+      saleDetail.venda?.condicao_pagamento?.observacoes_pagamento
+    ].filter(Boolean).join(' ').toLowerCase();
     const carrierName = (saleDetail.venda?.transportadora?.nome || saleDetail.transportadora?.nome || '').toLowerCase();
 
     if (notes.includes('retira') || notes.includes('retirada') || carrierName.includes('retira')) {
@@ -1663,6 +1680,80 @@ export class ContaAzulService {
       return 'TRANSPORTADORA';
     }
     return 'RETIRADA';
+  }
+
+  private extractMeasure(texts: (string | null | undefined)[]): string {
+    for (const text of texts) {
+      if (!text) continue;
+
+      // 1. Padrão explícito com palavras-chave: "Medida: 20x15x5 cm", "Medidas: 30 x 40", "Dimensões: 15x10"
+      const keywordMatch = text.match(/(?:medidas?|dimens[õo]es|tamanho|formato):\s*([0-9.,]+\s*[xX]\s*[0-9.,]+(?:\s*[xX]\s*[0-9.,]+)?(?:\/[0-9]+\s*g)?(?:\s*cm|\s*mm|\s*m)?)/i);
+      if (keywordMatch && keywordMatch[1]) {
+        return keywordMatch[1].trim();
+      }
+
+      // 2. Padrão numérico isolado de dimensões (ex: "38X31X19/100G", "20x15x5 cm", "20x15x5", "30x40 cm", "25x30")
+      const dimMatch = text.match(/\b([0-9]{1,3}(?:[.,][0-9])?\s*[xX]\s*[0-9]{1,3}(?:[.,][0-9])?(?:\s*[xX]\s*[0-9]{1,3}(?:[.,][0-9])?)?(?:\/[0-9]+\s*g)?\s*(?:cm|mm|m)?)\b/i);
+      if (dimMatch && dimMatch[1]) {
+        return dimMatch[1].trim();
+      }
+    }
+
+    return '—';
+  }
+
+  private parsePackagingDetails(notesStr: string, mainItemDesc: string, resolvedShippingType: string): { boxesCount: number; packagingType: 'CAIXA' | 'PACOTE' } {
+    let boxesCount = 0;
+    let packagingType: 'CAIXA' | 'PACOTE' = 'CAIXA';
+
+    const notesStrLower = (notesStr || '').toLowerCase();
+    const mainItemDescLower = (mainItemDesc || '').toLowerCase();
+
+    // 1. Extrair da linha "Embalagem:" nas observações de pagamento / notas
+    const embalagemMatch = notesStr.match(/embalagem:\s*([^\n\r]+)/i);
+
+    if (embalagemMatch && embalagemMatch[1]) {
+      const embText = embalagemMatch[1].trim().toLowerCase();
+      
+      // Identificar Tipo (PACOTE vs CAIXA)
+      if (embText.includes('pac') || embText.includes('saco') || embText.includes('envelope')) {
+        packagingType = 'PACOTE';
+      } else if (embText.includes('caix') || embText.includes('cx')) {
+        packagingType = 'CAIXA';
+      }
+
+      // Identificar Quantidade (número)
+      const numMatch = embText.match(/(\d+)/);
+      if (numMatch) {
+        boxesCount = parseInt(numMatch[1], 10);
+      }
+    }
+
+    // 2. Se a linha "Embalagem:" não existia ou não especificou tipo, verificar palavras-chave nas observações gerais ou descrição do item
+    if (!embalagemMatch) {
+      if (notesStrLower.includes('pacote') || notesStrLower.includes('pacotes') || mainItemDescLower.includes('pacote') || mainItemDescLower.includes('saco')) {
+        packagingType = 'PACOTE';
+      } else if (notesStrLower.includes('caixa') || notesStrLower.includes('caixas') || mainItemDescLower.includes('caixa')) {
+        packagingType = 'CAIXA';
+      } else if (resolvedShippingType === 'RETIRADA' || resolvedShippingType === 'LALAMOVE' || resolvedShippingType === 'MOTOBOY') {
+        packagingType = 'PACOTE';
+      }
+    }
+
+    // 3. Se a quantidade de volumes não foi encontrada, buscar em "caixas: 10", "pacotes: 5" ou no texto da observação
+    if (boxesCount === 0) {
+      const boxesMatch = mainItemDesc.match(/caixas?:\s*(\d+)/i) || mainItemDesc.match(/pacotes?:\s*(\d+)/i) || notesStr.match(/(\d+)\s*(?:caixas|pacotes|volumes|cx|pac)/i);
+      if (boxesMatch && boxesMatch[1]) {
+        boxesCount = parseInt(boxesMatch[1], 10);
+      }
+    }
+
+    // Default se nenhuma quantidade foi encontrada
+    if (boxesCount === 0) {
+      boxesCount = 1;
+    }
+
+    return { boxesCount, packagingType };
   }
 
   async getSaleIdByNumber(orderNumber: string | number): Promise<string> {
@@ -1766,6 +1857,13 @@ export class ContaAzulService {
       throw new Error(`Erro ao buscar detalhes da venda: ${await saleRes.text()}`);
     }
     const saleDetail = await saleRes.json();
+    
+    // Verificar se a venda está em orçamento ("Em andamento")
+    if (isSaleEmAndamento(saleDetail) || isSaleEmAndamento(saleDetail.venda)) {
+      const pvNum = saleDetail.venda?.numero ? `PV-${saleDetail.venda.numero}` : 'este pedido';
+      throw new Error(`O pedido ${pvNum} consta como "Em andamento" (orçamento) no Conta Azul e não pode ser importado para produção até ser aprovado/faturado.`);
+    }
+
     const saleSummary = {
       id: saleId,
       numero: saleDetail.venda?.numero,
@@ -1907,28 +2005,11 @@ export class ContaAzulService {
     let paymentReleasedDate: string | null = null;
     let firstPaymentDate: string | null = null;
 
-    let measure = '—';
-    let boxesCount = 0;
-    const mainItemDesc = (mainItem.descricao || '').toLowerCase();
-    const measureMatch = mainItemDesc.match(/medidas?:\s*([0-9x\s]+(?:cm)?)/i);
-    if (measureMatch && measureMatch[1]) {
-      measure = measureMatch[1].trim();
-    }
-    const boxesMatch = mainItemDesc.match(/caixas?:\s*(\d+)/i);
-    if (boxesMatch && boxesMatch[1]) {
-      boxesCount = parseInt(boxesMatch[1], 10);
-    }
-
+    const notesStr = [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n');
+    const mainItemDesc = (mainItem.descricao || mainItem.nome || '').toLowerCase();
+    const measure = this.extractMeasure([mainItem.nome, mainItem.descricao, notesStr]);
     const resolvedShippingType = this.parseShippingType(saleDetail);
-    let resolvedPackagingType: 'CAIXA' | 'PACOTE' = 'CAIXA';
-    if (resolvedShippingType === 'RETIRADA' || resolvedShippingType === 'LALAMOVE' || resolvedShippingType === 'MOTOBOY') {
-      resolvedPackagingType = 'PACOTE';
-    }
-    if (mainItemDesc.includes('pacote')) {
-      resolvedPackagingType = 'PACOTE';
-    } else if (mainItemDesc.includes('caixa')) {
-      resolvedPackagingType = 'CAIXA';
-    }
+    const { boxesCount, packagingType: resolvedPackagingType } = this.parsePackagingDetails(notesStr, mainItemDesc, resolvedShippingType);
 
     const getSituacaoDesc = (situacao: any) => {
       if (!situacao) return 'Aprovado';
@@ -1942,8 +2023,6 @@ export class ContaAzulService {
       return nome;
     };
     const contaAzulStatus = getSituacaoDesc(saleDetail.venda?.situacao || saleSummary.situacao);
-
-    const notesStr = [saleDetail.venda?.observacoes, saleDetail.venda?.condicao_pagamento?.observacoes_pagamento].filter(Boolean).join('\n\n');
     const opNumber = extractOpNumber(notesStr);
 
     const orderPayload: any = {

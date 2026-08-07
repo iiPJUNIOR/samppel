@@ -277,17 +277,6 @@ export default function Sidebar() {
             <span className={styles.roleBadge} style={{ backgroundColor: 'var(--warning-bg)', color: 'var(--warning)', borderColor: 'var(--warning)' }}>
               Terminal Fábrica
             </span>
-          ) : user.actual_role === 'Administrador' ? (
-            <select
-              value={user.role}
-              onChange={(e) => changeActiveRole(e.target.value as UserRole)}
-              className={styles.roleSelector}
-            >
-              <option value="Administrador">Administrador</option>
-              <option value="Produção">Produção</option>
-              <option value="Fábrica">Fábrica</option>
-              <option value="Vendedor">Vendedor</option>
-            </select>
           ) : (
             <span className={styles.roleBadge}>{user.role}</span>
           )}

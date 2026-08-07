@@ -17,7 +17,8 @@ import {
   getOrderStages,
   getAllStageHistory,
   getOrderItemStageHistory,
-  getOrderItemSectorHistory
+  getOrderItemSectorHistory,
+  getOrderItemNotesHistory
 } from '@/services/supabase';
 import { Skeleton, CardSkeleton, TableRowSkeleton } from '@/components/ui/Skeleton';
 import { 
@@ -278,15 +279,28 @@ export default function RelatoriosPage() {
       const timelineEvents: any[] = [];
 
       for (const item of itemsOfOrder) {
-        // A. Histórico de Estágios do Kanban
+        // A. Histórico de Estágios do Kanban (com cálculo de tempo de permanência em cada etapa)
         const { data: historyEvents } = await getOrderItemStageHistory(item.id);
         if (historyEvents && historyEvents.length > 0) {
-          historyEvents.forEach((evt: any) => {
+          const sortedHistory = [...historyEvents].sort((a, b) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime());
+          
+          sortedHistory.forEach((evt: any, index: number) => {
+            let durationFormatted = null;
+            if (index > 0) {
+              const prevTime = new Date(sortedHistory[index - 1].changed_at).getTime();
+              const currTime = new Date(evt.changed_at).getTime();
+              const diffMs = currTime - prevTime;
+              if (diffMs > 0) {
+                durationFormatted = formatHoursToDaysHours(diffMs / (1000 * 60 * 60));
+              }
+            }
+
             timelineEvents.push({
               ...evt,
               order_item_id: item.id,
               itemFriendlyId: item.friendly_id,
               itemName: item.name,
+              durationFormatted,
               eventType: 'stage_change'
             });
           });
@@ -309,6 +323,26 @@ export default function RelatoriosPage() {
               sector: evt.sector,
               machineName: evt.machine?.name || 'Sem Máquina',
               eventType: 'sector_change'
+            });
+          });
+        }
+
+        // C. Histórico de Edições / Alterações de Notas e Especificações
+        const { data: notesEvents } = await getOrderItemNotesHistory(item.id, targetOrder.tenant_id);
+        if (notesEvents && notesEvents.length > 0) {
+          notesEvents.forEach((evt: any) => {
+            timelineEvents.push({
+              id: evt.id,
+              created_at: evt.created_at,
+              changed_at: evt.created_at,
+              order_item_id: item.id,
+              itemFriendlyId: item.friendly_id,
+              itemName: item.name,
+              notesType: evt.notes_type,
+              oldContent: evt.old_content,
+              newContent: evt.new_content,
+              changed_by: evt.operator,
+              eventType: 'edit_change'
             });
           });
         }
@@ -1470,17 +1504,58 @@ export default function RelatoriosPage() {
                                 </>
                               )}
                             </>
+                          ) : evt.eventType === 'edit_change' ? (
+                            <>
+                              {labelType} <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> teve suas {evt.notesType === 'ANOTACOES_INTERNAS' ? 'Anotações Internas' : 'Especificações / Observações'} alteradas.
+                              {(evt.oldContent || evt.newContent) && (
+                                <div style={{ fontSize: '0.75rem', marginTop: '4px', padding: '6px 10px', backgroundColor: 'var(--background)', borderRadius: '6px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  {evt.oldContent && <div style={{ color: '#ef4444' }}><strong>Anterior:</strong> {evt.oldContent}</div>}
+                                  {evt.newContent && <div style={{ color: '#10b981' }}><strong>Novo:</strong> {evt.newContent}</div>}
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <>
                               {labelType} <strong style={{ color: 'var(--primary)' }}>{cleanFriendlyId}</strong> foi movido de{' '}
                               <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{evt.from_stage?.name || 'Início'}</span> para{' '}
                               <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{evt.to_stage?.name || 'Final'}</span>
+                              {evt.durationFormatted && (
+                                <span style={{
+                                  marginLeft: '6px',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                                  color: '#3b82f6',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}>
+                                  ⏱️ Permanência na etapa anterior: {evt.durationFormatted}
+                                </span>
+                              )}
                             </>
                           )}
                         </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', fontStyle: 'italic' }}>
-                        {evt.eventType === 'sector_change' ? 'Alterado por: ' : 'Movido por: '}<strong style={{ color: 'var(--text)' }}>
-                          {evt.changed_by ? (evt.changed_by.full_name || evt.changed_by.name || evt.changed_by.email || 'Operador') : 'Sistema'}
+                        {evt.eventType === 'sector_change' ? 'Alterado por: ' : evt.eventType === 'edit_change' ? 'Editado por: ' : 'Movido por: '}<strong style={{ color: 'var(--text)' }}>
+                          {(() => {
+                            if (evt.changed_by) {
+                              if (typeof evt.changed_by === 'object') {
+                                return evt.changed_by.full_name || evt.changed_by.name || evt.changed_by.email || 'Operador';
+                              }
+                              if (typeof evt.changed_by === 'string' && evt.changed_by.length > 0 && !evt.changed_by.includes('-')) {
+                                return evt.changed_by;
+                              }
+                            }
+                            if (evt.operator) {
+                              if (typeof evt.operator === 'object') {
+                                return evt.operator.name || evt.operator.full_name || 'Operador';
+                              }
+                            }
+                            return 'Sistema';
+                          })()}
                         </strong> {evt.changed_by?.role ? `(${evt.changed_by.role})` : ''}
                       </div>
                     </div>
