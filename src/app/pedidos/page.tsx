@@ -463,6 +463,27 @@ export default function PedidosPage() {
   const [expeditionFreightLength, setExpeditionFreightLength] = useState<string>('');
   const [expeditionFreightNotes, setExpeditionFreightNotes] = useState<string>('');
   const [expeditionFreightPackagingTypeId, setExpeditionFreightPackagingTypeId] = useState<string>('');
+  const [expeditionItemConferencyMap, setExpeditionItemConferencyMap] = useState<Record<string, { producedQuantity: number; adjustmentAction: string }>>({});
+
+  const updateExpeditionItemConferency = (itemId: string, field: 'producedQuantity' | 'adjustmentAction', value: any) => {
+    setExpeditionItemConferencyMap(prev => {
+      const existing = prev[itemId] || { producedQuantity: 0, adjustmentAction: 'CREDITO_PROXIMO_PEDIDO' };
+      const updated = { ...existing, [field]: value };
+      if (field === 'producedQuantity') {
+        const itm = orderItems.find(i => i.id === itemId) || (expeditionTransitionItem?.id === itemId ? expeditionTransitionItem : null);
+        const orderedQty = itm?.print_run || 0;
+        const diff = Number(value) - orderedQty;
+        if (diff > 0) {
+          updated.adjustmentAction = 'CREDITO_PROXIMO_PEDIDO';
+        } else if (diff < 0) {
+          updated.adjustmentAction = 'PENDENCIA_ENTREGA';
+        } else {
+          updated.adjustmentAction = 'OUTRO';
+        }
+      }
+      return { ...prev, [itemId]: updated };
+    });
+  };
 
   const expeditionTransitionMoveBypass = useRef(false);
 
@@ -1346,6 +1367,20 @@ export default function PedidosPage() {
       setExpeditionFreightLength(parentOrder?.package_length !== undefined && parentOrder?.package_length !== null ? String(parentOrder.package_length) : '');
       setExpeditionFreightNotes('');
       setExpeditionFreightPackagingTypeId('');
+
+      // Inicializar mapa de conferência individual de sobras e faltas por item
+      const initialMap: Record<string, { producedQuantity: number; adjustmentAction: string }> = {};
+      initialMap[item.id] = {
+        producedQuantity: item.print_run || 0,
+        adjustmentAction: 'CREDITO_PROXIMO_PEDIDO'
+      };
+      siblingItems.forEach((sib: any) => {
+        initialMap[sib.id] = {
+          producedQuantity: sib.print_run || 0,
+          adjustmentAction: 'CREDITO_PROXIMO_PEDIDO'
+        };
+      });
+      setExpeditionItemConferencyMap(initialMap);
 
       setIsExpeditionTransitionModalOpen(true);
       return;
@@ -5411,82 +5446,97 @@ export default function PedidosPage() {
                   </div>
                 </div>
 
-                {/* OCORRÊNCIAS DE EMBALAGEM / SOBRAS & FALTAS */}
+                {/* OCORRÊNCIAS DE EMBALAGEM / SOBRAS & FALTAS INDIVIDUAIS POR ITEM */}
                 <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '0.85rem 1rem', backgroundColor: 'var(--surface)' }}>
-                  <h3 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>Conferência de Sobras & Faltas</span>
+                  <h3 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Conferência de Sobras & Faltas (Por Item)</span>
                     <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-                      Tiragem Contratada: <strong>{(expeditionTransitionItem.print_run || 0).toLocaleString('pt-BR')} un</strong>
+                      Itens Selecionados: <strong>{[expeditionTransitionItem, ...expeditionSiblings.filter(s => expeditionSelectedSiblings.includes(s.id))].length}</strong>
                     </span>
                   </h3>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', alignItems: 'center' }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.75rem' }}>Qtd Produzida Final *</label>
-                      <input 
-                        type="number"
-                        min="0"
-                        required
-                        className="form-input"
-                        value={producedQuantity}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setProducedQuantity(val);
-                          const diff = val - (expeditionTransitionItem.print_run || 0);
-                          if (diff > 0) {
-                            setAdjustmentAction('CREDITO_PROXIMO_PEDIDO');
-                          } else if (diff < 0) {
-                            setAdjustmentAction('PENDENCIA_ENTREGA');
-                          } else {
-                            setAdjustmentAction('OUTRO');
-                          }
-                        }}
-                        style={{ padding: '0.4rem 0.5rem', fontSize: '0.82rem' }}
-                      />
-                    </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '280px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {[expeditionTransitionItem, ...expeditionSiblings.filter(s => expeditionSelectedSiblings.includes(s.id))].map((itm: any) => {
+                      const itemData = expeditionItemConferencyMap[itm.id] || { producedQuantity: itm.print_run || 0, adjustmentAction: 'CREDITO_PROXIMO_PEDIDO' };
+                      const orderedQty = itm.print_run || 0;
+                      const diffQty = itemData.producedQuantity - orderedQty;
 
-                    <div>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>Saldo Calculado:</span>
-                      {(() => {
-                        const diff = producedQuantity - (expeditionTransitionItem.print_run || 0);
-                        if (diff === 0) {
-                          return <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>0 (Sem sobras ou faltas)</span>;
-                        } else if (diff > 0) {
-                          return <span style={{ fontSize: '0.78rem', color: 'hsl(142.1, 76.2%, 36.3%)', fontWeight: 700 }}>+{diff.toLocaleString('pt-BR')} un (Sobra / Cortesia)</span>;
-                        } else {
-                          return <span style={{ fontSize: '0.78rem', color: 'hsl(346.8, 77.2%, 49.8%)', fontWeight: 700 }}>{diff.toLocaleString('pt-BR')} un (Falta)</span>;
-                        }
-                      })()}
-                    </div>
+                      return (
+                        <div key={itm.id} style={{
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm, 6px)',
+                          padding: '0.65rem 0.75rem',
+                          backgroundColor: 'var(--background)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.5rem'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+                            <strong style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>
+                              {itm.friendly_id || 'Item'} · {itm.name}
+                            </strong>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                              Contratado: <strong>{orderedQty.toLocaleString('pt-BR')} un</strong>
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', alignItems: 'center' }}>
+                            <div className="form-group" style={{ margin: 0 }}>
+                              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Qtd Produzida Final *</label>
+                              <input 
+                                type="number"
+                                min="0"
+                                required
+                                className="form-input"
+                                value={itemData.producedQuantity}
+                                onChange={(e) => updateExpeditionItemConferency(itm.id, 'producedQuantity', Number(e.target.value))}
+                                style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }}
+                              />
+                            </div>
+
+                            <div>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>Saldo Calculado:</span>
+                              {diffQty === 0 ? (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>0 (Sem sobras/faltas)</span>
+                              ) : diffQty > 0 ? (
+                                <span style={{ fontSize: '0.75rem', color: 'hsl(142.1, 76.2%, 36.3%)', fontWeight: 700 }}>+{diffQty.toLocaleString('pt-BR')} un (Sobra)</span>
+                              ) : (
+                                <span style={{ fontSize: '0.75rem', color: 'hsl(346.8, 77.2%, 49.8%)', fontWeight: 700 }}>{diffQty.toLocaleString('pt-BR')} un (Falta)</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {diffQty !== 0 && (
+                            <div className="form-group" style={{ margin: 0 }}>
+                              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Tratamento do Saldo (Cliente) *</label>
+                              <select
+                                className="form-select"
+                                value={itemData.adjustmentAction}
+                                onChange={(e) => updateExpeditionItemConferency(itm.id, 'adjustmentAction', e.target.value)}
+                                style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                              >
+                                {diffQty > 0 ? (
+                                  <>
+                                    <option value="CREDITO_PROXIMO_PEDIDO">Cortesia / Crédito para o Próximo Pedido</option>
+                                    <option value="GUARDAR_ESTOQUE_CLIENTE">Guardar no Estoque de Personalizados (Fábrica)</option>
+                                    <option value="COBRADO_ADICIONAL">Cobrar Valor Adicional do Cliente</option>
+                                    <option value="OUTRO">Outro / Tratar Manualmente</option>
+                                  </>
+                                ) : (
+                                  <>
+                                    <option value="PENDENCIA_ENTREGA">Registrar Pendência de Entrega (Gerar Crédito)</option>
+                                    <option value="REPRODUCAO_PENDENTE">Programar Reprodução Pendente (Lote Corretivo)</option>
+                                    <option value="CANCELADO_DESCONTO">Gerar Desconto Proporcional no Faturamento</option>
+                                    <option value="OUTRO">Outro / Tratar Manualmente</option>
+                                  </>
+                                )}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  {producedQuantity - (expeditionTransitionItem.print_run || 0) !== 0 && (
-                    <div className="form-group" style={{ marginTop: '0.65rem', margin: '0.65rem 0 0 0' }}>
-                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.75rem' }}>Tratamento do Saldo *</label>
-                      <select
-                        className="form-select"
-                        value={adjustmentAction}
-                        onChange={(e) => setAdjustmentAction(e.target.value)}
-                        style={{ padding: '0.35rem 0.5rem', fontSize: '0.78rem' }}
-                      >
-                        {producedQuantity - (expeditionTransitionItem.print_run || 0) > 0 ? (
-                          <>
-                            <option value="CREDITO_PROXIMO_PEDIDO">Cortesia / Crédito para o Próximo Pedido</option>
-                            <option value="GUARDAR_ESTOQUE_CLIENTE">Guardar no Estoque de Personalizados (Fábrica)</option>
-                            <option value="COBRADO_ADICIONAL">Cobrar Valor Adicional do Cliente</option>
-                            <option value="OUTRO">Outro / Tratar Manualmente</option>
-                          </>
-                        ) : (
-                          <>
-                            <option value="PENDENCIA_ENTREGA">Registrar Pendência de Entrega (Gerar Crédito)</option>
-                            <option value="REPRODUCAO_PENDENTE">Programar Reprodução Pendente (Lote Corretivo)</option>
-                            <option value="CANCELADO_DESCONTO">Gerar Desconto Proporcional no Faturamento</option>
-                            <option value="OUTRO">Outro / Tratar Manualmente</option>
-                          </>
-                        )}
-                      </select>
-                    </div>
-                  )}
                 </div>
 
                 {/* OBSERVAÇÕES */}
@@ -5527,83 +5577,93 @@ export default function PedidosPage() {
                     return;
                   }
 
-                  const orderedQty = expeditionTransitionItem.print_run || 0;
-                  const diffQty = producedQuantity - orderedQty;
-
-                  const updates: any = {
-                    over_short_quantity: diffQty,
-                    expedition_notes: expeditionTransitionNotes || null
-                  };
-
-                  if (diffQty < 0) {
-                    updates.shortage_quantity = Math.abs(diffQty);
-                    updates.courtesy_quantity = 0;
-                    updates.adjustment_resolved = false;
-                  } else if (diffQty > 0) {
-                    updates.courtesy_quantity = diffQty;
-                    updates.shortage_quantity = 0;
-                    updates.adjustment_resolved = false;
-                  } else {
-                    updates.shortage_quantity = 0;
-                    updates.courtesy_quantity = 0;
-                    updates.adjustment_resolved = true;
-                  }
+                  const activeItemsToMove = [
+                    expeditionTransitionItem,
+                    ...expeditionSiblings.filter(s => expeditionSelectedSiblings.includes(s.id))
+                  ];
 
                   setLoading(true);
                   try {
                     const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
-                    // 1. Atualizar Ocorrência do Item Principal
-                    const { error } = await updateOrderItem(expeditionTransitionItem.id, updates);
-                    if (error) {
-                      alert('Erro ao salvar ocorrências de expedição: ' + error.message);
-                      setLoading(false);
-                      return;
-                    }
+                    // 1. Processar Ocorrências e Crédito/Débito Individual para Cada Item Selecionado
+                    for (const itm of activeItemsToMove) {
+                      const itemData = expeditionItemConferencyMap[itm.id] || {
+                        producedQuantity: itm.print_run || 0,
+                        adjustmentAction: 'CREDITO_PROXIMO_PEDIDO'
+                      };
+                      const orderedQty = itm.print_run || 0;
+                      const diffQty = itemData.producedQuantity - orderedQty;
 
-                    // 2. Gravar Log de Auditoria do Saldo (order_balance_adjustments)
-                    if (diffQty !== 0) {
-                      const adjType = diffQty >= 0 ? 'SOBRA' : 'FALTA';
-                      await createOrderBalanceAdjustment({
-                        tenant_id: tenantId,
-                        order_id: expeditionTransitionItem.order_id,
-                        order_item_id: expeditionTransitionItem.id,
-                        customer_id: expeditionTransitionItem.order?.customer_id,
-                        product_id: expeditionTransitionItem.product_id,
-                        ordered_quantity: orderedQty,
-                        produced_quantity: producedQuantity,
-                        difference_quantity: diffQty,
-                        adjustment_type: adjType,
-                        action_taken: adjustmentAction,
-                        notes: expeditionTransitionNotes || `Registrado na consolidação da Expedição (${adjType})`,
-                        created_by_name: user?.full_name || user?.email || 'Sistema'
-                      });
+                      const updates: any = {
+                        over_short_quantity: diffQty,
+                        expedition_notes: expeditionTransitionNotes || null
+                      };
 
-                      // 3. Se a ação gera crédito/pendência para o cliente, salvar em customer_stock_credits
-                      if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(adjustmentAction)) {
-                        const creditType = diffQty < 0 ? 'PENDENCIA_ENTREGA' : 'CORTESIA_SOBRA';
-                        const absQty = Math.abs(diffQty);
+                      if (diffQty < 0) {
+                        updates.shortage_quantity = Math.abs(diffQty);
+                        updates.courtesy_quantity = 0;
+                        updates.adjustment_resolved = false;
+                      } else if (diffQty > 0) {
+                        updates.courtesy_quantity = diffQty;
+                        updates.shortage_quantity = 0;
+                        updates.adjustment_resolved = false;
+                      } else {
+                        updates.shortage_quantity = 0;
+                        updates.courtesy_quantity = 0;
+                        updates.adjustment_resolved = true;
+                      }
 
-                        const { error: creditError } = await createCustomerStockCredit({
+                      // Update item no banco
+                      const { error } = await updateOrderItem(itm.id, updates);
+                      if (error) {
+                        console.error(`Erro ao atualizar item ${itm.id}:`, error.message);
+                      }
+
+                      // Registra Log de Ajustes do Saldo (order_balance_adjustments)
+                      if (diffQty !== 0) {
+                        const adjType = diffQty >= 0 ? 'SOBRA' : 'FALTA';
+                        await createOrderBalanceAdjustment({
                           tenant_id: tenantId,
-                          customer_id: expeditionTransitionItem.order?.customer_id,
-                          product_id: expeditionTransitionItem.product_id,
-                          credit_type: creditType,
-                          original_quantity: absQty,
-                          remaining_quantity: absQty,
-                          source_order_id: expeditionTransitionItem.order_id,
-                          source_adjustment_id: null,
-                          status: 'ATIVO',
-                          notes: expeditionTransitionNotes || `Registrado na Expedição (${diffQty < 0 ? 'Falta' : 'Cortesia'})`
+                          order_id: itm.order_id,
+                          order_item_id: itm.id,
+                          customer_id: itm.order?.customer_id || expeditionTransitionItem.order?.customer_id,
+                          product_id: itm.product_id,
+                          ordered_quantity: orderedQty,
+                          produced_quantity: itemData.producedQuantity,
+                          difference_quantity: diffQty,
+                          adjustment_type: adjType,
+                          action_taken: itemData.adjustmentAction as any,
+                          notes: expeditionTransitionNotes || `Registrado na consolidação da Expedição (${adjType})`,
+                          created_by_name: user?.full_name || user?.email || 'Sistema'
                         });
 
-                        if (creditError) {
-                          console.error('Erro ao registrar saldo acumulado do cliente:', creditError.message);
+                        // Registra Crédito/Débito em customer_stock_credits
+                        if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(itemData.adjustmentAction)) {
+                          const creditType = diffQty < 0 ? 'PENDENCIA_ENTREGA' : 'CORTESIA_SOBRA';
+                          const absQty = Math.abs(diffQty);
+
+                          const { error: creditError } = await createCustomerStockCredit({
+                            tenant_id: tenantId,
+                            customer_id: itm.order?.customer_id || expeditionTransitionItem.order?.customer_id,
+                            product_id: itm.product_id,
+                            credit_type: creditType,
+                            original_quantity: absQty,
+                            remaining_quantity: absQty,
+                            source_order_id: itm.order_id,
+                            source_adjustment_id: null,
+                            status: 'ATIVO',
+                            notes: expeditionTransitionNotes || `Registrado na Expedição (${diffQty < 0 ? 'Falta' : 'Cortesia'})`
+                          });
+
+                          if (creditError) {
+                            console.error('Erro ao registrar saldo acumulado do cliente:', creditError.message);
+                          }
                         }
                       }
                     }
 
-                    // 4. Salvar Dados Técnicos de Frete (Consolidado)
+                    // 2. Salvar Dados Técnicos de Frete (Consolidado)
                     await updateOrder(expeditionTransitionItem.order_id, {
                       shipping_type: selectedShippingType as any,
                       notes: expeditionFreightNotes ? (expeditionTransitionItem.order?.notes + '\n' + expeditionFreightNotes) : expeditionTransitionItem.order?.notes
@@ -5620,26 +5680,18 @@ export default function PedidosPage() {
                       notes: expeditionFreightNotes || null
                     }], tenantId);
 
-                    // 5. Mover Item Principal para a Expedição
-                    expeditionTransitionMoveBypass.current = true;
+                    // 3. Mover Todos os Itens Selecionados para a Expedição
                     setIsExpeditionTransitionModalOpen(false);
-                    await moveOrderItemToStage(expeditionTransitionItem, expeditionTransitionTargetStageId);
-                    
-                    // 6. Mover Itens Irmãos Selecionados
-                    if (expeditionSelectedSiblings.length > 0) {
-                      for (const sibId of expeditionSelectedSiblings) {
-                        const siblingItem = orderItems.find(i => i.id === sibId);
-                        if (siblingItem) {
-                          expeditionTransitionMoveBypass.current = true;
-                          await moveOrderItemToStage(siblingItem, expeditionTransitionTargetStageId);
-                        }
-                      }
+                    for (const itm of activeItemsToMove) {
+                      expeditionTransitionMoveBypass.current = true;
+                      await moveOrderItemToStage(itm, expeditionTransitionTargetStageId);
                     }
 
                     setExpeditionTransitionItem(null);
                   } catch (err) {
                     console.error(err);
-                    alert('Ocorreu um erro ao salvar os dados.');
+                    alert('Ocorreu um erro ao salvar os dados da expedição.');
+                  } finally {
                     setLoading(false);
                   }
                 }}
