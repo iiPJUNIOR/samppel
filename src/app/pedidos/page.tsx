@@ -129,16 +129,23 @@ const extractOrderDetails = (notes: string | null) => {
     return match ? match[1].trim() : null;
   };
 
-  const cliche = extract(/Chichê:\s*([^\n\r]+)/i) || extract(/Clichê:\s*([^\n\r]+)/i);
-  const embalagem = extract(/Embalagem:\s*([^\n\r]+)/i);
-  const prazo = extract(/Prazo de entrega:\s*([^\n\r]+)/i);
-  const freteInfo = extract(/Frete:\s*([^\n\r]+)/i);
-  const meioPag = extract(/Meio de pag\.:\s*([^\n\r]+)/i) || extract(/Meio de pagamento:\s*([^\n\r]+)/i);
-  const formaPag = extract(/Forma de pag\.:\s*([^\n\r]+)/i) || extract(/Forma de pagamento:\s*([^\n\r]+)/i);
+  const cliche = extract(/Clich[êe]\s*:\s*([^\n\r]+)/i) || extract(/Chichê:\s*([^\n\r]+)/i);
+  const embalagem = extract(/Embalage(?:m|ns)\s*:\s*([^\n\r]+)/i);
+  const prazo = extract(/Prazo de entrega\s*:\s*([^\n\r]+)/i);
+  const freteInfo = extract(/Frete\s*:\s*([^\n\r]+)/i);
+  const meioPag = extract(/Meio de pag(?:amento|\.)?\s*:\s*([^\n\r]+)/i);
+  const formaPag = extract(/Forma de pag(?:amento|\.)?\s*:\s*([^\n\r]+)/i);
+  const op = extract(/OP\s*:\s*([^\n\r]+)/i);
 
-  if (!cliche && !embalagem && !prazo && !freteInfo && !meioPag && !formaPag) return null;
+  const impressaoMatch = relevantNotes.match(/Impressão\s+([^\n\r]+)/i);
+  const impressao = impressaoMatch ? impressaoMatch[1].trim() : null;
 
-  return { cliche, embalagem, prazo, freteInfo, meioPag, formaPag };
+  const faturamentoMatch = relevantNotes.match(/(PEDIDO FATURADO[^\n\r]*)/i);
+  const faturamento = faturamentoMatch ? faturamentoMatch[1].trim() : null;
+
+  if (!cliche && !embalagem && !prazo && !freteInfo && !meioPag && !formaPag && !op && !impressao && !faturamento) return null;
+
+  return { cliche, embalagem, prazo, freteInfo, meioPag, formaPag, op, impressao, faturamento };
 };
 
 // Helper para garantir primeira letra maiúscula em valores de especificações
@@ -677,6 +684,32 @@ export default function PedidosPage() {
     setBlockedPaymentItem(null);
     setBlockedPaymentTargetStageId('');
     setBlockedSyncFeedback(null);
+    resetAllBypasses();
+  };
+
+  // Estados do Modal Faturado Alert (Entrando na Expedição)
+  const [isFaturadoAlertModalOpen, setIsFaturadoAlertModalOpen] = useState(false);
+  const [faturadoAlertItem, setFaturadoAlertItem] = useState<any>(null);
+  const [faturadoAlertTargetStageId, setFaturadoAlertTargetStageId] = useState<string>('');
+  const faturadoAlertBypass = useRef(false);
+
+  const handleConfirmFaturadoAlertMove = async () => {
+    if (!faturadoAlertItem || !faturadoAlertTargetStageId) return;
+    const item = faturadoAlertItem;
+    const targetStageId = faturadoAlertTargetStageId;
+
+    setIsFaturadoAlertModalOpen(false);
+    setFaturadoAlertItem(null);
+    setFaturadoAlertTargetStageId('');
+
+    faturadoAlertBypass.current = true;
+    await moveOrderItemToStage(item, targetStageId);
+  };
+
+  const handleCancelFaturadoAlertMove = () => {
+    setIsFaturadoAlertModalOpen(false);
+    setFaturadoAlertItem(null);
+    setFaturadoAlertTargetStageId('');
     resetAllBypasses();
   };
 
@@ -1220,6 +1253,7 @@ export default function PedidosPage() {
     siblingMoveBypass.current = false;
     insufficientStockMoveBypass.current = false;
     adminMoveOverride.current = false;
+    faturadoAlertBypass.current = false;
     currentOperator.current = null;
   };
 
@@ -1266,6 +1300,19 @@ export default function PedidosPage() {
       setInProgressTargetStageId(targetStageId);
       setIsOrderInProgressModalOpen(true);
       return;
+    }
+
+    // ---------------------------------------------------------------
+    // REGRA DE ALERTA DE FATURADO (Qualquer etapa -> Expedição)
+    // ---------------------------------------------------------------
+    if (targetStage.name === 'Expedição' && !faturadoAlertBypass.current) {
+      const details = extractOrderDetails(item.notes || parentOrder.notes);
+      if (details?.formaPag && details.formaPag.toUpperCase().includes('FATURADO')) {
+        setFaturadoAlertItem(item);
+        setFaturadoAlertTargetStageId(targetStageId);
+        setIsFaturadoAlertModalOpen(true);
+        return;
+      }
     }
 
     // ---------------------------------------------------------------
@@ -4274,7 +4321,9 @@ export default function PedidosPage() {
                               touchAction: 'pan-y',
                               userSelect: 'none',
                               backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
-                              border: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                              borderTop: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                              borderRight: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                              borderBottom: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
                               borderLeft: `3px solid ${stage.color}`,
                               borderRadius: 'var(--radius-sm)',
                               padding: '0.5rem',
@@ -4416,11 +4465,15 @@ export default function PedidosPage() {
                                 fontSize: '0.6rem',
                                 color: 'var(--text-muted)'
                               }}>
+                                {details.op && <div><strong style={{ color: 'var(--text)' }}>OP:</strong> {capitalizeText(details.op)}</div>}
+                                {details.cliche && <div><strong style={{ color: 'var(--text)' }}>Clichê:</strong> {capitalizeText(details.cliche)}</div>}
                                 {details.embalagem && <div><strong style={{ color: 'var(--text)' }}>Emb:</strong> {capitalizeText(details.embalagem)}</div>}
                                 {details.prazo && <div><strong style={{ color: 'var(--text)' }}>Prazo:</strong> {capitalizeText(details.prazo)}</div>}
                                 {details.freteInfo && <div><strong style={{ color: 'var(--text)' }}>Frete:</strong> {capitalizeText(details.freteInfo)}</div>}
                                 {details.meioPag && <div><strong style={{ color: 'var(--text)' }}>Meio Pgto:</strong> {capitalizeText(details.meioPag)}</div>}
                                 {details.formaPag && <div><strong style={{ color: 'var(--text)' }}>Forma Pgto:</strong> {capitalizeText(details.formaPag)}</div>}
+                                {details.impressao && <div><strong style={{ color: 'var(--text)' }}>Impressão:</strong> {capitalizeText(details.impressao)}</div>}
+                                {details.faturamento && <div><strong style={{ color: 'var(--text)' }}>Fat:</strong> {capitalizeText(details.faturamento)}</div>}
                               </div>
                             );
                           })()}
@@ -4481,7 +4534,11 @@ export default function PedidosPage() {
                                 <span>{item.print_run?.toLocaleString('pt-BR')} un</span>
                               )}
                               <span style={{ fontWeight: 600 }}>
-                                {item.boxes_count}{item.packaging_type === 'PACOTE' ? 'pct' : 'cx'}
+                                {(() => {
+                                  const d = extractOrderDetails(item.notes || parentOrder.notes);
+                                  if (d?.embalagem) return capitalizeText(d.embalagem);
+                                  return item.boxes_count ? `${item.boxes_count}${item.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null;
+                                })()}
                               </span>
                             </div>
                             
@@ -4505,9 +4562,7 @@ export default function PedidosPage() {
 
                           {/* Setor, Tipo e Localização */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem', gap: '2px' }}>
-                            <span className="badge badge-info" style={{ fontSize: '0.6rem', padding: '0px 4px', textTransform: 'capitalize' }}>
-                              {item.production_sector}
-                            </span>
+
                             <span 
                               style={{ 
                                 color: 'var(--text-muted)',
@@ -5027,11 +5082,12 @@ export default function PedidosPage() {
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 500 }}>
-                            {order.boxes_count} {order.packaging_type === 'PACOTE' ? 'pacote(s)' : 'caixa(s)'}
+                            {(() => {
+                              const d = extractOrderDetails(order.notes);
+                              if (d?.embalagem) return capitalizeText(d.embalagem);
+                              return order.boxes_count ? `${order.boxes_count} ${order.packaging_type === 'PACOTE' ? 'pacote(s)' : 'caixa(s)'}` : '—';
+                            })()}
                           </div>
-                          {order.packaging_type === 'PACOTE' && (
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>(100 un por pct)</div>
-                          )}
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
                           <span className="badge badge-info" style={{ textTransform: 'capitalize', display: 'block', textAlign: 'center', marginBottom: '4px' }}>
@@ -7743,6 +7799,7 @@ export default function PedidosPage() {
                 </div>
               </div>
 
+
               {/* CONTROLE FINANCEIRO */}
               {user?.role !== 'Produção' && user?.role !== 'Estoque' && user?.role !== 'Expedição' && (
                 <div style={{ marginTop: '1.25rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'rgba(var(--primary-rgb), 0.02)' }}>
@@ -7933,6 +7990,36 @@ export default function PedidosPage() {
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* OBSERVAÇÕES E HISTÓRICO */}
+              <div style={{ marginTop: '1.25rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}>
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)', marginBottom: '0.75rem' }}>Observações e Anotações Internas</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">Observações (Visível para todos)</label>
+                    <textarea
+                      className="form-input"
+                      rows={4}
+                      value={formNotes}
+                      disabled={isReadOnlyForForm('notes')}
+                      onChange={(e) => setFormNotes(e.target.value)}
+                      placeholder="Observações vindas do Conta Azul ou adicionadas pela equipe..."
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">Anotações Internas (Uso Interno)</label>
+                    <textarea
+                      className="form-input"
+                      rows={3}
+                      value={formInternalNotes}
+                      disabled={isReadOnlyForForm('internalNotes')}
+                      onChange={(e) => setFormInternalNotes(e.target.value)}
+                      placeholder="Anotações para controle interno, produção ou financeiro..."
+                    />
+                  </div>
+                </div>
               </div>
 
               <footer style={{
@@ -8561,13 +8648,17 @@ export default function PedidosPage() {
                       const packagingText = specDetails?.embalagem || (detailItem.boxes_count ? `${detailItem.boxes_count} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null);
 
                       const specsList = [
+                        { label: 'OP', value: capitalizeText(specDetails?.op) },
                         { label: 'Tiragem', value: detailItem.print_run ? detailItem.print_run.toLocaleString('pt-BR') + ' un' : '—' },
+                        { label: 'Clichê', value: capitalizeText(specDetails?.cliche) },
                         { label: 'Embalagem', value: capitalizeText(packagingText) },
                         { label: 'Medida', value: capitalizeText(getItemRealMeasure(detailItem)) },
+                        { label: 'Impressão', value: capitalizeText(specDetails?.impressao) },
                         { label: 'Prazo de Entrega', value: capitalizeText(specDetails?.prazo) },
                         { label: 'Frete', value: capitalizeText(specDetails?.freteInfo) },
                         { label: 'Meio de Pagamento', value: capitalizeText(specDetails?.meioPag) },
                         { label: 'Forma de Pagamento', value: capitalizeText(specDetails?.formaPag) },
+                        { label: 'Faturamento', value: capitalizeText(specDetails?.faturamento) },
                         { label: 'Máquina Vinculada', value: capitalizeText(machineName) },
                         { label: 'Localização', value: capitalizeText(detailItem.physical_location) },
                         { label: 'Sobra/Falta Produção', value: detailItem.over_short_quantity ? (detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : `${detailItem.over_short_quantity}`) : '—' },
@@ -8584,6 +8675,7 @@ export default function PedidosPage() {
                     })()}
                   </div>
                 </section>
+
 
                 {/* Seção: Controle Financeiro & Contas a Receber (Estilo Conta Azul em Card) */}
                 <section style={{
@@ -8922,6 +9014,37 @@ export default function PedidosPage() {
                   </div>
                 </section>
 
+
+                {/* Seção: Observações e Anotações Internas */}
+                <section style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md, 10px)',
+                  padding: '1rem 1.15rem',
+                  backgroundColor: 'var(--surface)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem',
+                  marginBottom: '1rem'
+                }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+                    <span style={{ width: '4px', height: '14px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
+                    Observações e Anotações Internas
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Observações (Visível para todos)</span>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text)', whiteSpace: 'pre-wrap', backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                        {detailItem.notes || order.notes || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhuma observação informada.</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Anotações Internas (Uso Interno)</span>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text)', whiteSpace: 'pre-wrap', backgroundColor: 'rgba(var(--primary-rgb), 0.05)', padding: '0.75rem', borderRadius: '6px', border: '1px dashed var(--primary)' }}>
+                        {order.internal_notes || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhuma anotação interna informada.</span>}
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
               </div>
 
@@ -9770,6 +9893,64 @@ export default function PedidosPage() {
           </div>
         );
       })()}
+
+      {/* MODAL: ALERTA DE FATURADO (AO ENTRAR NA EXPEDIÇÃO) */}
+      {isFaturadoAlertModalOpen && faturadoAlertItem && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200000,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
+            maxWidth: '500px', width: '90%', overflow: 'hidden',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', color: 'var(--text)'
+          }}>
+            <div style={{
+              backgroundColor: '#3b82f6',
+              padding: '1.25rem 1.5rem',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', gap: '0.75rem'
+            }}>
+              <AlertCircle size={28} />
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>Atenção: Pedido Faturado</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', opacity: 0.9 }}>
+                  Verifique os procedimentos de faturamento antes de prosseguir.
+                </p>
+              </div>
+            </div>
+            
+            <div style={{ padding: '1.5rem' }}>
+              <p style={{ fontSize: '0.9rem', marginBottom: '1rem', lineHeight: '1.5' }}>
+                O pedido <strong>{faturadoAlertItem.order?.pv_number || faturadoAlertItem.order_id}</strong> possui a forma de pagamento definida como <strong>FATURADO</strong>.
+              </p>
+              <p style={{ fontSize: '0.9rem', marginBottom: '1rem', lineHeight: '1.5', color: 'var(--text-muted)' }}>
+                Certifique-se de que a nota fiscal e as condições de pagamento estão corretas antes de prosseguir com a Expedição. Deseja continuar a movimentação?
+              </p>
+            </div>
+            
+            <div style={{ padding: '1.25rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '0.75rem', backgroundColor: 'var(--bg-body)', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn" 
+                onClick={handleCancelFaturadoAlertMove}
+                style={{ height: '38px', fontSize: '0.85rem', fontWeight: 600, border: '1px solid var(--border)', backgroundColor: 'transparent' }}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="btn" 
+                onClick={handleConfirmFaturadoAlertMove}
+                style={{ height: '38px', fontSize: '0.85rem', fontWeight: 600, color: '#fff', backgroundColor: '#3b82f6', border: 'none' }}
+              >
+                Ciente, Prosseguir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL DIDÁTICO: ALERTA DE PEDIDO BLOQUEADO (AGUARDANDO PAGAMENTO / SINAL) */}
       {isBlockedPaymentModalOpen && blockedPaymentItem && (() => {
