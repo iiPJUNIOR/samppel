@@ -4537,6 +4537,38 @@ export default function PedidosPage() {
                             );
                           })()}
 
+                          {/* Informações Extras (Clichê, Pagamento) */}
+                          {(orderDetails?.cliche || orderDetails?.meioPag || orderDetails?.formaPag) && (
+                            <div style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '1px',
+                              fontSize: '0.62rem',
+                              color: 'var(--text-muted)',
+                              marginTop: '2px',
+                              marginBottom: '2px'
+                            }}>
+                              {orderDetails.cliche && (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>Clichê:</span>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={orderDetails.cliche}>{capitalizeText(orderDetails.cliche)}</span>
+                                </div>
+                              )}
+                              {orderDetails.meioPag && (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>Pgto:</span>
+                                  <span>{capitalizeText(orderDetails.meioPag)}{orderDetails.formaPag ? ` - ${capitalizeText(orderDetails.formaPag)}` : ''}</span>
+                                </div>
+                              )}
+                              {!orderDetails.meioPag && orderDetails.formaPag && (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>Pgto:</span>
+                                  <span>{capitalizeText(orderDetails.formaPag)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {/* Produto e Tiragem */}
                           <div style={{ fontSize: '0.65rem', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', padding: '0.2rem 0', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2px', alignItems: 'center' }}>
@@ -5502,16 +5534,16 @@ export default function PedidosPage() {
                       <input type="number" step="0.01" className="form-input" value={expeditionFreightWeight} onChange={e => setExpeditionFreightWeight(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0.00" />
                     </div>
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Comp (cm)</label>
-                      <input type="number" step="0.1" className="form-input" value={expeditionFreightLength} onChange={e => setExpeditionFreightLength(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
+                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Alt (cm)</label>
+                      <input type="number" step="0.1" className="form-input" value={expeditionFreightHeight} onChange={e => setExpeditionFreightHeight(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
                     </div>
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label" style={{ fontSize: '0.72rem' }}>Larg (cm)</label>
                       <input type="number" step="0.1" className="form-input" value={expeditionFreightWidth} onChange={e => setExpeditionFreightWidth(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
                     </div>
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Alt (cm)</label>
-                      <input type="number" step="0.1" className="form-input" value={expeditionFreightHeight} onChange={e => setExpeditionFreightHeight(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
+                      <label className="form-label" style={{ fontSize: '0.72rem' }}>Comp (cm)</label>
+                      <input type="number" step="0.1" className="form-input" value={expeditionFreightLength} onChange={e => setExpeditionFreightLength(e.target.value)} style={{ padding: '0.4rem 0.5rem', fontSize: '0.8rem' }} placeholder="0" />
                     </div>
                   </div>
                 </div>
