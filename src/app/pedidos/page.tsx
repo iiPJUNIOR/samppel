@@ -129,7 +129,11 @@ const extractOrderDetails = (notes: string | null) => {
     return match ? match[1].trim() : null;
   };
 
-  const cliche = extract(/Clich[êe]\s*:\s*([^\n\r]+)/i) || extract(/Chichê:\s*([^\n\r]+)/i);
+  let cliche = extract(/Clich[êe]\s*:\s*([^\n\r]+)/i) || extract(/Chichê:\s*([^\n\r]+)/i);
+  if (cliche) {
+    cliche = cliche.replace(/Embalage(?:m|ns)\s*:.*/i, '').replace(/[\s|-]+$/, '').trim();
+    if (!cliche) cliche = null;
+  }
   const embalagem = extract(/Embalage(?:m|ns)\s*:\s*([^\n\r]+)/i);
   const prazo = extract(/Prazo de entrega\s*:\s*([^\n\r]+)/i);
   const freteInfo = extract(/Frete\s*:\s*([^\n\r]+)/i);
@@ -3498,7 +3502,21 @@ export default function PedidosPage() {
     return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage;
   });
 
-  const getFreightBadgeStyle = (shippingType: string) => {
+  const getFreightBadgeStyle = (shippingType: string, notesFreight?: string | null) => {
+    if (notesFreight) {
+      const nfUpper = notesFreight.toUpperCase();
+      if (nfUpper.includes('ENTREGA') && !nfUpper.includes('CORREIO') && !nfUpper.includes('SEDEX')) {
+         return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: capitalizeText(notesFreight) };
+      }
+      if (nfUpper.includes('CORREIO') || nfUpper.includes('SEDEX') || nfUpper.includes('PAC') || nfUpper.includes('TRANSP')) {
+         return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: capitalizeText(notesFreight) };
+      }
+      if (nfUpper.includes('LALA') || nfUpper.includes('MOTO')) {
+         return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: capitalizeText(notesFreight) };
+      }
+      return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: capitalizeText(notesFreight) };
+    }
+
     switch (shippingType) {
       case 'LALAMOVE':
       case 'MOTOBOY':
@@ -4303,7 +4321,8 @@ export default function PedidosPage() {
                       const parentOrder = item.order || {};
                       const isReleased = !!parentOrder.first_payment_date;
                       const overShort = item.over_short_quantity || 0;
-                      const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type);
+                      const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+                      const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type, orderDetails?.freteInfo);
                       const isBeingDragged = draggedItemId === item.id;
                       const showPlaceholderBefore = dragOverStageId === stage.id && dragOverIndex === idx && !isBeingDragged;
                       
@@ -4408,7 +4427,7 @@ export default function PedidosPage() {
                                 );
                               })()}
                             </div>
-                            {parentOrder.op_number ? (
+                            {parentOrder.op_number && (
                               <span 
                                 style={{ 
                                   fontSize: '0.625rem', 
@@ -4422,8 +4441,6 @@ export default function PedidosPage() {
                               >
                                 {parentOrder.op_number}
                               </span>
-                            ) : (
-                              <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)' }}>Est.</span>
                             )}
                           </div>
 
@@ -4448,60 +4465,57 @@ export default function PedidosPage() {
                             </div>
                           </div>
 
-                          {/* Destahes Estruturados do Pedido (Extraídos das Observações) */}
-                          {(() => {
-                            const details = extractOrderDetails(item.notes || parentOrder.notes);
-                            if (!details) return null;
-                            return (
-                              <div style={{
-                                marginTop: '4px',
-                                padding: '4px',
-                                backgroundColor: 'var(--background)',
-                                border: '1px solid var(--border)',
-                                borderRadius: '4px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '2px',
-                                fontSize: '0.6rem',
-                                color: 'var(--text-muted)'
-                              }}>
-                                {details.op && <div><strong style={{ color: 'var(--text)' }}>OP:</strong> {capitalizeText(details.op)}</div>}
-                                {details.cliche && <div><strong style={{ color: 'var(--text)' }}>Clichê:</strong> {capitalizeText(details.cliche)}</div>}
-                                {details.embalagem && <div><strong style={{ color: 'var(--text)' }}>Emb:</strong> {capitalizeText(details.embalagem)}</div>}
-                                {details.prazo && <div><strong style={{ color: 'var(--text)' }}>Prazo:</strong> {capitalizeText(details.prazo)}</div>}
-                                {details.freteInfo && <div><strong style={{ color: 'var(--text)' }}>Frete:</strong> {capitalizeText(details.freteInfo)}</div>}
-                                {details.meioPag && <div><strong style={{ color: 'var(--text)' }}>Meio Pgto:</strong> {capitalizeText(details.meioPag)}</div>}
-                                {details.formaPag && <div><strong style={{ color: 'var(--text)' }}>Forma Pgto:</strong> {capitalizeText(details.formaPag)}</div>}
-                                {details.impressao && <div><strong style={{ color: 'var(--text)' }}>Impressão:</strong> {capitalizeText(details.impressao)}</div>}
-                                {details.faturamento && <div><strong style={{ color: 'var(--text)' }}>Fat:</strong> {capitalizeText(details.faturamento)}</div>}
-                              </div>
-                            );
-                          })()}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '1px' }}>
+                            {/* Destaque de Autorização (AUT.) se houver nas observações */}
+                            {(() => {
+                              const authNum = extractAuthorization(item.notes || parentOrder.notes);
+                              if (!authNum) return null;
+                              return (
+                                <div style={{
+                                  backgroundColor: 'hsla(142, 76.2%, 36.3%, 0.1)',
+                                  border: '1px solid hsla(142, 76.2%, 36.3%, 0.35)',
+                                  color: 'hsl(142, 76.2%, 30%)',
+                                  borderRadius: 'var(--radius-sm)',
+                                  padding: '2px 6px',
+                                  fontSize: '0.65rem',
+                                  fontWeight: 800,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                  width: 'fit-content'
+                                }}>
+                                  <Check size={8} strokeWidth={3} />
+                                  {authNum}
+                                </div>
+                              );
+                            })()}
 
-                          {/* Destaque de Autorização (AUT.) se houver nas observações */}
-                          {(() => {
-                            const authNum = extractAuthorization(item.notes || parentOrder.notes);
-                            if (!authNum) return null;
-                            return (
-                              <div style={{
-                                backgroundColor: 'hsla(142, 76.2%, 36.3%, 0.1)',
-                                border: '1px solid hsla(142, 76.2%, 36.3%, 0.35)',
-                                color: 'hsl(142, 76.2%, 30%)',
-                                borderRadius: 'var(--radius-sm)',
-                                padding: '2px 6px',
-                                fontSize: '0.65rem',
-                                fontWeight: 800,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.2rem',
-                                width: 'fit-content',
-                                marginTop: '1px'
-                              }}>
-                                <Check size={8} strokeWidth={3} />
-                                {authNum}
-                              </div>
-                            );
-                          })()}
+                            {/* Destaque de Faturamento */}
+                            {(() => {
+                              const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
+                              if (!isFaturado) return null;
+                              
+                              const text = orderDetails?.faturamento ? orderDetails.faturamento.toUpperCase() : 'PEDIDO FATURADO';
+                              return (
+                                <div style={{
+                                  backgroundColor: 'hsla(220, 90%, 50%, 0.1)',
+                                  border: '1px solid hsla(220, 90%, 50%, 0.35)',
+                                  color: 'hsl(220, 90%, 40%)',
+                                  borderRadius: 'var(--radius-sm)',
+                                  padding: '2px 6px',
+                                  fontSize: '0.65rem',
+                                  fontWeight: 800,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                  width: 'fit-content'
+                                }}>
+                                  <CheckCircle2 size={10} strokeWidth={2.5} />
+                                  {text}
+                                </div>
+                              );
+                            })()}
+                          </div>
 
                           {/* Destaque de Prazo de Produção se houver nas observações */}
                           {(() => {
