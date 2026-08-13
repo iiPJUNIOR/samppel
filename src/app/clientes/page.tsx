@@ -119,7 +119,8 @@ export default function ClientesPage() {
     };
   };
 
-  const formatDocument = (val: string) => {
+  const formatDocument = (val: string | null | undefined) => {
+    if (!val) return '';
     const clean = val.replace(/\D/g, '').substring(0, 14);
     if (clean.length <= 11) {
       // CPF: 999.999.999-99
@@ -137,7 +138,8 @@ export default function ClientesPage() {
     }
   };
 
-  const formatPhone = (val: string) => {
+  const formatPhone = (val: string | null | undefined) => {
+    if (!val) return '';
     const clean = val.replace(/\D/g, '').substring(0, 11);
     if (clean.length <= 10) {
       // (99) 9999-9999
