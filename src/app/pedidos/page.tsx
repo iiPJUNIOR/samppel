@@ -48,6 +48,7 @@ import {
   createFactoryLocation,
   updateFactoryLocation,
   deleteFactoryLocation,
+  createCustomer,
   getOrderItemHandlingTeams,
   saveOrderItemHandlingTeams,
   saveOrderShippingVolumes,
@@ -3075,7 +3076,8 @@ export default function PedidosPage() {
       const order = entity.order || {};
       setSelectedOrder(order);
       
-      setFormCustomer(order.customer_id || '');
+      const cust = customers.find(c => c.id === order.customer_id);
+      setFormCustomer(cust ? cust.name : '');
       setFormProduct(entity.product_id || '');
       setFormMeasure(getItemRealMeasure(entity));
       setFormPrintRun(entity.print_run || 1000);
@@ -3162,6 +3164,23 @@ export default function PedidosPage() {
     setIsModalOpen(true);
   };
 
+  const resolveCustomerId = async (name: string) => {
+    if (!name || !name.trim()) return null;
+    const existingCust = customers.find(c => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (existingCust) {
+      return existingCust.id;
+    } else {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const { data: newCust, error: custError } = await createCustomer({ name: name.trim(), tenant_id: tenantId });
+      if (custError) {
+        console.error('Erro ao criar cliente:', custError.message);
+        return null;
+      }
+      if (newCust) return newCust.id;
+    }
+    return null;
+  };
+
   const executeDetailsSave = async (opId?: string | null, opName?: string | null) => {
     if (!selectedItem) return;
 
@@ -3209,8 +3228,9 @@ export default function PedidosPage() {
         internal_notes: formInternalNotes
       };
     } else {
+      const resolvedCustomerId = await resolveCustomerId(formCustomer);
       orderPayload = {
-        customer_id: formCustomer,
+        customer_id: resolvedCustomerId || null,
         seller_name: formSeller,
         freight_value: Number(formFreight),
         pv_number: formPvNumber,
@@ -3266,7 +3286,7 @@ export default function PedidosPage() {
     e.preventDefault();
 
     if (modalType === 'create') {
-      let targetStage = stages[0];
+      let targetStage = stages.find(s => s.name === 'A produzir') || stages[0];
       let targetStatus = 'A produzir';
       let targetSector: any = 'Impressão';
 
@@ -3279,8 +3299,12 @@ export default function PedidosPage() {
         }
       }
 
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const resolvedCustomerId = await resolveCustomerId(formCustomer);
+
       const orderPayload = {
-        customer_id: formCustomer,
+        tenant_id: tenantId,
+        customer_id: resolvedCustomerId || null,
         product_id: formProduct || null,
         measure: formMeasure,
         print_run: Number(formPrintRun),
@@ -3379,8 +3403,9 @@ export default function PedidosPage() {
             internal_notes: formInternalNotes
           };
         } else {
+          const resolvedCustomerId = await resolveCustomerId(formCustomer);
           updatePayload = {
-            customer_id: formCustomer,
+            customer_id: resolvedCustomerId || null,
             product_id: formProduct || null,
             measure: formMeasure,
             print_run: Number(formPrintRun),
@@ -7443,6 +7468,7 @@ export default function PedidosPage() {
             maxHeight: '90vh',
             display: 'flex',
             flexDirection: 'column',
+            overflow: 'hidden',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{
@@ -7565,18 +7591,21 @@ export default function PedidosPage() {
                 {/* Seleção do Cliente */}
                 <div className="form-group">
                   <label className="form-label">Cliente (Razão Social) *</label>
-                  <select 
-                    className="form-select"
+                  <input
+                    type="text"
+                    list="customers-list"
+                    className="form-input"
                     required
+                    placeholder="Ex: Doce Vida Doceria (Digite ou selecione)"
                     value={formCustomer}
                     disabled={isReadOnlyForForm('customer')}
                     onChange={(e) => setFormCustomer(e.target.value)}
-                  >
-                    <option value="">Selecione o Cliente</option>
+                  />
+                  <datalist id="customers-list">
                     {customers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                      <option key={c.id} value={c.name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
 
                 {/* Seleção do Produto */}
@@ -7612,12 +7641,11 @@ export default function PedidosPage() {
 
                 {/* Medidas */}
                 <div className="form-group">
-                  <label className="form-label">Medidas Customizadas *</label>
+                  <label className="form-label">Medidas Customizadas</label>
                   <input 
                     type="text" 
                     className="form-input" 
                     placeholder="Ex: 20x15x8 cm"
-                    required
                     value={formMeasure}
                     disabled={isReadOnlyForForm('measure')}
                     onChange={(e) => setFormMeasure(e.target.value)}
@@ -7635,35 +7663,6 @@ export default function PedidosPage() {
                     value={formPrintRun}
                     disabled={isReadOnlyForForm('printRun')}
                     onChange={(e) => setFormPrintRun(Number(e.target.value))}
-                  />
-                </div>
-
-                {/* Tipo de Embalagem */}
-                <div className="form-group">
-                  <label className="form-label">Tipo de Embalagem Final *</label>
-                  <select 
-                    className="form-select"
-                    required
-                    value={formPackagingType}
-                    disabled={isReadOnlyForForm('packaging_type')}
-                    onChange={(e) => setFormPackagingType(e.target.value as any)}
-                  >
-                    <option value="CAIXA">Caixas</option>
-                    <option value="PACOTE">Pacotes (100 un)</option>
-                  </select>
-                </div>
-
-                {/* Qtd. Embalagens */}
-                <div className="form-group">
-                  <label className="form-label">Qtd. de Caixas/Pacotes de Embalagem *</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    required
-                    min={1}
-                    value={formBoxes}
-                    disabled={isReadOnlyForForm('boxes')}
-                    onChange={(e) => setFormBoxes(Number(e.target.value))}
                   />
                 </div>
 
@@ -8050,7 +8049,7 @@ export default function PedidosPage() {
                       value={formNotes}
                       disabled={isReadOnlyForForm('notes')}
                       onChange={(e) => setFormNotes(e.target.value)}
-                      placeholder="Observações vindas do Conta Azul ou adicionadas pela equipe..."
+                      placeholder="Observações adicionadas pela equipe..."
                     />
                   </div>
                   

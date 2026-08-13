@@ -37,7 +37,7 @@ export default function SaldosCreditosPage() {
   
   // Controle de Estado
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'credits' | 'stocks' | 'logs'>('credits');
+  const [activeTab, setActiveTab] = useState<'credits' | 'stocks'>('credits');
 
   // Filtros
   const [filterCustomer, setFilterCustomer] = useState('');
@@ -183,23 +183,7 @@ export default function SaldosCreditosPage() {
           <span>Créditos e Saldos ({credits.length})</span>
         </button>
         
-        <button 
-          onClick={() => setActiveTab('stocks')}
-          className={`btn ${activeTab === 'stocks' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-        >
-          <Package size={16} />
-          <span>Estoque de Personalizados ({stocks.length})</span>
-        </button>
 
-        <button 
-          onClick={() => setActiveTab('logs')}
-          className={`btn ${activeTab === 'logs' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-        >
-          <Clock size={16} />
-          <span>Histórico de Logs ({adjustments.length})</span>
-        </button>
       </div>
 
       {/* BARRA DE FILTROS */}
@@ -270,7 +254,7 @@ export default function SaldosCreditosPage() {
       {/* EXIBIÇÃO CONTEÚDO */}
       <div className="card">
         <div className="table-responsive">
-          {activeTab === 'credits' ? (
+          {activeTab === 'credits' && (
             /* TAB 1: CRÉDITOS */
             <table className="table">
               <thead>
@@ -335,133 +319,6 @@ export default function SaldosCreditosPage() {
                       </td>
                     </tr>
                   ))
-                )}
-              </tbody>
-            </table>
-          ) : activeTab === 'stocks' ? (
-            /* TAB 2: ESTOQUES */
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Cliente Proprietário</th>
-                  <th>Produto Personalizado</th>
-                  <th>Tamanho / Medida</th>
-                  <th>Quantidade em Estoque na Fábrica</th>
-                  <th>Última Movimentação</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={5} />)
-                ) : filteredStocks.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-                      Nenhum lote de personalizado armazenado na fábrica.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredStocks.map((s) => (
-                    <tr key={s.id}>
-                      <td style={{ fontWeight: 600 }}>{s.customer?.name || 'Cliente'}</td>
-                      <td style={{ fontWeight: 500 }}>{s.product?.name || 'Produto'}</td>
-                      <td><code>{s.product?.measure || 'Padrão'}</code></td>
-                      <td style={{ fontWeight: 700, color: 'hsl(142.1, 76.2%, 36.3%)' }}>
-                        {s.quantity?.toLocaleString('pt-BR')} un
-                      </td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          <Clock size={12} />
-                          {new Date(s.updated_at || s.created_at).toLocaleDateString('pt-BR')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          ) : (
-            /* TAB 3: HISTÓRICO DE LOGS DE AUDITORIA */
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Pedido (PV)</th>
-                  <th>Cliente</th>
-                  <th>Produto</th>
-                  <th>Qtd. Pedida</th>
-                  <th>Qtd. Produzida</th>
-                  <th>Diferença</th>
-                  <th>Ação Tomada</th>
-                  <th>Tempo Prod.</th>
-                  <th>Liberado Por</th>
-                  <th>Observações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={11} />)
-                ) : filteredAdjustments.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-                      Nenhum registro de log de ajuste de saldo encontrado.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredAdjustments.map((a) => {
-                    const diffColor = a.difference_quantity > 0 ? 'var(--success)' : a.difference_quantity < 0 ? 'var(--danger)' : 'var(--text-muted)';
-                    const diffSign = a.difference_quantity > 0 ? '+' : '';
-                    
-                    const actionLabel = 
-                      a.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' ? 'Estoque Cliente' :
-                      a.action_taken === 'CREDITO_PROXIMO_PEDIDO' ? 'Crédito Futuro' :
-                      a.action_taken === 'CANCELADO_DESCONTO' ? 'Desconto Concedido' :
-                      a.action_taken === 'COBRADO_ADICIONAL' ? 'Cobr. Adicional' :
-                      a.action_taken === 'REPRODUCAO_PENDENTE' ? 'Reproduzir Pendente' : 'Outro';
-
-                    const actionColor = 
-                      a.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' ? 'var(--success)' :
-                      a.action_taken === 'CREDITO_PROXIMO_PEDIDO' ? 'var(--primary)' :
-                      a.action_taken === 'REPRODUCAO_PENDENTE' ? 'var(--warning)' : 'var(--text-muted)';
-
-                    return (
-                      <tr key={a.id}>
-                        <td>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                            {new Date(a.created_at).toLocaleDateString('pt-BR')}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight: 600 }}>
-                          {a.order?.pv_number ? `PV ${a.order.pv_number}` : '---'}
-                        </td>
-                        <td style={{ fontWeight: 600 }}>{a.customer?.name || 'Cliente'}</td>
-                        <td style={{ fontWeight: 500 }}>{a.product?.name || 'Produto'}</td>
-                        <td>{a.ordered_quantity?.toLocaleString('pt-BR')} un</td>
-                        <td>{a.produced_quantity?.toLocaleString('pt-BR')} un</td>
-                        <td style={{ fontWeight: 700, color: diffColor }}>
-                          {diffSign}{a.difference_quantity?.toLocaleString('pt-BR')} un
-                        </td>
-                        <td>
-                          <span className="badge" style={{
-                            backgroundColor: actionColor + '12',
-                            color: actionColor,
-                            border: `1px solid ${actionColor}25`,
-                            fontSize: '0.72rem'
-                          }}>
-                            {actionLabel}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          {getProductionTimeDisplay(a.order?.production_start_date, a.created_at)}
-                        </td>
-                        <td style={{ fontWeight: 500 }}>
-                          {a.created_by_name || 'Sistema'}
-                        </td>
-                        <td style={{ fontSize: '0.75rem', maxWidth: '200px', color: 'var(--text-muted)' }}>
-                          {a.notes || '---'}
-                        </td>
-                      </tr>
-                    );
-                  })
                 )}
               </tbody>
             </table>

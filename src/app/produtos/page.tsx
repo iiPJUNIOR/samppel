@@ -2,16 +2,20 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getProducts, createProduct, updateProduct, adjustStock, getStockTransactions } from '@/services/supabase';
+import { getProducts, createProduct, updateProduct, adjustStock, getStockTransactions, getCustomerProductStock } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock } from 'lucide-react';
 
 export default function ProdutosPage() {
   const { user } = useAuth();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  
+  // Navigation Tabs
+  const [activeTab, setActiveTab] = useState<'products' | 'custom_stocks'>('products');
+  const [customStocks, setCustomStocks] = useState<any[]>([]);
 
   // Modals State
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -122,8 +126,12 @@ export default function ProdutosPage() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const { data } = await getProducts();
-      setProducts(data || []);
+      const [productsRes, customStocksRes] = await Promise.all([
+        getProducts(user?.tenant_id),
+        getCustomerProductStock(user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0')
+      ]);
+      setProducts(productsRes.data || []);
+      setCustomStocks(customStocksRes.data || []);
     } catch (e) {
       console.error('Error fetching products:', e);
     } finally {
@@ -277,6 +285,11 @@ export default function ProdutosPage() {
     (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))
   );
 
+  const filteredCustomStocks = customStocks.filter(s => 
+    s.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
+    s.product?.name?.toLowerCase().includes(search.toLowerCase())
+  );
+
   const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial';
   const canEditDetails = user?.role === 'Administrador' || user?.role === 'Comercial';
   const isAdmin = user?.role === 'Administrador';
@@ -316,7 +329,30 @@ export default function ProdutosPage() {
         </div>
       </header>
 
-      {/* FILTERS */}
+      {/* TABS DE ALTERNÂNCIA */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+        <button 
+          onClick={() => setActiveTab('products')}
+          className={`btn ${activeTab === 'products' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+        >
+          <Warehouse size={16} />
+          <span>Produtos Cadastrados ({products.length})</span>
+        </button>
+        
+        <button 
+          onClick={() => setActiveTab('custom_stocks')}
+          className={`btn ${activeTab === 'custom_stocks' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+        >
+          <Package size={16} />
+          <span>Estoque de Personalizados ({customStocks.length})</span>
+        </button>
+      </div>
+
+      {activeTab === 'products' ? (
+        <>
+          {/* FILTERS */}
       <div className="filter-bar" style={{ alignItems: 'center', gap: '0.75rem' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: '280px' }}>
           <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
@@ -458,6 +494,52 @@ export default function ProdutosPage() {
           </table>
         </div>
       </div>
+      </>
+      ) : (
+        <div className="card">
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Cliente Proprietário</th>
+                  <th>Produto Personalizado</th>
+                  <th>Tamanho / Medida</th>
+                  <th>Quantidade em Estoque na Fábrica</th>
+                  <th>Última Movimentação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={5} />)
+                ) : filteredCustomStocks.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                      Nenhum lote de personalizado armazenado na fábrica.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCustomStocks.map((s) => (
+                    <tr key={s.id}>
+                      <td style={{ fontWeight: 600 }}>{s.customer?.name || 'Cliente'}</td>
+                      <td style={{ fontWeight: 500 }}>{s.product?.name || 'Produto'}</td>
+                      <td><code>{s.product?.measure || 'Padrão'}</code></td>
+                      <td style={{ fontWeight: 700, color: 'hsl(142.1, 76.2%, 36.3%)' }}>
+                        {s.quantity?.toLocaleString('pt-BR')} un
+                      </td>
+                      <td>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          <Clock size={12} />
+                          {new Date(s.updated_at || s.created_at).toLocaleDateString('pt-BR')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* FORM MODAL (CREATE / EDIT DETAILS) */}
       {isFormModalOpen && (

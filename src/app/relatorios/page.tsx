@@ -90,8 +90,8 @@ export default function RelatoriosPage() {
     }
   }, [user, router]);
   
-  // Navigation tabs: 'efficiency' | 'credits' | 'commercial' | 'traceability'
-  const [activeTab, setActiveTab] = useState<'efficiency' | 'credits' | 'commercial' | 'traceability'>('traceability');
+  // Navigation tabs: 'efficiency' | 'credits' | 'commercial' | 'traceability' | 'logs'
+  const [activeTab, setActiveTab] = useState<'efficiency' | 'credits' | 'commercial' | 'traceability' | 'logs'>('traceability');
 
   // Lists for filters
   const [customers, setCustomers] = useState<any[]>([]);
@@ -571,6 +571,13 @@ export default function RelatoriosPage() {
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'commercial' ? '2px solid var(--primary)' : 'none' }}
         >
           Desempenho Comercial
+        </button>
+        <button 
+          onClick={() => setActiveTab('logs')}
+          className={`btn ${activeTab === 'logs' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: activeTab === 'logs' ? '2px solid var(--primary)' : 'none' }}
+        >
+          Histórico de Saldos & Créditos
         </button>
       </div>
 
@@ -1567,6 +1574,99 @@ export default function RelatoriosPage() {
           </div>
         </>
       )}
+
+      {/* TAB: HISTÓRICO DE LOGS DE AUDITORIA */}
+      {activeTab === 'logs' && (
+        <div className="card" style={{ padding: '1.25rem' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <History size={18} />
+            Histórico de Saldos & Créditos
+          </h2>
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Pedido (PV)</th>
+                  <th>Cliente</th>
+                  <th>Produto</th>
+                  <th>Qtd. Pedida</th>
+                  <th>Qtd. Produzida</th>
+                  <th>Diferença</th>
+                  <th>Ação Tomada</th>
+                  <th>Liberado Por</th>
+                  <th>Observações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={10} />)
+                ) : adjustments.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                      Nenhum registro de log de ajuste encontrado.
+                    </td>
+                  </tr>
+                ) : (
+                  adjustments.map((a) => {
+                    const diffColor = a.difference_quantity > 0 ? 'var(--success)' : a.difference_quantity < 0 ? 'var(--danger)' : 'var(--text-muted)';
+                    const diffSign = a.difference_quantity > 0 ? '+' : '';
+                    
+                    const actionLabel = 
+                      a.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' ? 'Estoque Cliente' :
+                      a.action_taken === 'CREDITO_PROXIMO_PEDIDO' ? 'Crédito Futuro' :
+                      a.action_taken === 'CANCELADO_DESCONTO' ? 'Desconto Concedido' :
+                      a.action_taken === 'COBRADO_ADICIONAL' ? 'Cobr. Adicional' :
+                      a.action_taken === 'REPRODUCAO_PENDENTE' ? 'Reproduzir Pendente' : 'Outro';
+
+                    const actionColor = 
+                      a.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' ? 'var(--success)' :
+                      a.action_taken === 'CREDITO_PROXIMO_PEDIDO' ? 'var(--primary)' :
+                      a.action_taken === 'REPRODUCAO_PENDENTE' ? 'var(--warning)' : 'var(--text-muted)';
+
+                    return (
+                      <tr key={a.id}>
+                        <td>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            {new Date(a.created_at).toLocaleDateString('pt-BR')}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>
+                          {a.order?.pv_number ? `PV ${a.order.pv_number}` : '---'}
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{a.customer?.name || 'Cliente'}</td>
+                        <td style={{ fontWeight: 500 }}>{a.product?.name || 'Produto'}</td>
+                        <td>{a.ordered_quantity?.toLocaleString('pt-BR')} un</td>
+                        <td>{a.produced_quantity?.toLocaleString('pt-BR')} un</td>
+                        <td style={{ fontWeight: 700, color: diffColor }}>
+                          {diffSign}{a.difference_quantity?.toLocaleString('pt-BR')} un
+                        </td>
+                        <td>
+                          <span className="badge" style={{
+                            backgroundColor: actionColor + '12',
+                            color: actionColor,
+                            border: `1px solid ${actionColor}25`,
+                            fontSize: '0.72rem'
+                          }}>
+                            {actionLabel}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 500 }}>
+                          {a.created_by_name || 'Sistema'}
+                        </td>
+                        <td style={{ fontSize: '0.75rem', maxWidth: '200px', color: 'var(--text-muted)' }}>
+                          {a.notes || '---'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* MODAL DE DETALHES DO PEDIDO SELECIONADO */}
       {isDetailsModalOpen && selectedOrderDetails && (
         <div
