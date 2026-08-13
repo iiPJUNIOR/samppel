@@ -567,20 +567,17 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="lp-left-center">
-            <span className="lp-tagline-label">Portal de Gestão</span>
-            <h1 className="lp-headline">
+          <div className="lp-left-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+            <h1 className="lp-headline" style={{ textAlign: 'center' }}>
               Controle total<br />
               do seu <span>negócio.</span>
             </h1>
-            <p className="lp-subtitle">
+            <p className="lp-subtitle" style={{ textAlign: 'center' }}>
               Gerencie pedidos, clientes, produção e financeiro em um único sistema integrado ao Conta Azul.
             </p>
-
-
           </div>
 
-          <div className="lp-left-bottom">
+          <div className="lp-left-bottom" style={{ width: '100%', position: 'relative', zIndex: 1 }}>
             © {new Date().getFullYear()} Samppel Embalagens — Todos os direitos reservados.
           </div>
         </div>
@@ -760,20 +757,13 @@ export default function LoginPage() {
                   </button>
                 </form>
 
-                <div className="lp-footer">
+                <div className="lp-footer" style={{ justifyContent: 'center' }}>
                   <button
                     type="button"
                     className="lp-link"
                     onClick={() => { setIsForgotPasswordMode(true); setError(null); setResetSuccess(null); }}
                   >
                     Esqueceu a senha?
-                  </button>
-                  <button
-                    type="button"
-                    className="lp-link"
-                    onClick={() => { setIsSignUpMode(!isSignUpMode); setError(null); }}
-                  >
-                    {isSignUpMode ? 'Já tenho conta' : 'Criar conta'}
                   </button>
                 </div>
 
