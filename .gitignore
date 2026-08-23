@@ -43,6 +43,12 @@ next-env.d.ts
 # scratch and testing files
 src/app/produtos/scratch_*
 scratch/
+scratch*.txt
+update_pedidos*.js
+update_interface*.js
+fix_supabase.js
+clean_mocks.js
+migrate_*.js
 
 # informals/documentation containing secrets
 mapa_samppel.md

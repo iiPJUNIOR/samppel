@@ -1062,29 +1062,43 @@ export class ContaAzulService {
       const token = await this.getValidAccessToken();
       
       onProgress?.('Buscando lista de vendas no Conta Azul...', 10);
-      // Usar o endpoint oficial /v1/venda/busca com paginação no padrão da API v2 da Conta Azul
-      let url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100`;
-      if (startDate) {
-        url += `&data_inicio=${startDate}`;
-      }
-      if (endDate) {
-        url += `&data_fim=${endDate}`;
-      }
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
+      const allItems: any[] = [];
+      let currentPage = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        let url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100&pagina=${currentPage}`;
+        if (startDate) {
+          url += `&data_inicio=${startDate}`;
         }
-      });
+        if (endDate) {
+          url += `&data_fim=${endDate}`;
+        }
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Erro ao buscar vendas do Conta Azul: ${response.status} - ${errText}`);
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro ao buscar vendas do Conta Azul na página ${currentPage}: ${response.status} - ${errText}`);
+        }
+
+        const resData = await response.json();
+        const pageItems = resData.itens || [];
+        allItems.push(...pageItems);
+        
+        if (pageItems.length < 100) {
+          hasMore = false;
+        } else {
+          currentPage++;
+        }
       }
 
-      const resData = await response.json();
-      const items = resData.itens || [];
-      
+      const items = allItems;
       onProgress?.(`Encontrados ${items.length} pedidos. Sincronizando...`, 15);
 
       const dbClient = supabaseAdmin || supabase;

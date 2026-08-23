@@ -7,6 +7,60 @@ import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock } from 'lucide-react';
 
+function StockInlineEdit({ product, onSave }: { product: any, onSave: (id: string, newStock: number) => Promise<void> }) {
+  const [val, setVal] = useState(product.stock_quantity?.toString() || '0');
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setVal(product.stock_quantity?.toString() || '0');
+  }, [product.stock_quantity]);
+
+  const handleBlur = async () => {
+    setIsEditing(false);
+    const numVal = parseInt(val, 10);
+    if (isNaN(numVal) || numVal === product.stock_quantity) {
+      setVal(product.stock_quantity?.toString() || '0');
+      return;
+    }
+    setLoading(true);
+    await onSave(product.id, numVal);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <Warehouse size={12} style={{ color: product.stock_quantity < 500 ? 'var(--danger)' : 'var(--primary)' }} />
+      {isEditing ? (
+        <input
+          type="number"
+          value={val}
+          autoFocus
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={handleBlur}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleBlur(); }}
+          style={{ width: '80px', padding: '2px 4px', fontSize: '0.8rem', border: '1px solid var(--primary)', borderRadius: '3px' }}
+          disabled={loading}
+        />
+      ) : (
+        <span
+          onClick={() => setIsEditing(true)}
+          style={{
+            cursor: 'pointer',
+            padding: '2px 4px',
+            borderBottom: '1px dashed var(--primary)',
+            color: product.stock_quantity < 500 ? 'var(--danger)' : 'var(--text)',
+            opacity: loading ? 0.5 : 1
+          }}
+          title="Clique para editar"
+        >
+          {loading ? 'Salvando...' : Number(val).toLocaleString('pt-BR')} un
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function ProdutosPage() {
   const { user } = useAuth();
   const [products, setProducts] = useState<any[]>([]);
@@ -14,7 +68,7 @@ export default function ProdutosPage() {
   const [search, setSearch] = useState('');
   
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'products' | 'custom_stocks'>('products');
+  const [activeTab, setActiveTab] = useState<'lisas' | 'personalizadas' | 'custom_stocks' | 'all'>('all');
   const [customStocks, setCustomStocks] = useState<any[]>([]);
 
   // Modals State
@@ -49,6 +103,7 @@ export default function ProdutosPage() {
   const [formPrice, setFormPrice] = useState(0);
   const [formStock, setFormStock] = useState(0);
   const [formBindToFirstItem, setFormBindToFirstItem] = useState(false);
+  const [formCategory, setFormCategory] = useState<'LISAS' | 'PERSONALIZADA'>('LISAS');
 
   // Stock Adjustment Fields
   const [stockQtyChange, setStockQtyChange] = useState(100);
@@ -167,9 +222,9 @@ export default function ProdutosPage() {
     setFormName('');
     setFormSku('');
     setFormDescription('');
-    setFormPrice(0.00);
     setFormStock(0);
     setFormBindToFirstItem(false);
+    setFormCategory('LISAS');
     setIsFormModalOpen(true);
   };
 
@@ -179,9 +234,9 @@ export default function ProdutosPage() {
     setFormName(product.name);
     setFormSku(product.sku || '');
     setFormDescription(product.description || '');
-    setFormPrice(Number(product.price));
     setFormStock(product.stock_quantity);
     setFormBindToFirstItem(!!product.bind_to_first_item);
+    setFormCategory(product.category || 'LISAS');
     setIsFormModalOpen(true);
   };
 
@@ -202,6 +257,7 @@ export default function ProdutosPage() {
       description: formDescription,
       price: Number(formPrice),
       bind_to_first_item: formBindToFirstItem,
+      category: formCategory,
       stock_quantity: modalType === 'create' ? Number(formStock) : undefined // stock changes handled by adjustments in edit mode
     };
 
@@ -225,6 +281,27 @@ export default function ProdutosPage() {
         setIsFormModalOpen(false);
         fetchProducts();
       }
+    }
+  };
+
+  const handleInlineStockSave = async (productId: string, newStock: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    const diff = newStock - product.stock_quantity;
+    if (diff === 0) return;
+    
+    const { error } = await adjustStock(
+      productId,
+      Math.abs(diff),
+      diff > 0 ? 'ENTRADA' : 'SAIDA',
+      'Ajuste Rápido Inline',
+      user?.tenant_id
+    );
+
+    if (error) {
+      alert('Erro ao atualizar estoque: ' + error);
+    } else {
+      setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock_quantity: newStock } : p));
     }
   };
 
@@ -280,10 +357,14 @@ export default function ProdutosPage() {
     }
   };
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || 
+                          (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()));
+    const matchesTab = activeTab === 'all' || 
+                       (activeTab === 'lisas' && p.category === 'LISAS') || 
+                       (activeTab === 'personalizadas' && p.category === 'PERSONALIZADA');
+    return matchesSearch && matchesTab;
+  });
 
   const filteredCustomStocks = customStocks.filter(s => 
     s.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -330,14 +411,32 @@ export default function ProdutosPage() {
       </header>
 
       {/* TABS DE ALTERNÂNCIA */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', flexWrap: 'wrap' }}>
         <button 
-          onClick={() => setActiveTab('products')}
-          className={`btn ${activeTab === 'products' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setActiveTab('all')}
+          className={`btn ${activeTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Warehouse size={16} />
-          <span>Produtos Cadastrados ({products.length})</span>
+          <span>Todos ({products.length})</span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('lisas')}
+          className={`btn ${activeTab === 'lisas' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+        >
+          <Package size={16} />
+          <span>Lisas ({products.filter(p => p.category === 'LISAS').length})</span>
+        </button>
+        
+        <button 
+          onClick={() => setActiveTab('personalizadas')}
+          className={`btn ${activeTab === 'personalizadas' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+        >
+          <Package size={16} />
+          <span>Personalizadas ({products.filter(p => p.category === 'PERSONALIZADA').length})</span>
         </button>
         
         <button 
@@ -346,11 +445,11 @@ export default function ProdutosPage() {
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Package size={16} />
-          <span>Estoque de Personalizados ({customStocks.length})</span>
+          <span>Estoque de Clientes ({customStocks.length})</span>
         </button>
       </div>
 
-      {activeTab === 'products' ? (
+      {activeTab !== 'custom_stocks' ? (
         <>
           {/* FILTERS */}
       <div className="filter-bar" style={{ alignItems: 'center', gap: '0.75rem' }}>
@@ -407,16 +506,7 @@ export default function ProdutosPage() {
                       </td>
                     )}
                     <td style={{ fontWeight: 600 }}>
-                      <span className="badge" style={{ 
-                        backgroundColor: product.stock_quantity < 500 ? 'var(--danger-bg)' : 'rgba(var(--primary-rgb), 0.08)',
-                        color: product.stock_quantity < 500 ? 'var(--danger)' : 'var(--primary)',
-                        display: 'inline-flex',
-                        gap: '0.25rem',
-                        alignItems: 'center'
-                      }}>
-                        <Warehouse size={12} />
-                        {product.stock_quantity.toLocaleString('pt-BR')} un
-                      </span>
+                      <StockInlineEdit product={product} onSave={handleInlineStockSave} />
                     </td>
                     <td>
                       {product.conta_azul_id ? (
@@ -586,6 +676,19 @@ export default function ProdutosPage() {
 
             <form onSubmit={handleProductSubmit} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               
+              <div className="form-group">
+                <label className="form-label">Categoria do Produto *</label>
+                <select 
+                  className="form-input" 
+                  value={formCategory} 
+                  onChange={(e) => setFormCategory(e.target.value as any)}
+                  required
+                >
+                  <option value="LISAS">Lisas</option>
+                  <option value="PERSONALIZADA">Personalizada</option>
+                </select>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">Nome do Produto de Embalagem *</label>
                 <input 

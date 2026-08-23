@@ -785,6 +785,8 @@ export default function PedidosPage() {
   interface HandlingTeamRow {
     handling_team_id: string;
     quantity: number;
+    is_completed?: boolean;
+    completed_at?: string;
   }
   const [isHandlingTeamModalOpen, setIsHandlingTeamModalOpen] = useState(false);
   const [handlingTeamModalItem, setHandlingTeamModalItem] = useState<any>(null);
@@ -799,27 +801,74 @@ export default function PedidosPage() {
     setHandlingTeamModalItem(item);
     setHandlingTeamModalTargetStageId(targetStageId);
 
-    const totalQty = item.print_run || 1000;
+    const totalQty = Number(item.print_run || item.quantity || 1000);
     try {
       const { data } = await getOrderItemHandlingTeams(item.id);
       if (data && data.length > 0) {
         setHandlingTeamAllocations(data.map(d => ({
           handling_team_id: d.handling_team_id,
-          quantity: d.quantity
+          quantity: d.quantity,
+          is_completed: d.is_completed || false,
+          completed_at: d.completed_at || ''
         })));
       } else {
         const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
         setHandlingTeamAllocations([
-          { handling_team_id: defaultTeam, quantity: totalQty }
+          { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
         ]);
       }
     } catch (err) {
       const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
       setHandlingTeamAllocations([
-        { handling_team_id: defaultTeam, quantity: totalQty }
+        { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
       ]);
     }
     setIsHandlingTeamModalOpen(true);
+  };
+
+  const handleSwitchHandlingModalItem = async (newItem: any) => {
+    if (handlingTeamModalItem && handlingTeamAllocations.length > 0) {
+      const valid = handlingTeamAllocations.filter(a => a.handling_team_id && a.quantity > 0);
+      if (valid.length > 0) {
+        try {
+          await saveOrderItemHandlingTeams(handlingTeamModalItem.id, handlingTeamAllocations);
+          const { data } = await getOrderItemHandlingTeams(handlingTeamModalItem.id);
+          if (data) {
+            setItemHandlingTeamsMap(prev => {
+              const updated = new Map(prev);
+              updated.set(handlingTeamModalItem.id, data);
+              return updated;
+            });
+          }
+        } catch (e) {
+          console.error('Erro ao salvar alocações do item anterior:', e);
+        }
+      }
+    }
+
+    setHandlingTeamModalItem(newItem);
+    const totalQty = Number(newItem.print_run || newItem.quantity || 1000);
+    try {
+      const { data } = await getOrderItemHandlingTeams(newItem.id);
+      if (data && data.length > 0) {
+        setHandlingTeamAllocations(data.map(d => ({
+          handling_team_id: d.handling_team_id,
+          quantity: d.quantity,
+          is_completed: d.is_completed || false,
+          completed_at: d.completed_at || ''
+        })));
+      } else {
+        const defaultTeam = newItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+        setHandlingTeamAllocations([
+          { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
+        ]);
+      }
+    } catch (err) {
+      const defaultTeam = newItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+      setHandlingTeamAllocations([
+        { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
+      ]);
+    }
   };
 
   // Estados de Localizações Físicas na Fábrica (CRUD)
@@ -947,6 +996,7 @@ export default function PedidosPage() {
   const [formSelectedProductStock, setFormSelectedProductStock] = useState<number | null>(null);
   const [formMachineId, setFormMachineId] = useState('');
   const [formHandlingTeamId, setFormHandlingTeamId] = useState('');
+  const [formHandlingAllocations, setFormHandlingAllocations] = useState<HandlingTeamRow[]>([]);
 
   const fetchAllData = async () => {
     setLoading(true);
@@ -1291,6 +1341,23 @@ export default function PedidosPage() {
 
     const currentStage = stages.find(s => s.id === currentStageId);
 
+    // REGRA DE TRAVA DO MANUSEIO:
+    // Se estiver saindo de Manuseio para outra etapa (exceto se for cancelamento/reversão específica),
+    // verifica se todas as frações estão concluídas e com conferência efetuada
+    if (currentStage?.name === 'Manuseio' && targetStage.name !== 'Manuseio' && targetStage.name !== 'Atrasado' && !handlingTeamMoveBypass.current) {
+      const { data: teams } = await getOrderItemHandlingTeams(item.id);
+      if (teams && teams.length > 0) {
+        const hasUncompleted = teams.some(t => !t.is_completed);
+        if (hasUncompleted) {
+          setLoading(false);
+          resetAllBypasses();
+          alert('ATENÇÃO: Existem frações de manuseio deste item que ainda não foram conferidas. Você deve marcar todas como concluídas (com data de conclusão) no modal de manuseio antes de avançar para a próxima etapa.');
+          handleOpenHandlingTeamModalForItem(item, item.stage_id);
+          return;
+        }
+      }
+    }
+
     const parentOrder = orders.find(o => o.id === item.order_id) || item.order;
 
     // ---------------------------------------------------------------
@@ -1382,9 +1449,9 @@ export default function PedidosPage() {
       }
     }
 
-    // REGRA DE MANUSEIO: Desmembrar / Vincular equipes de manuseio ao entrar na etapa 'Manuseio'
+    // REGRA DE MANUSEIO: Vincular equipes de manuseio ao entrar na etapa 'Manuseio'
     if (targetStage.name === 'Manuseio' && 
-        (currentStage?.name === 'Em produção' || currentStage?.name === 'Estoque') && 
+        currentStage?.name !== 'Manuseio' && 
         !handlingTeamMoveBypass.current) {
       
       handleOpenHandlingTeamModalForItem(item, targetStageId);
@@ -3092,6 +3159,21 @@ export default function PedidosPage() {
       setFormMachineId(entity.machine_id || '');
       setFormHandlingTeamId(entity.handling_team_id || '');
 
+      const existingAllocations = itemHandlingTeamsMap.get(entity.id) || [];
+      if (existingAllocations.length > 0) {
+        setFormHandlingAllocations(existingAllocations.map(a => ({
+          handling_team_id: a.handling_team_id,
+          quantity: a.quantity,
+          is_completed: a.is_completed || false,
+          completed_at: a.completed_at || ''
+        })));
+      } else {
+        const defaultTeam = entity.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+        setFormHandlingAllocations([
+          { handling_team_id: defaultTeam, quantity: Number(entity.print_run || 1000), is_completed: false, completed_at: '' }
+        ]);
+      }
+
       setFormPvNumber(order.pv_number || '');
       setFormOpNumber(order.op_number || '');
       setFormArtName(entity.name || '');
@@ -3127,6 +3209,22 @@ export default function PedidosPage() {
         setFormSector(correspondingItem.production_sector || 'Impressão');
         setFormMachineId(correspondingItem.machine_id || '');
         setFormHandlingTeamId(correspondingItem.handling_team_id || '');
+
+        const existingAllocations = itemHandlingTeamsMap.get(correspondingItem.id) || [];
+        if (existingAllocations.length > 0) {
+          setFormHandlingAllocations(existingAllocations.map(a => ({
+            handling_team_id: a.handling_team_id,
+            quantity: a.quantity,
+            is_completed: a.is_completed || false,
+            completed_at: a.completed_at || ''
+          })));
+        } else {
+          const defaultTeam = correspondingItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+          setFormHandlingAllocations([
+            { handling_team_id: defaultTeam, quantity: Number(correspondingItem.print_run || 1000), is_completed: false, completed_at: '' }
+          ]);
+        }
+
         setFormArtName(correspondingItem.name || '');
         setFormPackagingType(correspondingItem.packaging_type || 'CAIXA');
         setFormOverShortQuantity(correspondingItem.over_short_quantity || 0);
@@ -3143,6 +3241,7 @@ export default function PedidosPage() {
         setFormSector(entity.production_sector || 'Impressão');
         setFormMachineId('');
         setFormHandlingTeamId('');
+        setFormHandlingAllocations([]);
         setFormArtName(entity.art_name || '');
         setFormPackagingType(entity.packaging_type || 'CAIXA');
         setFormOverShortQuantity(entity.over_short_quantity || 0);
@@ -3207,7 +3306,7 @@ export default function PedidosPage() {
       stage_id: formStageId || null,
       production_sector: formSector,
       machine_id: formMachineId || null,
-      handling_team_id: formHandlingTeamId || null,
+      handling_team_id: formHandlingAllocations[0]?.handling_team_id || formHandlingTeamId || null,
       physical_location: formPhysicalLocation,
       over_short_quantity: Number(formOverShortQuantity),
       notes: specLines || formNotes
@@ -3255,6 +3354,26 @@ export default function PedidosPage() {
       alert('Erro ao atualizar pedido: ' + orderRes.error.message);
     } else {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
+      // Gravar divisão de equipes de manuseio se estiver em Manuseio
+      if (formHandlingAllocations && formHandlingAllocations.length > 0) {
+        const validAllocations = formHandlingAllocations.filter(a => a.handling_team_id && a.quantity > 0);
+        if (validAllocations.length > 0) {
+          try {
+            await saveOrderItemHandlingTeams(selectedItem.id, formHandlingAllocations);
+            const { data: updatedTeams } = await getOrderItemHandlingTeams(selectedItem.id);
+            if (updatedTeams) {
+              setItemHandlingTeamsMap(prev => {
+                const updated = new Map(prev);
+                updated.set(selectedItem.id, updatedTeams);
+                return updated;
+              });
+            }
+          } catch (teamErr) {
+            console.error('Erro ao salvar frações de manuseio no salvar do card:', teamErr);
+          }
+        }
+      }
 
       // Log de transição se houver mudança de setor ou de máquina
       const sectorChanged = selectedItem.production_sector !== formSector;
@@ -6762,153 +6881,385 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {/* MODAL DE VINCULAÇÃO DE EQUIPE DE MANUSEIO E ITENS MÚLTIPLOS */}
       {/* ──────────────────────────────────────────────────────────── */}
-      {isHandlingTeamModalOpen && handlingTeamModalItem && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
-        }}>
-          <div style={{
-            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
-            padding: '1.5rem', maxWidth: '550px', width: '100%',
-            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
-            animation: 'fadeIn 0.2s ease',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-              <Users size={22} style={{ color: 'var(--primary)' }} />
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
-                Vincular Equipe de Manuseio
-              </h2>
-            </div>
+      {isHandlingTeamModalOpen && handlingTeamModalItem && (() => {
+        const parentOrder = orders.find(o => o.id === handlingTeamModalItem.order_id) || handlingTeamModalItem.order;
+        const allSiblingItems = orderItems.filter(i => i.order_id === handlingTeamModalItem.order_id);
+        const totalItemQty = Number(handlingTeamModalItem.print_run || handlingTeamModalItem.quantity || 0);
+        const totalAllocated = handlingTeamAllocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+        const isTargetManuseio = handlingTeamModalTargetStageId && stages.find(s => s.id === handlingTeamModalTargetStageId)?.name === 'Manuseio';
+        const isCurrentManuseio = stages.find(s => s.id === handlingTeamModalItem.stage_id)?.name === 'Manuseio';
+        const showConferenceChecks = isCurrentManuseio || isTargetManuseio;
 
-            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              
-              {/* Informação do Item Atual */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', backgroundColor: 'var(--background)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Item sendo Movido</span>
-                <span style={{ fontSize: '0.9rem', color: 'var(--text)', fontWeight: 700 }}>
-                  {handlingTeamModalItem.friendly_id} — {handlingTeamModalItem.name}
-                </span>
+        return (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+          }}>
+            <div style={{
+              backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+              padding: '1.5rem', maxWidth: '640px', width: '100%',
+              border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+              animation: 'fadeIn 0.2s ease',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem'
+            }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{
+                    width: '38px', height: '38px', borderRadius: '10px',
+                    backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.12)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'hsl(271, 91.2%, 55%)'
+                  }}>
+                    <Users size={20} />
+                  </div>
+                  <div>
+                    <h2 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
+                      Vincular Equipe de Manuseio
+                    </h2>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {parentOrder?.pv_number ? `Pedido / PV: ${parentOrder.pv_number}` : `Pedido #${parentOrder?.order_number || 'S/N'}`} · Cliente: <strong>{parentOrder?.customer?.name || handlingTeamModalItem.customer_name || 'Não informado'}</strong>
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {/* Informação sobre múltiplos itens do pedido */}
-              {(() => {
-                const siblingItems = orderItems.filter(i => 
-                  i.order_id === handlingTeamModalItem.order_id && 
-                  i.id !== handlingTeamModalItem.id
-                );
-                if (siblingItems.length === 0) return null;
-
-                const currentIdx = handlingTeamModalItem.friendly_id?.split('/')[1] || String(handlingTeamModalItem.item_index || 1);
-
-                return (
+              <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                
+                {/* Seletor de Itens Irmãos do Pedido (quando houver múltiplos) */}
+                {allSiblingItems.length > 1 && (
                   <div style={{
-                    backgroundColor: 'hsla(35, 100%, 50%, 0.05)',
-                    border: '1px solid hsla(35, 100%, 50%, 0.2)',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
                     borderRadius: 'var(--radius-md)',
-                    padding: '0.875rem 1rem'
+                    padding: '0.75rem 1rem'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'hsl(35, 90%, 40%)', fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                      <AlertTriangle size={15} />
-                      <span>Aviso: Este item é o /{currentIdx} de um pedido conjunto</span>
-                    </div>
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: '0.75rem' }}>
-                      Este pedido possui mais itens associados que estão em andamento na produção.
-                    </p>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'var(--surface)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                      <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem', display: 'block' }}>
-                        Outros itens deste pedido:
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Itens deste Pedido ({allSiblingItems.length} itens no lote):
                       </span>
-                      {siblingItems.map((sib: any) => {
-                        const sibStage = stages.find(s => s.id === sib.stage_id);
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        Clique para alternar o item
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '2px' }}>
+                      {allSiblingItems.map((itm) => {
+                        const isSelected = itm.id === handlingTeamModalItem.id;
+                        const itmAllocations = itemHandlingTeamsMap.get(itm.id) || [];
+                        const isDone = itmAllocations.length > 0 && itmAllocations.every(a => a.is_completed);
+                        const itmStage = stages.find(s => s.id === itm.stage_id);
+
                         return (
-                          <div key={sib.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.35rem' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                                {sib.friendly_id || `/${sib.item_index}`} · {sib.name}
+                          <button
+                            key={itm.id}
+                            type="button"
+                            onClick={() => handleSwitchHandlingModalItem(itm)}
+                            style={{
+                              padding: '0.45rem 0.75rem',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.76rem',
+                              fontWeight: isSelected ? 700 : 500,
+                              backgroundColor: isSelected ? 'var(--primary)' : 'var(--surface)',
+                              color: isSelected ? '#ffffff' : 'var(--text)',
+                              border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <span style={{ opacity: isSelected ? 1 : 0.8 }}>{itm.friendly_id || `/${itm.item_index}`}</span>
+                            <span>·</span>
+                            <span>{itm.name?.slice(0, 16)}{itm.name?.length > 16 ? '...' : ''}</span>
+                            <span style={{ opacity: 0.85 }}>({Number(itm.print_run || 0).toLocaleString('pt-BR')} un)</span>
+                            {isDone && <Check size={12} style={{ color: isSelected ? '#fff' : 'var(--success)' }} />}
+                            {itmStage && !isSelected && (
+                              <span style={{ fontSize: '0.65rem', opacity: 0.7, padding: '1px 4px', borderRadius: '3px', backgroundColor: 'var(--background)' }}>
+                                {itmStage.name}
                               </span>
-                              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                                Há {getTimeInStage(sib.updated_at)} nesta etapa
-                              </span>
-                            </div>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: '99px',
-                              fontSize: '0.68rem',
-                              fontWeight: 600,
-                              backgroundColor: sibStage?.color ? `${sibStage.color}15` : 'var(--surface-subtle)',
-                              color: sibStage?.color || 'var(--text-muted)',
-                              border: `1px solid ${sibStage?.color ? `${sibStage.color}30` : 'var(--border)'}`
-                            }}>
-                              {sibStage?.name || sib.status}
-                            </span>
-                          </div>
+                            )}
+                          </button>
                         );
                       })}
                     </div>
                   </div>
-                );
-              })()}
+                )}
 
-              {/* Seletor de Equipe */}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label" style={{ fontWeight: 600 }}>Equipe de Manuseio Responsável *</label>
-                <select
-                  className="form-select"
-                  value={selectedHandlingTeamId}
-                  onChange={(e) => setSelectedHandlingTeamId(e.target.value)}
-                  style={{ marginTop: '0.25rem' }}
+                {/* Card com Detalhes Completos do Item Ativo */}
+                <div style={{
+                  backgroundColor: 'hsla(var(--primary-rgb), 0.04)',
+                  border: '1px solid hsla(var(--primary-rgb), 0.2)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.85rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.4rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--primary)',
+                        color: '#fff',
+                        fontWeight: 800,
+                        fontSize: '0.85rem'
+                      }}>
+                        {handlingTeamModalItem.friendly_id || `Item #${handlingTeamModalItem.item_index || 1}`}
+                      </span>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)' }}>
+                        {handlingTeamModalItem.name}
+                      </span>
+                    </div>
+
+                    <div style={{
+                      padding: '3px 10px',
+                      borderRadius: '99px',
+                      backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)',
+                      color: 'hsl(271, 91.2%, 50%)',
+                      fontSize: '0.82rem',
+                      fontWeight: 800,
+                      border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)'
+                    }}>
+                      Tiragem: {totalItemQty.toLocaleString('pt-BR')} un
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                    <span>Medida: <strong style={{ color: 'var(--text)' }}>{handlingTeamModalItem.measure || 'Padrão'}</strong></span>
+                    {handlingTeamModalItem.production_sector && (
+                      <span>Setor Atual: <strong style={{ color: 'var(--text)' }}>{handlingTeamModalItem.production_sector}</strong></span>
+                    )}
+                    {handlingTeamModalItem.boxes_count && (
+                      <span>Volumes: <strong style={{ color: 'var(--text)' }}>{handlingTeamModalItem.boxes_count} cx</strong></span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Distribuição de Lotes e Equipes */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <label className="form-label" style={{ fontWeight: 700, margin: 0, fontSize: '0.85rem' }}>
+                        Distribuição de Lotes e Equipes *
+                      </label>
+                      <span style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '99px',
+                        backgroundColor: totalAllocated === totalItemQty
+                          ? 'hsla(142, 71%, 45%, 0.12)'
+                          : totalAllocated < totalItemQty
+                          ? 'hsla(45, 93%, 47%, 0.15)'
+                          : 'hsla(0, 84%, 60%, 0.15)',
+                        color: totalAllocated === totalItemQty
+                          ? 'hsl(142, 71%, 35%)'
+                          : totalAllocated < totalItemQty
+                          ? 'hsl(45, 93%, 35%)'
+                          : 'hsl(0, 84%, 45%)',
+                        border: `1px solid ${totalAllocated === totalItemQty ? 'hsla(142, 71%, 45%, 0.3)' : totalAllocated < totalItemQty ? 'hsla(45, 93%, 47%, 0.3)' : 'hsla(0, 84%, 60%, 0.3)'}`
+                      }}>
+                        {totalAllocated === totalItemQty
+                          ? `Total: ${totalAllocated.toLocaleString('pt-BR')} un (100% Distribuído)`
+                          : totalAllocated < totalItemQty
+                          ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (Faltam ${(totalItemQty - totalAllocated).toLocaleString('pt-BR')})`
+                          : `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (Excesso de ${(totalAllocated - totalItemQty).toLocaleString('pt-BR')})`}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', gap: '0.3rem', display: 'flex', alignItems: 'center' }}
+                      onClick={() => {
+                        const remaining = Math.max(0, totalItemQty - totalAllocated);
+                        setHandlingTeamAllocations(prev => [
+                          ...prev,
+                          { handling_team_id: '', quantity: remaining, is_completed: false, completed_at: '' }
+                        ]);
+                      }}
+                    >
+                      <Plus size={14} /> Adicionar Lote
+                    </button>
+                  </div>
+
+                  {handlingTeamAllocations.map((alloc, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        gap: '0.5rem',
+                        alignItems: 'flex-start',
+                        backgroundColor: 'var(--background)',
+                        padding: '0.65rem',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)',
+                        boxShadow: 'var(--shadow-xs)'
+                      }}
+                    >
+                      <div style={{ flex: 2 }}>
+                        <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Lote {idx + 1} - Equipe de Manuseio
+                        </label>
+                        <select
+                          className="form-select"
+                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
+                          value={alloc.handling_team_id}
+                          onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, handling_team_id: e.target.value } : a))}
+                        >
+                          <option value="">— Selecione a Equipe —</option>
+                          {handlingTeams.filter(t => t.status === 'ATIVO').map((team) => (
+                            <option key={team.id} value={team.id}>{team.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div style={{ flex: 1.2 }}>
+                        <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                          Quantidade (un)
+                        </label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
+                          value={alloc.quantity || ''}
+                          placeholder="Qtd."
+                          onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, quantity: Number(e.target.value) } : a))}
+                        />
+                      </div>
+
+                      {showConferenceChecks && (
+                        <>
+                          <div style={{ flex: 0.6, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Conferido</label>
+                            <input
+                              type="checkbox"
+                              style={{ cursor: 'pointer', width: '18px', height: '18px', marginTop: '6px' }}
+                              checked={alloc.is_completed || false}
+                              onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? {
+                                ...a,
+                                is_completed: e.target.checked,
+                                completed_at: e.target.checked ? (a.completed_at || new Date().toISOString().slice(0, 10)) : ''
+                              } : a))}
+                            />
+                          </div>
+
+                          <div style={{ flex: 1.3 }}>
+                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Data Conclusão</label>
+                            <input
+                              type="date"
+                              className="form-input"
+                              style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
+                              value={alloc.completed_at || ''}
+                              onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, completed_at: e.target.value } : a))}
+                              disabled={!alloc.is_completed}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {handlingTeamAllocations.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setHandlingTeamAllocations(prev => prev.filter((_, i) => i !== idx))}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--danger)',
+                            cursor: 'pointer',
+                            marginTop: '1.25rem',
+                            padding: '4px'
+                          }}
+                          title="Excluir fração"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rodapé e Ações */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setIsHandlingTeamModalOpen(false);
+                    setHandlingTeamModalItem(null);
+                    setHandlingTeamModalTargetStageId('');
+                    resetAllBypasses();
+                  }}
                 >
-                  <option value="">— Selecione uma Equipe —</option>
-                  {handlingTeams
-                    .filter(t => t.status === 'ATIVO')
-                    .map((team) => (
-                      <option key={team.id} value={team.id}>{team.name}</option>
-                    ))
-                  }
-                </select>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={loading}
+                  onClick={async () => {
+                    // Validações
+                    const validAllocations = handlingTeamAllocations.filter(a => a.handling_team_id && a.quantity > 0);
+                    if (validAllocations.length === 0) {
+                      alert('Por favor, selecione ao menos uma equipe de manuseio com quantidade maior que zero.');
+                      return;
+                    }
+
+                    const hasIncompleteRow = handlingTeamAllocations.some(a => (a.quantity > 0 && !a.handling_team_id) || (a.handling_team_id && !a.quantity));
+                    if (hasIncompleteRow) {
+                      alert('Existem lotes preenchidos incorretamente. Verifique se todos possuem equipe e quantidade.');
+                      return;
+                    }
+
+                    setLoading(true);
+                    try {
+                      // 1. Salva no banco de dados
+                      await saveOrderItemHandlingTeams(handlingTeamModalItem.id, handlingTeamAllocations);
+                      
+                      // 2. Atualiza estado local de alocações
+                      const { data } = await getOrderItemHandlingTeams(handlingTeamModalItem.id);
+                      if (data) {
+                        setItemHandlingTeamsMap(prev => {
+                          const updated = new Map(prev);
+                          updated.set(handlingTeamModalItem.id, data);
+                          return updated;
+                        });
+                      }
+
+                      showToast(`Equipes de manuseio do item ${handlingTeamModalItem.friendly_id || ''} salvas com sucesso!`);
+
+                      // 3. Se for movimentação para etapa, executa o move
+                      if (handlingTeamModalTargetStageId && handlingTeamModalTargetStageId !== handlingTeamModalItem.stage_id) {
+                        handlingTeamMoveBypass.current = true;
+                        await moveOrderItemToStage(handlingTeamModalItem, handlingTeamModalTargetStageId);
+                      }
+
+                      setIsHandlingTeamModalOpen(false);
+                      setHandlingTeamModalItem(null);
+                      setHandlingTeamModalTargetStageId('');
+                    } catch (err: any) {
+                      console.error('Erro ao salvar equipes de manuseio:', err);
+                      alert('Erro ao salvar equipes de manuseio: ' + (err.message || 'Falha ao gravar no banco.'));
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                >
+                  {loading ? 'Gravando...' : (handlingTeamModalTargetStageId && handlingTeamModalTargetStageId !== handlingTeamModalItem.stage_id ? 'Salvar e Mover para Manuseio' : 'Salvar Distribuição')}
+                </button>
               </div>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setIsHandlingTeamModalOpen(false);
-                  setHandlingTeamModalItem(null);
-                  setSelectedHandlingTeamId('');
-                  resetAllBypasses();
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={loading}
-                onClick={async () => {
-                  if (!selectedHandlingTeamId) {
-                    alert('Por favor, selecione qual equipe de manuseio será responsável pelo item.');
-                    return;
-                  }
-                  setIsHandlingTeamModalOpen(false);
-                  handlingTeamMoveBypass.current = true;
-                  await moveOrderItemToStage(handlingTeamModalItem, handlingTeamModalTargetStageId);
-                  setHandlingTeamModalItem(null);
-                  setSelectedHandlingTeamId('');
-                }}
-              >
-                {loading ? 'Processando...' : 'Confirmar e Mover'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ──────────────────────────────────────────────────────────── */}
       {/* MODAL DE AVISO DE ITENS VINCULADOS EM EXPEDIÇÃO */}
@@ -8009,32 +8360,161 @@ export default function PedidosPage() {
                   </select>
                 </div>
 
-                {/* Campo de Equipe de Manuseio — visível sempre que setor for Manuseio */}
-                {formSector === 'Manuseio' && (
-                  <div className="form-group" style={{ gridColumn: '1 / -1', background: 'hsla(271, 91.2%, 65.1%, 0.08)', border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem' }}>
-                    <label className="form-label" style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      Equipe de Manuseio Responsável
-                    </label>
-                    <select 
-                      className="form-select"
-                      value={formHandlingTeamId}
-                      onChange={(e) => setFormHandlingTeamId(e.target.value)}
-                    >
-                      <option value="">Sem Equipe Vinculada</option>
-                      {handlingTeams
-                        .filter(t => t.status === 'ATIVO')
-                        .map((team) => (
-                          <option key={team.id} value={team.id}>{team.name}</option>
-                        ))
-                      }
-                    </select>
-                    {!formHandlingTeamId && (
-                      <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                        Indique com qual equipe este material está sendo trabalhado.
-                      </p>
-                    )}
-                  </div>
-                )}
+                {/* Gestão Multi-Equipe de Manuseio (Frações / Lotes) */}
+                {(formSector === 'Manuseio' || stages.find(s => s.id === formStageId)?.name === 'Manuseio') && (() => {
+                  const targetPrintRun = Number(formPrintRun) || 0;
+                  const totalAllocated = formHandlingAllocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+                  
+                  return (
+                    <div className="form-group" style={{
+                      gridColumn: '1 / -1',
+                      background: 'hsla(271, 91.2%, 65.1%, 0.05)',
+                      border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '1rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.75rem'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <Users size={18} style={{ color: 'hsl(271, 91.2%, 55%)' }} />
+                          <label className="form-label" style={{ fontWeight: 700, margin: 0, fontSize: '0.85rem' }}>
+                            Distribuição de Equipes de Manuseio
+                          </label>
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '99px',
+                            backgroundColor: totalAllocated === targetPrintRun
+                              ? 'hsla(142, 71%, 45%, 0.12)'
+                              : totalAllocated < targetPrintRun
+                              ? 'hsla(45, 93%, 47%, 0.15)'
+                              : 'hsla(0, 84%, 60%, 0.15)',
+                            color: totalAllocated === targetPrintRun
+                              ? 'hsl(142, 71%, 35%)'
+                              : totalAllocated < targetPrintRun
+                              ? 'hsl(45, 93%, 35%)'
+                              : 'hsl(0, 84%, 45%)',
+                            border: `1px solid ${totalAllocated === targetPrintRun ? 'hsla(142, 71%, 45%, 0.3)' : totalAllocated < targetPrintRun ? 'hsla(45, 93%, 47%, 0.3)' : 'hsla(0, 84%, 60%, 0.3)'}`
+                          }}>
+                            {totalAllocated === targetPrintRun
+                              ? `Total: ${totalAllocated.toLocaleString('pt-BR')} un (100% Distribuído)`
+                              : totalAllocated < targetPrintRun
+                              ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${targetPrintRun.toLocaleString('pt-BR')} un (Faltam ${(targetPrintRun - totalAllocated).toLocaleString('pt-BR')})`
+                              : `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${targetPrintRun.toLocaleString('pt-BR')} un (Excesso de ${(totalAllocated - targetPrintRun).toLocaleString('pt-BR')})`}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ padding: '0.2rem 0.55rem', fontSize: '0.75rem', gap: '0.25rem', display: 'flex', alignItems: 'center' }}
+                          onClick={() => {
+                            const remaining = Math.max(0, targetPrintRun - totalAllocated);
+                            setFormHandlingAllocations(prev => [
+                              ...prev,
+                              { handling_team_id: '', quantity: remaining, is_completed: false, completed_at: '' }
+                            ]);
+                          }}
+                        >
+                          <Plus size={14} /> Adicionar Equipe / Fração
+                        </button>
+                      </div>
+
+                      {formHandlingAllocations.map((alloc, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            gap: '0.5rem',
+                            alignItems: 'flex-start',
+                            backgroundColor: 'var(--surface)',
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border)'
+                          }}
+                        >
+                          <div style={{ flex: 2 }}>
+                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Equipe {idx + 1}
+                            </label>
+                            <select
+                              className="form-select"
+                              style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem', marginTop: '2px' }}
+                              value={alloc.handling_team_id}
+                              onChange={(e) => setFormHandlingAllocations(prev => prev.map((a, i) => i === idx ? { ...a, handling_team_id: e.target.value } : a))}
+                            >
+                              <option value="">— Selecione a Equipe —</option>
+                              {handlingTeams.filter(t => t.status === 'ATIVO').map((team) => (
+                                <option key={team.id} value={team.id}>{team.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div style={{ flex: 1.2 }}>
+                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                              Quantidade (un)
+                            </label>
+                            <input
+                              type="number"
+                              className="form-input"
+                              style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem', marginTop: '2px' }}
+                              value={alloc.quantity || ''}
+                              placeholder="Qtd."
+                              onChange={(e) => setFormHandlingAllocations(prev => prev.map((a, i) => i === idx ? { ...a, quantity: Number(e.target.value) } : a))}
+                            />
+                          </div>
+
+                          <div style={{ flex: 0.6, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Conferido</label>
+                            <input
+                              type="checkbox"
+                              style={{ cursor: 'pointer', width: '18px', height: '18px', marginTop: '6px' }}
+                              checked={alloc.is_completed || false}
+                              onChange={(e) => setFormHandlingAllocations(prev => prev.map((a, i) => i === idx ? {
+                                ...a,
+                                is_completed: e.target.checked,
+                                completed_at: e.target.checked ? (a.completed_at || new Date().toISOString().slice(0, 10)) : ''
+                              } : a))}
+                            />
+                          </div>
+
+                          <div style={{ flex: 1.2 }}>
+                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Data Conclusão</label>
+                            <input
+                              type="date"
+                              className="form-input"
+                              style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem', marginTop: '2px' }}
+                              value={alloc.completed_at || ''}
+                              onChange={(e) => setFormHandlingAllocations(prev => prev.map((a, i) => i === idx ? { ...a, completed_at: e.target.value } : a))}
+                              disabled={!alloc.is_completed}
+                            />
+                          </div>
+
+                          {formHandlingAllocations.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setFormHandlingAllocations(prev => prev.filter((_, i) => i !== idx))}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--danger)',
+                                cursor: 'pointer',
+                                marginTop: '1.2rem',
+                                padding: '4px'
+                              }}
+                              title="Excluir fração"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* OBSERVAÇÕES E HISTÓRICO */}

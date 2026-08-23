@@ -1976,6 +1976,22 @@ export async function createProductionMachine(machine: Omit<ProductionMachine, '
     mockProductionMachines.push(newMac);
     return { data: newMac, error: null };
   }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch('/api/config/machines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...machine, tenant_id: tenantId })
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Falha ao criar máquina');
+      return { data: json.data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
+  }
+
   const { data, error } = await getDbClient()
     .from('production_machines')
     .insert([{ ...machine, tenant_id: tenantId }])
@@ -1990,6 +2006,22 @@ export async function updateProductionMachine(id: string, updates: Partial<Produ
     const updated = mockProductionMachines.find(m => m.id === id);
     return { data: updated, error: null };
   }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch('/api/config/machines', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...updates })
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Falha ao atualizar máquina');
+      return { data: json.data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
+  }
+
   const { data, error } = await getDbClient()
     .from('production_machines')
     .update({ ...updates, updated_at: new Date().toISOString() })
@@ -2004,6 +2036,20 @@ export async function deleteProductionMachine(id: string) {
     mockProductionMachines = mockProductionMachines.filter(m => m.id !== id);
     return { data: true, error: null };
   }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch(`/api/config/machines?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Falha ao excluir máquina');
+      return { data: true, error: null };
+    } catch (err: any) {
+      return { data: false, error: err };
+    }
+  }
+
   const { error } = await getDbClient()
     .from('production_machines')
     .delete()
@@ -2052,11 +2098,27 @@ export async function createProductionSector(sector: Omit<ProductionSector, 'id'
     mockProductionSectors.push(newSec);
     return { data: newSec, error: null };
   }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch('/api/config/sectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...sector, tenant_id: tenantId })
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Falha ao criar setor');
+      return { data: json.data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
+  }
+
   const { data, error } = await getDbClient()
     .from('production_sectors')
     .insert([{ ...sector, tenant_id: tenantId }])
     .select()
-    .single();
+    .maybeSingle();
   return { data, error };
 }
 
@@ -2066,12 +2128,28 @@ export async function updateProductionSector(id: string, updates: Partial<Produc
     const updated = mockProductionSectors.find(s => s.id === id);
     return { data: updated, error: null };
   }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch('/api/config/sectors', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...updates })
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Falha ao atualizar setor');
+      return { data: json.data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
+  }
+
   const { data, error } = await getDbClient()
     .from('production_sectors')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select()
-    .single();
+    .maybeSingle();
   return { data, error };
 }
 
@@ -2080,6 +2158,20 @@ export async function deleteProductionSector(id: string) {
     mockProductionSectors = mockProductionSectors.filter(s => s.id !== id);
     return { data: true, error: null };
   }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const response = await fetch(`/api/config/sectors?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Falha ao excluir setor');
+      return { data: true, error: null };
+    } catch (err: any) {
+      return { data: false, error: err };
+    }
+  }
+
   const { error } = await getDbClient()
     .from('production_sectors')
     .delete()
@@ -2373,6 +2465,8 @@ export interface OrderItemHandlingTeam {
   order_item_id: string;
   handling_team_id: string;
   quantity: number;
+  is_completed?: boolean;
+  completed_at?: string | null;
   team?: HandlingTeam;
   created_at?: string;
   updated_at?: string;
@@ -2394,7 +2488,7 @@ export async function getOrderItemHandlingTeams(orderItemId: string) {
 
 export async function saveOrderItemHandlingTeams(
   orderItemId: string,
-  teams: { handling_team_id: string; quantity: number }[],
+  teams: { handling_team_id: string; quantity: number; is_completed?: boolean; completed_at?: string | null }[],
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
 ) {
   if (isMockMode) {
@@ -2406,7 +2500,9 @@ export async function saveOrderItemHandlingTeams(
           tenant_id: tenantId,
           order_item_id: orderItemId,
           handling_team_id: t.handling_team_id,
-          quantity: t.quantity
+          quantity: t.quantity,
+          is_completed: t.is_completed || false,
+          completed_at: t.completed_at || null
         });
       }
     }
@@ -2429,7 +2525,9 @@ export async function saveOrderItemHandlingTeams(
     tenant_id: tenantId,
     order_item_id: orderItemId,
     handling_team_id: t.handling_team_id,
-    quantity: Number(t.quantity)
+    quantity: Number(t.quantity),
+    is_completed: t.is_completed || false,
+    completed_at: t.completed_at ? t.completed_at : null
   }));
 
   const { data, error } = await getDbClient()
