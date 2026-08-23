@@ -68,7 +68,7 @@ export default function ProdutosPage() {
   const [search, setSearch] = useState('');
   
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'lisas' | 'personalizadas' | 'custom_stocks' | 'all'>('all');
+  const [activeTab, setActiveTab] = useState<'lisas' | 'custom_stocks' | 'all'>('all');
   const [customStocks, setCustomStocks] = useState<any[]>([]);
 
   // Modals State
@@ -103,6 +103,7 @@ export default function ProdutosPage() {
   const [formPrice, setFormPrice] = useState(0);
   const [formStock, setFormStock] = useState(0);
   const [formBindToFirstItem, setFormBindToFirstItem] = useState(false);
+  const [formBindRequiresHandling, setFormBindRequiresHandling] = useState(false);
   const [formCategory, setFormCategory] = useState<'LISAS' | 'PERSONALIZADA'>('LISAS');
 
   // Stock Adjustment Fields
@@ -224,6 +225,7 @@ export default function ProdutosPage() {
     setFormDescription('');
     setFormStock(0);
     setFormBindToFirstItem(false);
+    setFormBindRequiresHandling(false);
     setFormCategory('LISAS');
     setIsFormModalOpen(true);
   };
@@ -236,6 +238,7 @@ export default function ProdutosPage() {
     setFormDescription(product.description || '');
     setFormStock(product.stock_quantity);
     setFormBindToFirstItem(!!product.bind_to_first_item);
+    setFormBindRequiresHandling(!!product.bind_requires_handling);
     setFormCategory(product.category || 'LISAS');
     setIsFormModalOpen(true);
   };
@@ -251,19 +254,24 @@ export default function ProdutosPage() {
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const payload = {
+    let payload: any = {
       name: formName,
       sku: formSku,
       description: formDescription,
       price: Number(formPrice),
       bind_to_first_item: formBindToFirstItem,
+      bind_requires_handling: formBindToFirstItem ? formBindRequiresHandling : false,
       category: formCategory,
-      stock_quantity: modalType === 'create' ? Number(formStock) : undefined // stock changes handled by adjustments in edit mode
+      stock_quantity: modalType === 'create' ? Number(formStock) : undefined
     };
 
     if (modalType === 'create') {
-      const { error } = await createProduct(payload);
-      if (error) alert('Erro ao cadastrar produto: ' + error.message);
+      let res = await createProduct(payload);
+      if (res.error && res.error.message?.includes('category')) {
+        delete payload.category;
+        res = await createProduct(payload);
+      }
+      if (res.error) alert('Erro ao cadastrar produto: ' + res.error.message);
       else {
         setIsFormModalOpen(false);
         fetchProducts();
@@ -275,8 +283,12 @@ export default function ProdutosPage() {
         return;
       }
 
-      const { error } = await updateProduct(selectedProduct.id, payload);
-      if (error) alert('Erro ao atualizar produto: ' + error.message);
+      let res = await updateProduct(selectedProduct.id, payload);
+      if (res.error && res.error.message?.includes('category')) {
+        delete payload.category;
+        res = await updateProduct(selectedProduct.id, payload);
+      }
+      if (res.error) alert('Erro ao atualizar produto: ' + res.error.message);
       else {
         setIsFormModalOpen(false);
         fetchProducts();
@@ -361,8 +373,7 @@ export default function ProdutosPage() {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || 
                           (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()));
     const matchesTab = activeTab === 'all' || 
-                       (activeTab === 'lisas' && p.category === 'LISAS') || 
-                       (activeTab === 'personalizadas' && p.category === 'PERSONALIZADA');
+                       (activeTab === 'lisas' && p.category === 'LISAS');
     return matchesSearch && matchesTab;
   });
 
@@ -427,16 +438,7 @@ export default function ProdutosPage() {
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Package size={16} />
-          <span>Lisas ({products.filter(p => p.category === 'LISAS').length})</span>
-        </button>
-        
-        <button 
-          onClick={() => setActiveTab('personalizadas')}
-          className={`btn ${activeTab === 'personalizadas' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-        >
-          <Package size={16} />
-          <span>Personalizadas ({products.filter(p => p.category === 'PERSONALIZADA').length})</span>
+          <span>Lisas/Genéricas ({products.filter(p => p.category === 'LISAS').length})</span>
         </button>
         
         <button 
@@ -751,17 +753,37 @@ export default function ProdutosPage() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <input 
-                  type="checkbox" 
-                  id="formBindToFirstItem"
-                  checked={formBindToFirstItem}
-                  onChange={(e) => setFormBindToFirstItem(e.target.checked)}
-                  style={{ width: 'auto', height: 'auto', margin: 0, cursor: 'pointer' }}
-                />
-                <label htmlFor="formBindToFirstItem" style={{ margin: 0, fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text)' }}>
-                  Vincular ao primeiro item do pedido (não produzir)
-                </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input 
+                    type="checkbox" 
+                    id="formBindToFirstItem"
+                    checked={formBindToFirstItem}
+                    onChange={(e) => {
+                      setFormBindToFirstItem(e.target.checked);
+                      if (!e.target.checked) setFormBindRequiresHandling(false);
+                    }}
+                    style={{ width: 'auto', height: 'auto', margin: 0, cursor: 'pointer' }}
+                  />
+                  <label htmlFor="formBindToFirstItem" style={{ margin: 0, fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text)' }}>
+                    Vincular ao primeiro item do pedido (não produzir)
+                  </label>
+                </div>
+
+                {formBindToFirstItem && (
+                  <div style={{ marginLeft: '1.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <input 
+                      type="checkbox" 
+                      id="formBindRequiresHandling"
+                      checked={formBindRequiresHandling}
+                      onChange={(e) => setFormBindRequiresHandling(e.target.checked)}
+                      style={{ width: 'auto', height: 'auto', margin: 0, cursor: 'pointer' }}
+                    />
+                    <label htmlFor="formBindRequiresHandling" style={{ margin: 0, fontWeight: 600, cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Este item vinculado exige Manuseio? (Se sim, entra na quantidade de manuseio)
+                    </label>
+                  </div>
+                )}
               </div>
 
               <footer style={{

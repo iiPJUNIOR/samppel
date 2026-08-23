@@ -43,7 +43,7 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
           if (pathname !== '/pedidos') {
             router.push('/pedidos');
           }
-        } else if (user.role === 'Produção') {
+        } else if (user.role === 'Produção' && user.actual_role !== 'Administrador') {
           if (pathname !== '/operador-perfil') {
             router.push('/operador-perfil');
           }
@@ -195,7 +195,7 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
   }
 
   // Restrição estrita para perfil de Produção (Acesso exclusivo para /operador-perfil)
-  if (user && user.role === 'Produção' && pathname !== '/operador-perfil' && pathname !== '/redefinir-senha') {
+  if (user && user.role === 'Produção' && user.actual_role !== 'Administrador' && pathname !== '/operador-perfil' && pathname !== '/redefinir-senha') {
     return (
       <div style={{
         display: 'flex',

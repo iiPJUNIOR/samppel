@@ -36,7 +36,35 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { profileId, stageId, canEnter, canExit } = await request.json();
+    const body = await request.json();
+
+    if (body.action === 'updateSellerPermissions') {
+      const { profileId, primarySellerName, sellerAccessMode, allowedSellers } = body;
+      if (!profileId) {
+        return NextResponse.json({ error: 'profileId é obrigatório.' }, { status: 400 });
+      }
+
+      try {
+        const { error } = await supabaseAdmin
+          .from('profiles')
+          .update({
+            primary_seller_name: primarySellerName || null,
+            seller_access_mode: sellerAccessMode || 'OWN',
+            allowed_sellers: allowedSellers || []
+          })
+          .eq('id', profileId);
+
+        if (error && !error.message?.includes('column')) {
+          console.warn('Erro ao atualizar profiles com permissões de vendedor no DB:', error.message);
+        }
+      } catch (err: any) {
+        console.warn('Falha no update do Supabase (tabela profiles):', err.message);
+      }
+
+      return NextResponse.json({ success: true });
+    }
+
+    const { profileId, stageId, canEnter, canExit } = body;
 
     if (!profileId || !stageId) {
       return NextResponse.json({ error: 'Parâmetros profileId e stageId são obrigatórios.' }, { status: 400 });

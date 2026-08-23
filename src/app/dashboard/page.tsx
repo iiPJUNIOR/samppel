@@ -196,7 +196,27 @@ export default function DashboardPage() {
       });
 
       // Filtra apenas itens de produção válidos (excluindo vinculados)
-      const validItems = joinedItems.filter(i => i.product?.bind_to_first_item !== true);
+      const validItems = joinedItems.filter(i => {
+        if (i.product?.bind_to_first_item === true) return false;
+        if (i.product_id) {
+          const prod = fetchedProducts.find((p: any) => p.id === i.product_id);
+          if (prod?.bind_to_first_item === true) return false;
+        }
+        if (i.name) {
+          const itemNameLower = i.name.trim().toLowerCase();
+          const matchedProd = fetchedProducts.find((p: any) => {
+            if (!p.bind_to_first_item) return false;
+            const prodNameLower = (p.name || '').trim().toLowerCase();
+            return prodNameLower && (itemNameLower === prodNameLower || itemNameLower.includes(prodNameLower) || prodNameLower.includes(itemNameLower));
+          });
+          if (matchedProd) return false;
+          if (itemNameLower.includes('clichê') || itemNameLower.includes('cliche')) {
+            const hasClicheBoundProd = fetchedProducts.some((p: any) => p.bind_to_first_item && (p.name || '').toLowerCase().includes('clich'));
+            if (hasClicheBoundProd) return false;
+          }
+        }
+        return true;
+      });
       setOrderItems(validItems);
 
       // 1. Pedidos Ativos (Itens de Pedido Ativos)

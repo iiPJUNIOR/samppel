@@ -50,12 +50,19 @@ import {
   deleteFactoryLocation,
   createCustomer,
   getOrderItemHandlingTeams,
+  getOrderItemHandlingTeamsBulk,
   saveOrderItemHandlingTeams,
   saveOrderShippingVolumes,
   type OrderItemHandlingTeam,
+  getSellerPermissionsMap,
+  getOrderItemShortages,
+  getOrderItemShortagesBulk,
+  saveOrderItemShortage,
+  resolveOrderItemShortage,
+  type OrderItemShortage,
   supabase
 } from '@/services/supabase';
-import { parseDeadlineFromNotes, isCardOverdue } from '@/services/deadline_service';
+import { parseDeadlineFromNotes, isCardOverdue, calculateExpeditionDate, detectScopeDays } from '@/services/deadline_service';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { 
@@ -82,12 +89,15 @@ import {
   Check,
   Users,
   AlertTriangle,
+  X,
   Download,
   Clock,
   ArrowRightLeft,
+  Calendar,
   MapPin,
   Trash2,
-  Layers
+  Layers,
+  Cpu
 } from 'lucide-react';
 
 // Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
@@ -261,6 +271,66 @@ const formatDocument = (doc: string) => {
     return `${cleaned.substring(0, 3)}.${cleaned.substring(3, 6)}.${cleaned.substring(6, 9)}-${cleaned.substring(9)}`;
   }
   return doc;
+};
+
+// Synchronous order deadline configs loader from localStorage
+const initOrderDeadlineConfigMap = (): Map<string, { isBusinessDays: boolean; chosenDays: number }> => {
+  const map = new Map<string, { isBusinessDays: boolean; chosenDays: number }>();
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('samppel_order_deadline_configs');
+      if (raw) {
+        const obj = JSON.parse(raw);
+        Object.entries(obj).forEach(([k, v]: [string, any]) => {
+          if (v && typeof v === 'object') {
+            map.set(k, { isBusinessDays: !!v.isBusinessDays, chosenDays: Number(v.chosenDays || 15) });
+          }
+        });
+      }
+    } catch (e) {}
+  }
+  return map;
+};
+
+// Synchronous handling teams map cache loader for 0ms initial render
+const initHandlingTeamsMapFromCache = (): Map<string, OrderItemHandlingTeam[]> => {
+  const map = new Map<string, OrderItemHandlingTeam[]>();
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('samppel_handling_teams_v2') || localStorage.getItem('samppel_order_item_handling_teams');
+      if (raw) {
+        const list: OrderItemHandlingTeam[] = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          list.forEach(item => {
+            const arr = map.get(item.order_item_id) || [];
+            arr.push(item);
+            map.set(item.order_item_id, arr);
+          });
+        }
+      }
+    } catch (e) {}
+  }
+  return map;
+};
+
+const initShortagesMapFromCache = (): Map<string, OrderItemShortage[]> => {
+  const map = new Map<string, OrderItemShortage[]>();
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('samppel_shortages');
+      if (raw) {
+        const list: OrderItemShortage[] = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          list.forEach(item => {
+            const arr = map.get(item.order_item_id) || [];
+            arr.push(item);
+            map.set(item.order_item_id, arr);
+          });
+        }
+      }
+    } catch (e) {}
+  }
+  return map;
 };
 
 export default function PedidosPage() {
@@ -783,9 +853,14 @@ export default function PedidosPage() {
 
   // Estados do Modal de Equipe de Manuseio (Desmembramento/Divisão por Equipe)
   interface HandlingTeamRow {
+    id?: string;
     handling_team_id: string;
-    quantity: number;
-    is_completed?: boolean;
+    quantity: number;          // Qtd Saída
+    departure_date?: string;   // Data Saída
+    return_quantity?: number;  // Qtd Retorno
+    return_date?: string;      // Data Retorno
+    handling_code?: string;    // Código de Manuseio (ex: MAN-1171/1)
+    is_completed?: boolean;    // Conferido
     completed_at?: string;
   }
   const [isHandlingTeamModalOpen, setIsHandlingTeamModalOpen] = useState(false);
@@ -793,37 +868,142 @@ export default function PedidosPage() {
   const [handlingTeamModalTargetStageId, setHandlingTeamModalTargetStageId] = useState<string>('');
   const [selectedHandlingTeamId, setSelectedHandlingTeamId] = useState<string>('');
   const [handlingTeamAllocations, setHandlingTeamAllocations] = useState<HandlingTeamRow[]>([]);
-  const [itemHandlingTeamsMap, setItemHandlingTeamsMap] = useState<Map<string, OrderItemHandlingTeam[]>>(new Map());
+  const [itemHandlingTeamsMap, setItemHandlingTeamsMap] = useState<Map<string, OrderItemHandlingTeam[]>>(initHandlingTeamsMapFromCache);
+  const [savingHandlingTeam, setSavingHandlingTeam] = useState(false);
   const handlingTeamMoveBypass = useRef(false);
   const currentOperator = useRef<{ id: string; name: string } | null>(null);
 
-  const handleOpenHandlingTeamModalForItem = async (item: any, targetStageId: string) => {
+  const [targetHandlingAllocationId, setTargetHandlingAllocationId] = useState<string | null>(null);
+
+  // Estados para preferência e cálculo da Data de Expedição (Padrão: Dias Corridos / DC)
+  const [isBusinessDays, setIsBusinessDays] = useState<boolean>(false);
+  const [orderRangeChoiceMap, setOrderRangeChoiceMap] = useState<Map<string, number>>(new Map());
+  const [orderDeadlineConfigMap, setOrderDeadlineConfigMap] = useState<Map<string, { isBusinessDays: boolean; chosenDays: number }>>(initOrderDeadlineConfigMap);
+
+  // Estados para Modal Dedicado de Ajuste de Prazo & Data de Expedição
+  const [isDeadlineModalOpen, setIsDeadlineModalOpen] = useState(false);
+  const [deadlineModalItem, setDeadlineModalItem] = useState<any>(null);
+  const [deadlineModalOrder, setDeadlineModalOrder] = useState<any>(null);
+  const [deadlineModalIsBusiness, setDeadlineModalIsBusiness] = useState(true);
+  const [deadlineModalDays, setDeadlineModalDays] = useState(15);
+
+  const handleSaveDeadlineModal = () => {
+    if (!deadlineModalOrder && !deadlineModalItem) return;
+    const orderId = deadlineModalOrder?.id || deadlineModalItem?.order_id;
+    if (!orderId) return;
+
+    const updatedMap = new Map(orderDeadlineConfigMap);
+    updatedMap.set(orderId, {
+      isBusinessDays: deadlineModalIsBusiness,
+      chosenDays: deadlineModalDays
+    });
+
+    setOrderDeadlineConfigMap(updatedMap);
+    if (typeof window !== 'undefined') {
+      try {
+        const obj = Object.fromEntries(updatedMap);
+        localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(obj));
+      } catch (e) {}
+    }
+
+    setIsDeadlineModalOpen(false);
+    showToast('Data de Expedição atualizada com sucesso!');
+  };
+
+  // Estados para Registro de Faltas/Avarias e Liquidação na Expedição
+  const [shortagesMap, setShortagesMap] = useState<Map<string, OrderItemShortage[]>>(initShortagesMapFromCache);
+  const [isShortageModalOpen, setIsShortageModalOpen] = useState(false);
+  const [shortageItem, setShortageItem] = useState<any>(null);
+  const [shortageQty, setShortageQty] = useState<number>(0);
+  const [shortageReason, setShortageReason] = useState<string>('MANUSEIO_AVARIA');
+  const [shortageNotes, setShortageNotes] = useState<string>('');
+  const [savingShortage, setSavingShortage] = useState(false);
+
+  // Estados para Modal de Expedição (Conferência de Crédito / Débito do Cliente)
+  const [isExpeditionModalOpen, setIsExpeditionModalOpen] = useState(false);
+  const [expeditionTargetShortage, setExpeditionTargetShortage] = useState<OrderItemShortage | null>(null);
+  const [expeditionTargetItem, setExpeditionTargetItem] = useState<any>(null);
+  const [expeditionResolutionType, setExpeditionResolutionType] = useState<'DESCONTO_FATURA' | 'REPOSICAO' | 'ACEITE_PARCIAL'>('DESCONTO_FATURA');
+  const [expeditionResolutionNotes, setExpeditionResolutionNotes] = useState<string>('');
+  const [savingExpeditionResolution, setSavingExpeditionResolution] = useState(false);
+
+  const fetchShortagesForItem = async (orderItemId: string) => {
+    try {
+      const { data } = await getOrderItemShortages(undefined, orderItemId);
+      if (data) {
+        setShortagesMap(prev => {
+          const updated = new Map(prev);
+          updated.set(orderItemId, data);
+          return updated;
+        });
+      }
+    } catch (e) {}
+  };
+
+  const handleOpenHandlingTeamModalForItem = async (item: any, targetStageId: string, targetAllocationId?: string) => {
     setHandlingTeamModalItem(item);
     setHandlingTeamModalTargetStageId(targetStageId);
+    setTargetHandlingAllocationId(targetAllocationId || null);
+    setSavingHandlingTeam(false);
 
     const totalQty = Number(item.print_run || item.quantity || 1000);
+    const defaultDate = new Date().toISOString().slice(0, 10);
+    const rawPv = item.friendly_id || item.order?.pv_number || (item.order_id ? item.order_id.slice(0, 6) : '262/1');
+    const itemPv = rawPv.replace(/^PV-?/i, '');
+
     try {
       const { data } = await getOrderItemHandlingTeams(item.id);
       if (data && data.length > 0) {
-        setHandlingTeamAllocations(data.map(d => ({
+        let listToLoad = data;
+        if (targetAllocationId) {
+          const match = data.filter((d: any) => d.id === targetAllocationId || d.handling_code === targetAllocationId);
+          if (match.length > 0) listToLoad = match;
+        }
+
+        setHandlingTeamAllocations(listToLoad.map((d, idx) => ({
+          id: d.id,
           handling_team_id: d.handling_team_id,
           quantity: d.quantity,
+          departure_date: d.departure_date || defaultDate,
+          return_quantity: d.return_quantity || 0,
+          return_date: d.return_date || d.completed_at || '',
+          handling_code: (d.handling_code || `MS${itemPv}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS'),
           is_completed: d.is_completed || false,
-          completed_at: d.completed_at || ''
+          completed_at: d.completed_at || d.return_date || ''
         })));
       } else {
         const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
         setHandlingTeamAllocations([
-          { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
+          {
+            handling_team_id: defaultTeam,
+            quantity: totalQty,
+            departure_date: defaultDate,
+            return_quantity: totalQty,
+            return_date: '',
+            handling_code: `MS${itemPv}/1`,
+            is_completed: false,
+            completed_at: ''
+          }
         ]);
       }
     } catch (err) {
       const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
       setHandlingTeamAllocations([
-        { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
+        {
+          handling_team_id: defaultTeam,
+          quantity: totalQty,
+          departure_date: defaultDate,
+          return_quantity: totalQty,
+          return_date: '',
+          handling_code: `MS${itemPv}/1`,
+          is_completed: false,
+          completed_at: ''
+        }
       ]);
+    } finally {
+      setLoading(false);
+      setIsHandlingTeamModalOpen(true);
     }
-    setIsHandlingTeamModalOpen(true);
   };
 
   const handleSwitchHandlingModalItem = async (newItem: any) => {
@@ -848,25 +1028,45 @@ export default function PedidosPage() {
 
     setHandlingTeamModalItem(newItem);
     const totalQty = Number(newItem.print_run || newItem.quantity || 1000);
+    const defaultDate = new Date().toISOString().slice(0, 10);
     try {
       const { data } = await getOrderItemHandlingTeams(newItem.id);
       if (data && data.length > 0) {
         setHandlingTeamAllocations(data.map(d => ({
           handling_team_id: d.handling_team_id,
           quantity: d.quantity,
+          departure_date: d.departure_date || defaultDate,
+          return_quantity: d.return_quantity || 0,
+          return_date: d.return_date || d.completed_at || '',
           is_completed: d.is_completed || false,
-          completed_at: d.completed_at || ''
+          completed_at: d.completed_at || d.return_date || ''
         })));
       } else {
         const defaultTeam = newItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
         setHandlingTeamAllocations([
-          { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
+          {
+            handling_team_id: defaultTeam,
+            quantity: totalQty,
+            departure_date: defaultDate,
+            return_quantity: totalQty,
+            return_date: '',
+            is_completed: false,
+            completed_at: ''
+          }
         ]);
       }
     } catch (err) {
       const defaultTeam = newItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
       setHandlingTeamAllocations([
-        { handling_team_id: defaultTeam, quantity: totalQty, is_completed: false, completed_at: '' }
+        {
+          handling_team_id: defaultTeam,
+          quantity: totalQty,
+          departure_date: defaultDate,
+          return_quantity: totalQty,
+          return_date: '',
+          is_completed: false,
+          completed_at: ''
+        }
       ]);
     }
   };
@@ -984,7 +1184,7 @@ export default function PedidosPage() {
   const [formOpNumber, setFormOpNumber] = useState('');
   const [formArtName, setFormArtName] = useState('');
   const [formPackagingType, setFormPackagingType] = useState<'CAIXA' | 'PACOTE'>('CAIXA');
-  const [formShippingType, setFormShippingType] = useState<'RETIRADA' | 'ENTREGA_PROPRIA' | 'TRANSPORTADORA' | 'LALAMOVE' | 'MOTOBOY' | 'TRANSPORTADORA_LONGA'>('RETIRADA');
+  const [formShippingType, setFormShippingType] = useState<string>('SEM_FRETE');
   const [formFirstPaymentDate, setFormFirstPaymentDate] = useState('');
   const [formInstallmentsTotal, setFormInstallmentsTotal] = useState(1);
   const [formInstallmentsPaid, setFormInstallmentsPaid] = useState(0);
@@ -1062,17 +1262,37 @@ export default function PedidosPage() {
         const packaged = new Set<string>();
         const teamsMap = new Map<string, OrderItemHandlingTeam[]>();
 
+        const [teamsBulkRes, shortagesBulkRes] = await Promise.all([
+          getOrderItemHandlingTeamsBulk(itemIds),
+          getOrderItemShortagesBulk(itemIds)
+        ]);
+
+        (teamsBulkRes.data || []).forEach((t: OrderItemHandlingTeam) => {
+          const arr = teamsMap.get(t.order_item_id) || [];
+          arr.push(t);
+          teamsMap.set(t.order_item_id, arr);
+        });
+
+        const sMap = new Map<string, OrderItemShortage[]>();
+        (shortagesBulkRes.data || []).forEach((s: OrderItemShortage) => {
+          const arr = sMap.get(s.order_item_id) || [];
+          arr.push(s);
+          sMap.set(s.order_item_id, arr);
+        });
+
         await Promise.allSettled(itemIds.map(async (id) => {
-          const [pkgRes, teamsRes] = await Promise.all([
-            getOrderItemPackaging(id),
-            getOrderItemHandlingTeams(id)
-          ]);
+          const pkgRes = await getOrderItemPackaging(id);
           if (pkgRes.data && pkgRes.data.length > 0) packaged.add(id);
-          if (teamsRes.data && teamsRes.data.length > 0) teamsMap.set(id, teamsRes.data);
         }));
 
         setItemsWithPackaging(packaged);
+        if (typeof window !== 'undefined' && Array.isArray(teamsBulkRes.data)) {
+          try {
+            localStorage.setItem('samppel_handling_teams_v2', JSON.stringify(teamsBulkRes.data));
+          } catch (e) {}
+        }
         setItemHandlingTeamsMap(teamsMap);
+        setShortagesMap(sMap);
       }
       return ordersRes.data || [];
     } catch (e) {
@@ -1343,17 +1563,55 @@ export default function PedidosPage() {
 
     // REGRA DE TRAVA DO MANUSEIO:
     // Se estiver saindo de Manuseio para outra etapa (exceto se for cancelamento/reversão específica),
-    // verifica se todas as frações estão concluídas e com conferência efetuada
+    // verifica se todos os 3 pilares de cada lote foram preenchidos (Saída, Retorno e Conferência).
     if (currentStage?.name === 'Manuseio' && targetStage.name !== 'Manuseio' && targetStage.name !== 'Atrasado' && !handlingTeamMoveBypass.current) {
       const { data: teams } = await getOrderItemHandlingTeams(item.id);
-      if (teams && teams.length > 0) {
-        const hasUncompleted = teams.some(t => !t.is_completed);
-        if (hasUncompleted) {
+      const isUserAdmin = user?.role === 'Administrador' || (user?.role as string) === 'Admin';
+      
+      const uncompletedLots = (teams || []).filter(t => {
+        const hasSaida = !!t.departure_date && Number(t.quantity) > 0;
+        const hasRetorno = (!!t.return_date || !!t.completed_at) && Number(t.return_quantity) > 0;
+        const isConferido = !!t.is_completed;
+        return !hasSaida || !hasRetorno || !isConferido;
+      });
+
+      const isPending = !teams || teams.length === 0 || uncompletedLots.length > 0;
+
+      if (isPending) {
+        if (!isUserAdmin) {
+          // Bloqueio estrito para Operador
           setLoading(false);
           resetAllBypasses();
-          alert('ATENÇÃO: Existem frações de manuseio deste item que ainda não foram conferidas. Você deve marcar todas como concluídas (com data de conclusão) no modal de manuseio antes de avançar para a próxima etapa.');
+          alert(
+            '⚠️ ATENÇÃO - AÇÃO BLOQUEADA\n\n' +
+            'Este item não pode sair da etapa Manuseio pois possui equipes pendentes de retorno ou conferência.\n\n' +
+            'Para liberar a movimentação, todas as equipes devem possuir:\n' +
+            '• Data de Saída e Quantidade de Saída\n' +
+            '• Data de Retorno e Quantidade de Retorno\n' +
+            '• Checkbox "Conferido" marcada\n\n' +
+            'O modal de Manuseio será aberto para regularização.'
+          );
           handleOpenHandlingTeamModalForItem(item, item.stage_id);
           return;
+        } else {
+          // Permissão para Admin com aviso explicativo e diálogo de confirmação
+          const lotSummary = (teams && teams.length > 0)
+            ? `Existe(m) ${uncompletedLots.length} de ${teams.length} equipe(s) pendente(s) de retorno/conferência.`
+            : 'Nenhuma equipe de manuseio cadastrada para este item.';
+          
+          const confirmForce = window.confirm(
+            `⚠️ ATENÇÃO ADMINISTRADOR\n\n` +
+            `Este item possui pendências na etapa Manuseio:\n${lotSummary}\n\n` +
+            `Como Administrador, você possui permissão para forçar a movimentação para a etapa "${targetStage.name}".\n\n` +
+            `Deseja confirmar e forçar a movimentação do pedido mesmo assim?`
+          );
+
+          if (!confirmForce) {
+            setLoading(false);
+            resetAllBypasses();
+            handleOpenHandlingTeamModalForItem(item, item.stage_id);
+            return;
+          }
         }
       }
     }
@@ -1705,7 +1963,7 @@ export default function PedidosPage() {
     // ---------------------------------------------------------------
     if (targetStage.name !== 'Expedição' && targetStage.name !== 'Coleta agendada' && targetStage.name !== 'Coleta Agendada' && !siblingMoveBypass.current) {
       const siblingItems = orderItems.filter(
-        i => i.order_id === item.order_id && i.id !== item.id && i.stage_id !== targetStageId && i.product?.bind_to_first_item !== true
+        i => i.order_id === item.order_id && i.id !== item.id && i.stage_id !== targetStageId && !isItemBoundToFirstItem(i)
       );
 
       if (siblingItems.length > 0) {
@@ -1775,7 +2033,7 @@ export default function PedidosPage() {
         alert('Erro ao mover item: ' + error.message);
       } else {
         // Sincronizar sub-itens vinculados (embalagens, acessórios) do mesmo pedido
-        const boundSubItems = orderItems.filter(i => i.order_id === item.order_id && i.product?.bind_to_first_item === true);
+        const boundSubItems = orderItems.filter(i => i.order_id === item.order_id && isItemBoundToFirstItem(i));
         if (boundSubItems.length > 0) {
           try {
             await Promise.all(boundSubItems.map(sib => 
@@ -2784,7 +3042,7 @@ export default function PedidosPage() {
     setFormOpNumber('');
     setFormArtName('');
     setFormPackagingType('CAIXA');
-    setFormShippingType('RETIRADA');
+    setFormShippingType('SEM_FRETE');
     setFormFirstPaymentDate('');
     setFormInstallmentsTotal(1);
     setFormInstallmentsPaid(0);
@@ -2795,12 +3053,30 @@ export default function PedidosPage() {
   };
 
   // Abrir modal de Detalhes do Card (read-only, rápido)
-  const handleOpenDetail = (item: any) => {
+  const handleOpenDetail = async (item: any) => {
     setDetailItem(item);
     setDetailShortage(item.shortage_quantity || 0);
     setDetailCourtesy(item.courtesy_quantity || 0);
     setDetailExpeditionNotes(item.expedition_notes || '');
     setIsDetailModalOpen(true);
+
+    // Carregar informações de manuseio dos itens do pedido
+    const parentOrderId = item.order_id;
+    const siblingItems = orderItems.filter(i => i.order_id === parentOrderId);
+    for (const sItem of siblingItems) {
+      try {
+        const { data } = await getOrderItemHandlingTeams(sItem.id);
+        if (data) {
+          setItemHandlingTeamsMap(prev => {
+            const updated = new Map(prev);
+            updated.set(sItem.id, data);
+            return updated;
+          });
+        }
+      } catch (e) {
+        console.error('Erro ao carregar manuseio para detalhes:', e);
+      }
+    }
   };
 
   const handleSaveExpeditionDetails = async () => {
@@ -3469,7 +3745,7 @@ export default function PedidosPage() {
           status: newOrder.status,
           production_sector: newOrder.production_sector,
           stage_id: newOrder.stage_id,
-          machine_id: null,
+          machine_id: formMachineId || null,
           handling_team_id: null,
           physical_location: newOrder.physical_location,
           notes: newOrder.notes
@@ -3569,12 +3845,43 @@ export default function PedidosPage() {
     return (pv || '').split('/')[0].trim().toLowerCase();
   };
 
+  // Helper para verificar permissões de carteira de vendedor do usuário logado
+  const canUserViewOrderSeller = (sellerName: string): boolean => {
+    if (!user) return true;
+    if (user.role === 'Administrador') return true;
+
+    if (user.role === 'Comercial' || user.role === 'Vendedor') {
+      const sellerPermsMap = getSellerPermissionsMap();
+      const userPerms = sellerPermsMap[user.id];
+
+      if (!userPerms) {
+        // Fallback por primeiro nome caso não configurado ainda em Ajustes
+        const userFirstName = user.full_name.split(' ')[0].toLowerCase();
+        const sellerNameLower = (sellerName || '').toLowerCase();
+        return sellerNameLower.includes(userFirstName);
+      }
+
+      const mode = userPerms.seller_access_mode || 'OWN';
+      if (mode === 'ALL' || (userPerms.allowed_sellers || []).includes('*')) return true;
+
+      const primary = (userPerms.primary_seller_name || '').toLowerCase();
+      const sLower = (sellerName || '').toLowerCase();
+
+      // Se coincidir com o vendedor principal vinculado
+      if (primary && (sLower.includes(primary) || primary.includes(sLower))) return true;
+
+      // Se coincidir com algum dos vendedores autorizados na lista
+      const allowed = userPerms.allowed_sellers || [];
+      return allowed.some(a => a && (sLower.includes(a.toLowerCase()) || a.toLowerCase().includes(sLower)));
+    }
+
+    return true;
+  };
+
   // Lógica de Filtros
   const filteredOrders = orders.filter(order => {
     if (isVendedor && user) {
-      const userFirstName = user.full_name.split(' ')[0].toLowerCase();
-      const sellerNameLower = (order.seller_name || '').toLowerCase();
-      if (!sellerNameLower.includes(userFirstName)) return false;
+      if (!canUserViewOrderSeller(order.seller_name)) return false;
     }
     const matchCustomer = filterCustomer ? (order.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? order.seller_name.toLowerCase().includes(filterSeller.toLowerCase()) : true;
@@ -3586,10 +3893,68 @@ export default function PedidosPage() {
     return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
 
+  // Helper para verificar se um item de pedido está configurado para ser vinculado ao primeiro item (Sem Produção)
+  const isItemBoundToFirstItem = (item: any): boolean => {
+    if (!item) return false;
+
+    // 1. Relação direta vinda do JOIN de banco de dados
+    if (item.product?.bind_to_first_item === true) return true;
+
+    // 2. Busca por product_id no estado global de produtos
+    if (item.product_id) {
+      const prod = products.find((p: any) => p.id === item.product_id);
+      if (prod?.bind_to_first_item === true) return true;
+    }
+
+    // 3. Fallback por Nome (itens importados sem product_id vinculado)
+    if (item.name) {
+      const itemNameLower = item.name.trim().toLowerCase();
+
+      const matchedProd = products.find((p: any) => {
+        if (!p.bind_to_first_item) return false;
+        const prodNameLower = (p.name || '').trim().toLowerCase();
+        if (!prodNameLower) return false;
+        return itemNameLower === prodNameLower || itemNameLower.includes(prodNameLower) || prodNameLower.includes(itemNameLower);
+      });
+
+      if (matchedProd) return true;
+
+      // Regra de segurança extra para Clichê com produto cadastrado tipo vincular
+      if (itemNameLower.includes('clichê') || itemNameLower.includes('cliche')) {
+        const hasClicheBoundProd = products.some((p: any) => p.bind_to_first_item && (p.name || '').toLowerCase().includes('clich'));
+        if (hasClicheBoundProd) return true;
+      }
+    }
+
+    return false;
+  };
+
+  // Helper para verificar se um item não produzido/vinculado exige Manuseio
+  const doesBoundItemRequireHandling = (item: any): boolean => {
+    if (!item) return false;
+    if (!isItemBoundToFirstItem(item)) return false;
+
+    if (item.product?.bind_requires_handling === true) return true;
+    if (item.product_id) {
+      const prod = products.find((p: any) => p.id === item.product_id);
+      if (prod?.bind_requires_handling === true) return true;
+    }
+    if (item.name) {
+      const itemNameLower = item.name.trim().toLowerCase();
+      const matchedProd = products.find((p: any) => {
+        if (!p.bind_to_first_item) return false;
+        const prodNameLower = (p.name || '').trim().toLowerCase();
+        return prodNameLower && (itemNameLower === prodNameLower || itemNameLower.includes(prodNameLower) || prodNameLower.includes(itemNameLower));
+      });
+      if (matchedProd?.bind_requires_handling === true) return true;
+    }
+    return false;
+  };
+
   // Lógica de Filtros para Itens no Kanban
   const filteredOrderItems = orderItems.filter(item => {
     // Não exibir cards de itens de produto configurados para vincular ao primeiro item
-    if (item.product?.bind_to_first_item === true) return false;
+    if (isItemBoundToFirstItem(item)) return false;
 
     const parentOrder = item.order || {};
 
@@ -3600,9 +3965,7 @@ export default function PedidosPage() {
     }
 
     if (isVendedor && user) {
-      const userFirstName = user.full_name.split(' ')[0].toLowerCase();
-      const sellerNameLower = (parentOrder.seller_name || '').toLowerCase();
-      if (!sellerNameLower.includes(userFirstName)) return false;
+      if (!canUserViewOrderSeller(parentOrder.seller_name)) return false;
     }
 
     if (user?.role === 'Estoque') {
@@ -3629,10 +3992,8 @@ export default function PedidosPage() {
     let matchPedidosRelease = true;
     if (filterPedidosRelease) {
       const isReleased = !!parentOrder.first_payment_date;
-      const hasAuth = !!extractAuthorization(item.notes || parentOrder.notes);
       if (filterPedidosRelease === 'liberados') matchPedidosRelease = isReleased;
       else if (filterPedidosRelease === 'bloqueados') matchPedidosRelease = !isReleased;
-      else if (filterPedidosRelease === 'autorizados') matchPedidosRelease = hasAuth;
     }
 
     // Filtro de Etapa do Kanban
@@ -4003,6 +4364,48 @@ export default function PedidosPage() {
 
               {/* Direita: Segmented Control Modo de Exibição & Collapse */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                {/* Controle de Cálculo: Dias Úteis vs Corridos (Exclusivo para Administrador) */}
+                {(user?.role === 'Administrador') && (
+                  <div style={{
+                    display: 'flex',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '2px',
+                    height: '32px',
+                    alignItems: 'center'
+                  }} title="Define se o cálculo da Data de Expedição utiliza Dias Úteis ou Corridos">
+                    <button
+                      type="button"
+                      onClick={() => setIsBusinessDays(true)}
+                      className="btn"
+                      style={{
+                        padding: '0.2rem 0.55rem', fontSize: '0.72rem', border: 'none', height: '100%',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: isBusinessDays ? 'var(--primary)' : 'transparent',
+                        color: isBusinessDays ? '#ffffff' : 'var(--text-muted)',
+                        fontWeight: isBusinessDays ? 700 : 500
+                      }}
+                    >
+                      Dias Úteis
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsBusinessDays(false)}
+                      className="btn"
+                      style={{
+                        padding: '0.2rem 0.55rem', fontSize: '0.72rem', border: 'none', height: '100%',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: !isBusinessDays ? 'var(--primary)' : 'transparent',
+                        color: !isBusinessDays ? '#ffffff' : 'var(--text-muted)',
+                        fontWeight: !isBusinessDays ? 700 : 500
+                      }}
+                    >
+                      Dias Corridos
+                    </button>
+                  </div>
+                )}
+
                 <div style={{
                   display: 'flex',
                   backgroundColor: 'var(--background)',
@@ -4145,7 +4548,6 @@ export default function PedidosPage() {
                   <option value="">Liberações (Todas)</option>
                   <option value="liberados">Liberados</option>
                   <option value="bloqueados">Bloqueados</option>
-                  <option value="autorizados">Com Autorização</option>
                 </select>
 
                 {/* Etapas Kanban */}
@@ -4415,23 +4817,6 @@ export default function PedidosPage() {
                       >
                         Bloqueados
                       </button>
-                      <button
-                        onClick={() => setFilterPedidosRelease('autorizados')}
-                        style={{
-                          fontSize: '0.6rem',
-                          padding: '1px 5px',
-                          borderRadius: '3px',
-                          border: filterPedidosRelease === 'autorizados' ? '1px solid #8b5cf6' : '1px solid var(--border)',
-                          backgroundColor: filterPedidosRelease === 'autorizados' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
-                          color: filterPedidosRelease === 'autorizados' ? '#8b5cf6' : 'var(--text-muted)',
-                          cursor: 'pointer',
-                          fontWeight: filterPedidosRelease === 'autorizados' ? 700 : 500,
-                          lineHeight: '1.2'
-                        }}
-                        title="Filtrar apenas pedidos com número de autorização (AUT)"
-                      >
-                        Autorizados
-                      </button>
                     </div>
                   )}
                 </div>
@@ -4610,30 +4995,6 @@ export default function PedidosPage() {
                           </div>
 
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '1px' }}>
-                            {/* Destaque de Autorização (AUT.) se houver nas observações */}
-                            {(() => {
-                              const authNum = extractAuthorization(item.notes || parentOrder.notes);
-                              if (!authNum) return null;
-                              return (
-                                <div style={{
-                                  backgroundColor: 'hsla(142, 76.2%, 36.3%, 0.1)',
-                                  border: '1px solid hsla(142, 76.2%, 36.3%, 0.35)',
-                                  color: 'hsl(142, 76.2%, 30%)',
-                                  borderRadius: 'var(--radius-sm)',
-                                  padding: '2px 6px',
-                                  fontSize: '0.65rem',
-                                  fontWeight: 800,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.2rem',
-                                  width: 'fit-content'
-                                }}>
-                                  <Check size={8} strokeWidth={3} />
-                                  {authNum}
-                                </div>
-                              );
-                            })()}
-
                             {/* Destaque de Faturamento */}
                             {(() => {
                               const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
@@ -4661,22 +5022,165 @@ export default function PedidosPage() {
                             })()}
                           </div>
 
-                          {/* Destaque de Prazo de Produção se houver nas observações */}
+                          {/* Exibição Calculada da Data de Expedição com Botões Inline DU / DC */}
                           {(() => {
-                            const deadlineText = extractProductionDeadline(item.notes || parentOrder.notes);
-                            if (!deadlineText) return null;
+                            const orderId = parentOrder.id || item.order_id;
+                            const config = orderDeadlineConfigMap.get(orderId);
+                            const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
+                            const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
+
+                            const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
+                            if (!expRes.expeditionDate) return null;
+                            const isOverdue = isCardOverdue(item, stages, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
+                            const isAdminUser = user?.role === 'Administrador';
+
                             return (
-                              <div style={{
-                                fontSize: '0.62rem',
-                                color: 'var(--text-muted)',
-                                fontStyle: 'italic',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.2rem',
-                                marginTop: '1px',
-                                textTransform: 'lowercase'
-                              }} title={deadlineText}>
-                                <span>🕒 prazo: {deadlineText.length > 25 ? `${deadlineText.substring(0, 25)}...` : deadlineText}</span>
+                              <div style={{ 
+                                fontSize: '0.66rem', 
+                                marginTop: '3px', 
+                                marginBottom: '2px',
+                                display: 'flex', 
+                                flexDirection: 'column',
+                                gap: '2px'
+                              }}>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  flexWrap: 'wrap',
+                                  gap: '0.25rem',
+                                  color: isOverdue ? 'var(--danger)' : 'var(--text-muted)',
+                                  fontWeight: isOverdue ? 700 : 400
+                                }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                    <span>Data de expedição: <strong style={{ color: isOverdue ? 'var(--danger)' : 'var(--text)', fontSize: '0.72rem' }}>{expRes.expeditionDate.toLocaleDateString('pt-BR')}</strong></span>
+
+                                    {/* Botões Inline DU (Dias Úteis) e DC (Dias Corridos) */}
+                                    {isAdminUser ? (
+                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const updatedMap = new Map(orderDeadlineConfigMap);
+                                            const current = updatedMap.get(orderId) || { isBusinessDays: true, chosenDays: expRes.scopeDays };
+                                            updatedMap.set(orderId, { ...current, isBusinessDays: true });
+                                            setOrderDeadlineConfigMap(updatedMap);
+                                            if (typeof window !== 'undefined') {
+                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
+                                            }
+                                          }}
+                                          style={{
+                                            fontSize: '0.58rem',
+                                            fontWeight: 800,
+                                            padding: '1px 4px',
+                                            borderRadius: '3px',
+                                            border: '1px solid var(--border)',
+                                            backgroundColor: effectiveIsBusiness ? 'var(--primary)' : 'var(--surface)',
+                                            color: effectiveIsBusiness ? '#ffffff' : 'var(--text-muted)',
+                                            cursor: 'pointer'
+                                          }}
+                                          title="Calcular por Dias Úteis (pula fins de semana)"
+                                        >
+                                          DU
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const updatedMap = new Map(orderDeadlineConfigMap);
+                                            const current = updatedMap.get(orderId) || { isBusinessDays: true, chosenDays: expRes.scopeDays };
+                                            updatedMap.set(orderId, { ...current, isBusinessDays: false });
+                                            setOrderDeadlineConfigMap(updatedMap);
+                                            if (typeof window !== 'undefined') {
+                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
+                                            }
+                                          }}
+                                          style={{
+                                            fontSize: '0.58rem',
+                                            fontWeight: 800,
+                                            padding: '1px 4px',
+                                            borderRadius: '3px',
+                                            border: '1px solid var(--border)',
+                                            backgroundColor: !effectiveIsBusiness ? 'var(--primary)' : 'var(--surface)',
+                                            color: !effectiveIsBusiness ? '#ffffff' : 'var(--text-muted)',
+                                            cursor: 'pointer'
+                                          }}
+                                          title="Calcular por Dias Corridos"
+                                        >
+                                          DC
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span style={{ fontSize: '0.56rem', fontWeight: 800, padding: '1px 3px', borderRadius: '3px', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                                        {effectiveIsBusiness ? 'DU' : 'DC'}
+                                      </span>
+                                    )}
+
+                                    {/* Se houver Faixa de Escopo (ex: 30 a 35 dias), exibe botões inline [30d] [35d] */}
+                                    {expRes.hasRange && isAdminUser && (
+                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '2px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const updatedMap = new Map(orderDeadlineConfigMap);
+                                            const current = updatedMap.get(orderId) || { isBusinessDays: effectiveIsBusiness, chosenDays: expRes.scopeDays };
+                                            updatedMap.set(orderId, { ...current, chosenDays: expRes.minDays });
+                                            setOrderDeadlineConfigMap(updatedMap);
+                                            if (typeof window !== 'undefined') {
+                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
+                                            }
+                                          }}
+                                          style={{
+                                            fontSize: '0.58rem',
+                                            fontWeight: 800,
+                                            padding: '1px 4px',
+                                            borderRadius: '3px',
+                                            border: '1px solid var(--border)',
+                                            backgroundColor: expRes.scopeDays === expRes.minDays ? 'var(--primary)' : 'var(--surface)',
+                                            color: expRes.scopeDays === expRes.minDays ? '#ffffff' : 'var(--text-muted)',
+                                            cursor: 'pointer'
+                                          }}
+                                          title={`Considerar ${expRes.minDays} dias`}
+                                        >
+                                          {expRes.minDays}d
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const updatedMap = new Map(orderDeadlineConfigMap);
+                                            const current = updatedMap.get(orderId) || { isBusinessDays: effectiveIsBusiness, chosenDays: expRes.scopeDays };
+                                            updatedMap.set(orderId, { ...current, chosenDays: expRes.maxDays });
+                                            setOrderDeadlineConfigMap(updatedMap);
+                                            if (typeof window !== 'undefined') {
+                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
+                                            }
+                                          }}
+                                          style={{
+                                            fontSize: '0.58rem',
+                                            fontWeight: 800,
+                                            padding: '1px 4px',
+                                            borderRadius: '3px',
+                                            border: '1px solid var(--border)',
+                                            backgroundColor: expRes.scopeDays === expRes.maxDays ? 'var(--primary)' : 'var(--surface)',
+                                            color: expRes.scopeDays === expRes.maxDays ? '#ffffff' : 'var(--text-muted)',
+                                            cursor: 'pointer'
+                                          }}
+                                          title={`Considerar ${expRes.maxDays} dias`}
+                                        >
+                                          {expRes.maxDays}d
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {isOverdue && <span style={{ fontSize: '0.58rem', color: 'var(--danger)', fontWeight: 800 }}>(Atrasado)</span>}
+                                  {parentOrder.conta_azul_status === 'Em andamento' && (
+                                    <span style={{ fontSize: '0.58rem', color: '#eab308', fontWeight: 700 }}>(Orçamento)</span>
+                                  )}
+                                </div>
                               </div>
                             );
                           })()}
@@ -4858,30 +5362,7 @@ export default function PedidosPage() {
                             ) : null}
                           </div>
 
-                          {/* Exibição do Prazo Extraído */}
-                          {(() => {
-                            const deadline = parseDeadlineFromNotes(item.notes || parentOrder.notes);
-                            if (!deadline) return null;
-                            const isOverdue = deadline.getTime() < Date.now() && stage.name !== 'Concluído' && parentOrder.conta_azul_status !== 'Em andamento';
-                            
-                            return (
-                              <div style={{ 
-                                fontSize: '0.6rem', 
-                                marginTop: '2px', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '0.15rem',
-                                color: isOverdue ? 'var(--danger)' : 'var(--text-muted)',
-                                fontWeight: isOverdue ? 700 : 400
-                              }}>
-                                Prazo: {deadline.toLocaleDateString('pt-BR')}
-                                {isOverdue && <span style={{ fontSize: '0.6rem', color: 'var(--danger)' }}>(Atrasado)</span>}
-                                {parentOrder.conta_azul_status === 'Em andamento' && (
-                                  <span style={{ fontSize: '0.6rem', color: '#eab308', fontWeight: 700 }}>(Orçamento em andamento)</span>
-                                )}
-                              </div>
-                            );
-                          })()}
+
 
                           {/* Informações adicionais como Prazo e Vendedora + Botão Mover no Mobile */}
                           <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
@@ -4916,81 +5397,178 @@ export default function PedidosPage() {
                             </button>
                           </div>
 
-                          {/* Badge(s) de Equipe(s) de Manuseio com Suporte a Múltiplas Equipes e Quantidades */}
+                          {/* Exibição da Máquina Vinculada (Mostra no card apenas se tiver máquina vinculada) */}
+                          {(() => {
+                            const linkedMachine = productionMachines.find(m => m.id === item.machine_id) || item.machine;
+                            if (!linkedMachine) return null;
+                            return (
+                              <div style={{ 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                gap: '0.25rem',
+                                fontSize: '0.6rem',
+                                fontWeight: 700,
+                                color: 'hsl(217, 91%, 38%)',
+                                backgroundColor: 'hsla(217, 91%, 60%, 0.1)',
+                                border: '1px solid hsla(217, 91%, 60%, 0.25)',
+                                padding: '1.5px 6px',
+                                borderRadius: '4px',
+                                marginTop: '3px',
+                                width: 'fit-content'
+                              }}>
+                                <Cpu size={9} />
+                                <span>Máquina: {linkedMachine.name}</span>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Badge(s) de Equipe(s) de Manuseio com Suporte a Múltiplas Equipes, Códigos e Status Finalizado */}
                           {(item.production_sector === 'Manuseio' || stage.name === 'Manuseio') && (() => {
-                            const itemAllocations = itemHandlingTeamsMap.get(item.id) || [];
-                            
-                            if (itemAllocations.length > 0) {
-                              return (
-                                <div 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenHandlingTeamModalForItem(item, item.stage_id);
-                                  }}
-                                  style={{
-                                    display: 'flex',
-                                    flexWrap: 'wrap',
-                                    gap: '0.2rem',
-                                    marginTop: '3px',
-                                    cursor: 'pointer'
-                                  }}
-                                  title="Clique para gerenciar / alterar divisão de equipes de manuseio"
-                                >
-                                  {itemAllocations.map((alloc) => {
-                                    const teamName = alloc.team?.name || handlingTeams.find(t => t.id === alloc.handling_team_id)?.name || 'Equipe';
-                                    return (
-                                      <div key={alloc.id || alloc.handling_team_id} style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.2rem',
-                                        padding: '1px 5px',
-                                        borderRadius: '4px',
-                                        backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.12)',
-                                        border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)',
-                                        fontSize: '0.6rem',
-                                        fontWeight: 700,
-                                        color: 'hsl(271, 91.2%, 55%)'
-                                      }}>
-                                        <Users size={10} />
-                                        <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
+                            const rawAllocations = itemHandlingTeamsMap.get(item.id) || [];
+                            const totalPrintRun = Number(item.print_run || item.quantity || 0);
+
+                            // Fallback seguro se não houver alocações detalhadas mas houver equipe atribuída ao item
+                            let itemAllocations = rawAllocations;
+                            if (itemAllocations.length === 0 && item.handling_team_id) {
+                              itemAllocations = [{
+                                id: item.id + '-fallback',
+                                tenant_id: item.tenant_id,
+                                order_item_id: item.id,
+                                handling_team_id: item.handling_team_id,
+                                quantity: totalPrintRun,
+                                team: item.handling_team,
+                                is_completed: item.handling_status === 'CONFERIDO' || item.is_completed || false,
+                                handling_code: item.handling_code
+                              }];
                             }
 
+                            const totalAllocated = itemAllocations.reduce((sum, a) => sum + Number(a.quantity || 0), 0);
+                            const remainingQty = Math.max(0, totalPrintRun - totalAllocated);
+                            const isAllConferido = itemAllocations.length > 0 && totalAllocated >= totalPrintRun && itemAllocations.every(a => a.is_completed);
+                            const rawPv = item.friendly_id || item.order?.pv_number || (item.order_id ? item.order_id.slice(0, 6) : '262/1');
+                            const itemPv = rawPv.replace(/^PV-?/i, '');
+                            
                             return (
                               <div 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenHandlingTeamModalForItem(item, item.stage_id);
-                                }}
                                 style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  marginTop: '3px',
-                                  padding: '2px 5px',
-                                  borderRadius: '4px',
-                                  background: item.handling_team_id
-                                    ? 'hsla(271, 91.2%, 65.1%, 0.12)'
-                                    : 'hsla(0, 84.2%, 60.2%, 0.08)',
-                                  border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`,
-                                  cursor: 'pointer'
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '0.2rem',
+                                  marginTop: '3px'
                                 }}
-                                title="Clique para vincular / dividir equipes de manuseio"
                               >
-                                <span style={{ 
-                                  fontSize: '0.6rem', 
-                                  fontWeight: 700,
-                                  color: item.handling_team_id ? 'hsl(271, 91.2%, 55%)' : 'hsl(0, 84.2%, 50%)'
-                                }}>
-                                  {item.handling_team_id
-                                    ? (handlingTeams.find(t => t.id === item.handling_team_id)?.name || 'Equipe desconhecida')
-                                    : 'Sem equipe vinculada (Clique para definir)'
-                                  }
-                                </span>
+                                {itemAllocations.length > 0 ? (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem' }}>
+                                    {itemAllocations.map((alloc, idx) => {
+                                      const teamName = alloc.team?.name || handlingTeams.find(t => t.id === alloc.handling_team_id)?.name || 'Equipe';
+                                      const hCode = (alloc.handling_code || `MS${itemPv}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS');
+                                      return (
+                                        <div
+                                          key={alloc.id || idx}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenHandlingTeamModalForItem(item, item.stage_id, alloc.id);
+                                          }}
+                                          style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: "0.2rem",
+                                            padding: "1px 5px",
+                                            borderRadius: "4px",
+                                            backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(271, 91.2%, 65.1%, 0.12)",
+                                            border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(271, 91.2%, 65.1%, 0.3)"}`,
+                                            fontSize: "0.6rem",
+                                            fontWeight: 700,
+                                            color: alloc.is_completed ? "hsl(142, 71%, 35%)" : "hsl(271, 91.2%, 55%)",
+                                            cursor: "pointer"
+                                          }}
+                                          title={`Clique para editar a equipe ${teamName} (${hCode})`}
+                                        >
+                                          <Users size={9} />
+                                          <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
+                                          <span style={{ fontSize: '0.55rem', opacity: 0.85, fontWeight: 600 }}>• {hCode}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    padding: '2px 5px',
+                                    borderRadius: '4px',
+                                    background: item.handling_team_id
+                                      ? 'hsla(271, 91.2%, 65.1%, 0.12)'
+                                      : 'hsla(0, 84.2%, 60.2%, 0.08)',
+                                    border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`
+                                  }}>
+                                    <span style={{ 
+                                      fontSize: '0.6rem', 
+                                      fontWeight: 700,
+                                      color: item.handling_team_id ? 'hsl(271, 91.2%, 55%)' : 'hsl(0, 84.2%, 50%)'
+                                    }}>
+                                      {item.handling_team_id
+                                        ? `${handlingTeams.find(t => t.id === item.handling_team_id)?.name || 'Equipe'} (${totalPrintRun.toLocaleString('pt-BR')} un)`
+                                        : 'Sem equipe vinculada (Clique para definir)'
+                                      }
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Badge de Status: "Manuseio concluído" se finalizado (100% alocado e conferido) ou "Faltam xxx" se pendente */}
+                                {isAllConferido ? (
+                                  <div style={{
+                                    fontSize: '0.6rem',
+                                    fontWeight: 800,
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'hsla(142, 71%, 45%, 0.15)',
+                                    color: 'hsl(142, 71%, 32%)',
+                                    border: '1px solid hsla(142, 71%, 45%, 0.35)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    width: 'fit-content'
+                                  }}>
+                                    <CheckCircle2 size={10} />
+                                    <span>✓ Manuseio concluído</span>
+                                  </div>
+                                ) : remainingQty > 0 ? (
+                                  <div style={{
+                                    fontSize: '0.58rem',
+                                    fontWeight: 800,
+                                    padding: '1px 5px',
+                                    borderRadius: '3px',
+                                    backgroundColor: 'hsla(38, 92%, 50%, 0.15)',
+                                    color: 'hsl(38, 92%, 35%)',
+                                    border: '1px solid hsla(38, 92%, 50%, 0.4)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.2rem',
+                                    width: 'fit-content'
+                                  }}>
+                                    <AlertTriangle size={9} />
+                                    <span>Faltam {remainingQty.toLocaleString('pt-BR')} un para manuseio</span>
+                                  </div>
+                                ) : (
+                                  <div style={{
+                                    fontSize: '0.58rem',
+                                    fontWeight: 800,
+                                    padding: '1px 5px',
+                                    borderRadius: '3px',
+                                    backgroundColor: 'hsla(45, 93%, 47%, 0.15)',
+                                    color: 'hsl(45, 93%, 35%)',
+                                    border: '1px solid hsla(45, 93%, 47%, 0.4)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.2rem',
+                                    width: 'fit-content'
+                                  }}>
+                                    <Clock size={9} />
+                                    <span>Manuseio em andamento (Pendente conferência)</span>
+                                  </div>
+                                )}
                               </div>
                             );
                           })()}
@@ -5025,12 +5603,12 @@ export default function PedidosPage() {
                           )}
 
                           {(() => {
-                            const productionItems = orderItems.filter(i => i.order_id === item.order_id && i.product?.bind_to_first_item !== true);
+                            const productionItems = orderItems.filter(i => i.order_id === item.order_id && !isItemBoundToFirstItem(i));
                             const firstProductionItem = [...productionItems].sort((a, b) => (a.item_index || 0) - (b.item_index || 0))[0];
                             const isFirstProductionItem = firstProductionItem && firstProductionItem.id === item.id;
-                            const boundItems = orderItems.filter(i => i.order_id === item.order_id && i.product?.bind_to_first_item === true);
+                            const boundItems = orderItems.filter(i => i.order_id === item.order_id && isItemBoundToFirstItem(i));
 
-                            const siblingProductionItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && i.product?.bind_to_first_item !== true);
+                            const siblingProductionItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && !isItemBoundToFirstItem(i));
 
                             const anySiblingInExpedition = siblingProductionItems.some(i => {
                               const s = stages.find(st => st.id === i.stage_id);
@@ -6894,7 +7472,7 @@ export default function PedidosPage() {
           <div style={{
             position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
             backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+            justifyContent: 'center', zIndex: 500000, padding: '1rem', backdropFilter: 'blur(4px)'
           }}>
             <div style={{
               backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
@@ -7018,16 +7596,23 @@ export default function PedidosPage() {
                       </span>
                     </div>
 
-                    <div style={{
-                      padding: '3px 10px',
-                      borderRadius: '99px',
-                      backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)',
-                      color: 'hsl(271, 91.2%, 50%)',
-                      fontSize: '0.82rem',
-                      fontWeight: 800,
-                      border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)'
-                    }}>
-                      Tiragem: {totalItemQty.toLocaleString('pt-BR')} un
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                      <div style={{
+                        padding: '3px 10px',
+                        borderRadius: '99px',
+                        backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)',
+                        color: 'hsl(271, 91.2%, 50%)',
+                        fontSize: '0.82rem',
+                        fontWeight: 800,
+                        border: '1px solid hsla(271, 91.2%, 65.1%, 0.3)'
+                      }}>
+                        Tiragem: {totalItemQty.toLocaleString('pt-BR')} un
+                      </div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                        Cód. Manuseio: <span style={{ color: 'var(--primary)', fontFamily: 'monospace', fontWeight: 700 }}>
+                          {handlingTeamAllocations.map(a => (a.handling_code || '').replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS')).filter(Boolean).join(', ') || `MS${(handlingTeamModalItem.friendly_id || '262/1').replace(/^PV-?/i, '')}/1`}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -7042,12 +7627,89 @@ export default function PedidosPage() {
                   </div>
                 </div>
 
-                {/* Distribuição de Lotes e Equipes */}
+                {/* BANNER DE ALERTA PARA QUANTIDADE NÃO ALOCADA / FALTA DE PRODUÇÃO */}
+                {totalAllocated < totalItemQty && (
+                  <div style={{
+                    backgroundColor: 'hsla(45, 93%, 47%, 0.12)',
+                    border: '1.5px solid hsla(45, 93%, 47%, 0.4)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.65rem 0.9rem',
+                    color: 'hsl(45, 93%, 30%)',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.6rem',
+                    boxShadow: 'var(--shadow-xs)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle size={18} style={{ color: 'hsl(45, 93%, 40%)' }} />
+                      <div>
+                        <div>⚠️ HÁ {(totalItemQty - totalAllocated).toLocaleString('pt-BR')} UN DA TIRAGEM NÃO ALOCADAS A NENHUMA EQUIPE</div>
+                        <div style={{ fontSize: '0.74rem', fontWeight: 500, opacity: 0.9 }}>
+                          Se houver refugo, rasgo ou perda no manuseio/produção, registre a falta para acerto de crédito/débito na Expedição.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-warning"
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        padding: '0.35rem 0.75rem',
+                        whiteSpace: 'nowrap',
+                        backgroundColor: 'hsl(45, 93%, 42%)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => {
+                        setShortageItem(handlingTeamModalItem);
+                        setShortageQty(totalItemQty - totalAllocated);
+                        setShortageReason('MANUSEIO_AVARIA');
+                        setShortageNotes('');
+                        setIsShortageModalOpen(true);
+                      }}
+                    >
+                      ⚠️ Registrar Falta / Avaria
+                    </button>
+                  </div>
+                )}
+
+                {/* ALERTA PROEMINENTE DE EXCESSO DE QUANTIDADE ALOCADA */}
+                {totalAllocated > totalItemQty && (
+                  <div style={{
+                    backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)',
+                    border: '1.5px solid hsla(0, 84.2%, 60.2%, 0.4)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.65rem 0.9rem',
+                    color: 'hsl(0, 84.2%, 45%)',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    boxShadow: 'var(--shadow-xs)'
+                  }}>
+                    <AlertTriangle size={20} style={{ minWidth: '20px', color: 'hsl(0, 84.2%, 50%)' }} />
+                    <div>
+                      <div>⚠️ ATENÇÃO: QUANTIDADE ALOCADA MAIOR QUE O PEDIDO</div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 500, opacity: 0.95, marginTop: '2px' }}>
+                        A quantidade total alocada (<strong>{totalAllocated.toLocaleString('pt-BR')} un</strong>) é maior do que o solicitado no pedido (<strong>{totalItemQty.toLocaleString('pt-BR')} un</strong>). Excesso de <strong>+{(totalAllocated - totalItemQty).toLocaleString('pt-BR')} un</strong>.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Distribuição de Equipes de Manuseio */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <label className="form-label" style={{ fontWeight: 700, margin: 0, fontSize: '0.85rem' }}>
-                        Distribuição de Lotes e Equipes *
+                        Distribuição de Equipes de Manuseio *
                       </label>
                       <span style={{
                         fontSize: '0.72rem',
@@ -7058,35 +7720,63 @@ export default function PedidosPage() {
                           ? 'hsla(142, 71%, 45%, 0.12)'
                           : totalAllocated < totalItemQty
                           ? 'hsla(45, 93%, 47%, 0.15)'
-                          : 'hsla(0, 84%, 60%, 0.15)',
+                          : 'hsla(0, 84%, 60%, 0.2)',
                         color: totalAllocated === totalItemQty
                           ? 'hsl(142, 71%, 35%)'
                           : totalAllocated < totalItemQty
                           ? 'hsl(45, 93%, 35%)'
-                          : 'hsl(0, 84%, 45%)',
-                        border: `1px solid ${totalAllocated === totalItemQty ? 'hsla(142, 71%, 45%, 0.3)' : totalAllocated < totalItemQty ? 'hsla(45, 93%, 47%, 0.3)' : 'hsla(0, 84%, 60%, 0.3)'}`
+                          : 'hsl(0, 84%, 40%)',
+                        border: `1.5px solid ${totalAllocated === totalItemQty ? 'hsla(142, 71%, 45%, 0.3)' : totalAllocated < totalItemQty ? 'hsla(45, 93%, 47%, 0.3)' : 'hsla(0, 84%, 60%, 0.5)'}`
                       }}>
                         {totalAllocated === totalItemQty
                           ? `Total: ${totalAllocated.toLocaleString('pt-BR')} un (100% Distribuído)`
                           : totalAllocated < totalItemQty
                           ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (Faltam ${(totalItemQty - totalAllocated).toLocaleString('pt-BR')})`
-                          : `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (Excesso de ${(totalAllocated - totalItemQty).toLocaleString('pt-BR')})`}
+                          : `⚠️ Excesso: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (+${(totalAllocated - totalItemQty).toLocaleString('pt-BR')} un a mais)`}
                       </span>
                     </div>
 
                     <button
                       type="button"
-                      className="btn btn-outline"
-                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', gap: '0.3rem', display: 'flex', alignItems: 'center' }}
+                      className="btn btn-primary"
+                      style={{ 
+                        padding: '0.45rem 0.85rem', 
+                        fontSize: '0.825rem', 
+                        fontWeight: 700,
+                        gap: '0.4rem', 
+                        display: 'inline-flex', 
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'var(--primary)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 'var(--radius-md, 6px)',
+                        boxShadow: '0 2px 8px rgba(37, 99, 235, 0.35)',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
                       onClick={() => {
                         const remaining = Math.max(0, totalItemQty - totalAllocated);
+                        const itemPv = (handlingTeamModalItem?.friendly_id || handlingTeamModalItem?.order?.pv_number || '262/1').replace(/^PV-?/i, '');
                         setHandlingTeamAllocations(prev => [
                           ...prev,
-                          { handling_team_id: '', quantity: remaining, is_completed: false, completed_at: '' }
+                          {
+                            id: `new-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                            handling_team_id: '',
+                            quantity: remaining,
+                            departure_date: new Date().toISOString().slice(0, 10),
+                            return_quantity: remaining,
+                            return_date: '',
+                            handling_code: `MS${itemPv}/${prev.length + 1}`,
+                            is_completed: false,
+                            completed_at: ''
+                          }
                         ]);
                       }}
+                      title="Clique para adicionar uma nova equipe ou divisão de manuseio"
                     >
-                      <Plus size={14} /> Adicionar Lote
+                      <Plus size={16} strokeWidth={2.5} />
+                      <span>Adicionar Equipe de Manuseio</span>
                     </button>
                   </div>
 
@@ -7095,77 +7785,32 @@ export default function PedidosPage() {
                       key={idx}
                       style={{
                         display: 'flex',
+                        flexDirection: 'column',
                         gap: '0.5rem',
-                        alignItems: 'flex-start',
                         backgroundColor: 'var(--background)',
-                        padding: '0.65rem',
+                        padding: '0.75rem',
                         borderRadius: 'var(--radius-sm)',
                         border: '1px solid var(--border)',
                         boxShadow: 'var(--shadow-xs)'
                       }}
                     >
-                      <div style={{ flex: 2 }}>
-                        <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Lote {idx + 1} - Equipe de Manuseio
-                        </label>
-                        <select
-                          className="form-select"
-                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
-                          value={alloc.handling_team_id}
-                          onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, handling_team_id: e.target.value } : a))}
-                        >
-                          <option value="">— Selecione a Equipe —</option>
-                          {handlingTeams.filter(t => t.status === 'ATIVO').map((team) => (
-                            <option key={team.id} value={team.id}>{team.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div style={{ flex: 1.2 }}>
-                        <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                          Quantidade (un)
-                        </label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
-                          value={alloc.quantity || ''}
-                          placeholder="Qtd."
-                          onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, quantity: Number(e.target.value) } : a))}
-                        />
-                      </div>
-
-                      {showConferenceChecks && (
-                        <>
-                          <div style={{ flex: 0.6, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Conferido</label>
-                            <input
-                              type="checkbox"
-                              style={{ cursor: 'pointer', width: '18px', height: '18px', marginTop: '6px' }}
-                              checked={alloc.is_completed || false}
-                              onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? {
-                                ...a,
-                                is_completed: e.target.checked,
-                                completed_at: e.target.checked ? (a.completed_at || new Date().toISOString().slice(0, 10)) : ''
-                              } : a))}
-                            />
-                          </div>
-
-                          <div style={{ flex: 1.3 }}>
-                            <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>Data Conclusão</label>
-                            <input
-                              type="date"
-                              className="form-input"
-                              style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
-                              value={alloc.completed_at || ''}
-                              onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, completed_at: e.target.value } : a))}
-                              disabled={!alloc.is_completed}
-                            />
-                          </div>
-                        </>
-                      )}
-
-                      {handlingTeamAllocations.length > 1 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)' }}>
+                            Equipe {idx + 1} — Equipe de Manuseio <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontFamily: 'monospace', marginLeft: '0.4rem' }}>({(alloc.handling_code || `MS${(handlingTeamModalItem?.friendly_id || '262/1').replace(/^PV-?/i, '')}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS')})</span> *
+                          </label>
+                          <select
+                            className="form-select"
+                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.82rem', marginTop: '2px' }}
+                            value={alloc.handling_team_id}
+                            onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, handling_team_id: e.target.value } : a))}
+                          >
+                            <option value="">— Selecione a Equipe —</option>
+                            {handlingTeams.filter(t => t.status === 'ATIVO').map((team) => (
+                              <option key={team.id} value={team.id}>{team.name}</option>
+                            ))}
+                          </select>
+                        </div>
                         <button
                           type="button"
                           onClick={() => setHandlingTeamAllocations(prev => prev.filter((_, i) => i !== idx))}
@@ -7174,14 +7819,101 @@ export default function PedidosPage() {
                             border: 'none',
                             color: 'var(--danger)',
                             cursor: 'pointer',
-                            marginTop: '1.25rem',
-                            padding: '4px'
+                            padding: '4px',
+                            marginLeft: '0.5rem'
                           }}
-                          title="Excluir fração"
+                          title="Excluir esta equipe vinculada"
                         >
                           <Trash2 size={16} />
                         </button>
-                      )}
+                      </div>
+
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.1fr 1fr 1.1fr 1fr 0.8fr',
+                        gap: '0.5rem',
+                        alignItems: 'flex-end',
+                        backgroundColor: 'var(--surface)',
+                        padding: '0.65rem',
+                        borderRadius: 'var(--radius-xs)',
+                        border: '1px solid var(--border)'
+                      }}>
+                        {/* SAÍDA */}
+                        <div>
+                          <label style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--text-muted)', display: 'block' }}>
+                            Data Saída
+                          </label>
+                          <input
+                            type="date"
+                            className="form-input"
+                            style={{ padding: '0.3rem 0.4rem', fontSize: '0.78rem', marginTop: '2px' }}
+                            value={alloc.departure_date || ''}
+                            onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, departure_date: e.target.value } : a))}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--text-muted)', display: 'block' }}>
+                            Qtd Saída (un)
+                          </label>
+                          <input
+                            type="number"
+                            className="form-input"
+                            style={{ padding: '0.3rem 0.4rem', fontSize: '0.78rem', marginTop: '2px' }}
+                            value={alloc.quantity || ''}
+                            placeholder="Qtd."
+                            onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, quantity: Number(e.target.value) } : a))}
+                          />
+                        </div>
+
+                        {/* RETORNO */}
+                        <div>
+                          <label style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--text-muted)', display: 'block' }}>
+                            Data Retorno
+                          </label>
+                          <input
+                            type="date"
+                            className="form-input"
+                            style={{ padding: '0.3rem 0.4rem', fontSize: '0.78rem', marginTop: '2px' }}
+                            value={alloc.return_date || alloc.completed_at || ''}
+                            onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? {
+                              ...a,
+                              return_date: e.target.value,
+                              completed_at: e.target.value
+                            } : a))}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--text-muted)', display: 'block' }}>
+                            Qtd Retorno (un)
+                          </label>
+                          <input
+                            type="number"
+                            className="form-input"
+                            style={{ padding: '0.3rem 0.4rem', fontSize: '0.78rem', marginTop: '2px' }}
+                            value={alloc.return_quantity || ''}
+                            placeholder="Qtd."
+                            onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? { ...a, return_quantity: Number(e.target.value) } : a))}
+                          />
+                        </div>
+
+                        {/* CONFERÊNCIA */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                          <label style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--text-muted)' }}>Conferido</label>
+                          <input
+                            type="checkbox"
+                            style={{ cursor: 'pointer', width: '18px', height: '18px', marginTop: '4px' }}
+                            checked={alloc.is_completed || false}
+                            onChange={(e) => setHandlingTeamAllocations(prev => prev.map((a, i) => i === idx ? {
+                              ...a,
+                              is_completed: e.target.checked,
+                              completed_at: e.target.checked ? (a.completed_at || a.return_date || new Date().toISOString().slice(0, 10)) : a.completed_at,
+                              return_date: e.target.checked ? (a.return_date || a.completed_at || new Date().toISOString().slice(0, 10)) : a.return_date
+                            } : a))}
+                          />
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -7204,7 +7936,7 @@ export default function PedidosPage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={loading}
+                  disabled={savingHandlingTeam}
                   onClick={async () => {
                     // Validações
                     const validAllocations = handlingTeamAllocations.filter(a => a.handling_team_id && a.quantity > 0);
@@ -7215,24 +7947,36 @@ export default function PedidosPage() {
 
                     const hasIncompleteRow = handlingTeamAllocations.some(a => (a.quantity > 0 && !a.handling_team_id) || (a.handling_team_id && !a.quantity));
                     if (hasIncompleteRow) {
-                      alert('Existem lotes preenchidos incorretamente. Verifique se todos possuem equipe e quantidade.');
+                      alert('Existem equipes preenchidas incorretamente. Verifique se todas possuem equipe e quantidade.');
                       return;
                     }
 
-                    setLoading(true);
+                    setSavingHandlingTeam(true);
                     try {
-                      // 1. Salva no banco de dados
-                      await saveOrderItemHandlingTeams(handlingTeamModalItem.id, handlingTeamAllocations);
+                      // Mescla as alocações editadas no modal com as alocações não-editadas do item para preservar todas
+                      const fullExistingList = itemHandlingTeamsMap.get(handlingTeamModalItem.id) || [];
+                      const editingIds = new Set(handlingTeamAllocations.map(a => a.id).filter(Boolean));
+                      const uneditedAllocations = fullExistingList.filter((a: any) => !editingIds.has(a.id));
+
+                      const mergedPayload = [
+                        ...uneditedAllocations,
+                        ...handlingTeamAllocations
+                      ];
+
+                      // 1. Salva no banco de dados e obtém dados salvos
+                      const saveRes = await saveOrderItemHandlingTeams(handlingTeamModalItem.id, mergedPayload);
                       
-                      // 2. Atualiza estado local de alocações
+                      // 2. Atualiza estado local de alocações imediatamente priorizando a lista completa salva
                       const { data } = await getOrderItemHandlingTeams(handlingTeamModalItem.id);
-                      if (data) {
-                        setItemHandlingTeamsMap(prev => {
-                          const updated = new Map(prev);
-                          updated.set(handlingTeamModalItem.id, data);
-                          return updated;
-                        });
-                      }
+                      const savedList = Array.isArray(saveRes.data) ? saveRes.data : [];
+                      const fetchedList = Array.isArray(data) ? data : [];
+                      const finalTeams = savedList.length >= fetchedList.length ? savedList : fetchedList;
+
+                      setItemHandlingTeamsMap(prev => {
+                        const updated = new Map(prev);
+                        updated.set(handlingTeamModalItem.id, finalTeams);
+                        return updated;
+                      });
 
                       showToast(`Equipes de manuseio do item ${handlingTeamModalItem.friendly_id || ''} salvas com sucesso!`);
 
@@ -7249,11 +7993,11 @@ export default function PedidosPage() {
                       console.error('Erro ao salvar equipes de manuseio:', err);
                       alert('Erro ao salvar equipes de manuseio: ' + (err.message || 'Falha ao gravar no banco.'));
                     } finally {
-                      setLoading(false);
+                      setSavingHandlingTeam(false);
                     }
                   }}
                 >
-                  {loading ? 'Gravando...' : (handlingTeamModalTargetStageId && handlingTeamModalTargetStageId !== handlingTeamModalItem.stage_id ? 'Salvar e Mover para Manuseio' : 'Salvar Distribuição')}
+                  {savingHandlingTeam ? 'Gravando...' : (handlingTeamModalTargetStageId && handlingTeamModalTargetStageId !== handlingTeamModalItem.stage_id ? 'Salvar e Mover para Manuseio' : 'Salvar Distribuição')}
                 </button>
               </div>
             </div>
@@ -7855,11 +8599,11 @@ export default function PedidosPage() {
             <form onSubmit={handleSubmit} style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 
-                {/* Seleção do Destino Inicial (Obrigatório na Criação) */}
+                {/* Seleção do Destino Inicial */}
                 {modalType === 'create' && (
                   <div className="form-group" style={{ backgroundColor: 'rgba(37, 99, 235, 0.05)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
                     <label className="form-label" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.85rem', marginBottom: '0.4rem', display: 'block' }}>
-                      Destino Inicial Obrigatório do Pedido *
+                      Destino Inicial do Pedido
                     </label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                       <label style={{
@@ -7898,21 +8642,21 @@ export default function PedidosPage() {
                   </div>
                 )}
 
-                {/* Número do PV */}
+                {/* Número da OP / PV (Obrigatório) */}
                 <div className="form-group">
-                  <label className="form-label">Número do PV (ERP Conta Azul) *</label>
+                  <label className="form-label">OP (Número da OP / PV) *</label>
                   <input 
                     type="text" 
                     className="form-input" 
                     required
-                    placeholder="Ex: PV-1234"
+                    placeholder="Ex: OP-1234 ou PV-1234"
                     value={formPvNumber}
                     disabled={isReadOnlyForForm('pv_number')}
                     onChange={(e) => setFormPvNumber(e.target.value)}
                   />
                 </div>
 
-                {/* Número da OP */}
+                {/* Número da OP (Fábrica) */}
                 <div className="form-group">
                   <label className="form-label">Número da OP (Fábrica) - Vazio se for Estoque</label>
                   <input 
@@ -7925,21 +8669,8 @@ export default function PedidosPage() {
                   />
                 </div>
 
-                {/* Nome da Arte */}
-                <div className="form-group">
-                  <label className="form-label">Produto/Serviço / Identificação Visual da Embalagem *</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    required
-                    placeholder="Ex: Sacola Kraft Chocolate Gourmet Brasil - Logo Prata"
-                    value={formArtName}
-                    disabled={isReadOnlyForForm('art_name')}
-                    onChange={(e) => setFormArtName(e.target.value)}
-                  />
-                </div>
 
-                {/* Seleção do Cliente */}
+                {/* Seleção do Cliente (Obrigatório) */}
                 <div className="form-group">
                   <label className="form-label">Cliente (Razão Social) *</label>
                   <input
@@ -7959,17 +8690,16 @@ export default function PedidosPage() {
                   </datalist>
                 </div>
 
-                {/* Seleção do Produto */}
+                {/* Seleção do Produto (Opcional) */}
                 <div className="form-group">
-                  <label className="form-label">Produto de Embalagem *</label>
+                  <label className="form-label">Produto de Embalagem (Opcional)</label>
                   <select 
                     className="form-select"
-                    required
                     value={formProduct}
                     disabled={isReadOnlyForForm('product')}
                     onChange={(e) => setFormProduct(e.target.value)}
                   >
-                    <option value="">Selecione o Produto</option>
+                    <option value="">— Selecione o Produto (Opcional) —</option>
                     {products.map(p => (
                       <option key={p.id} value={p.id}>{p.name} (Estoque: {p.stock_quantity})</option>
                     ))}
@@ -7990,6 +8720,22 @@ export default function PedidosPage() {
                   )}
                 </div>
 
+                {/* Seleção de Máquina de Produção (Opcional) */}
+                <div className="form-group">
+                  <label className="form-label">Máquina de Produção (Opcional)</label>
+                  <select 
+                    className="form-select"
+                    value={formMachineId}
+                    disabled={isReadOnlyForForm('machine_id')}
+                    onChange={(e) => setFormMachineId(e.target.value)}
+                  >
+                    <option value="">— Nenhuma máquina vinculada —</option>
+                    {productionMachines.filter(m => m.status === 'ATIVO').map(m => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.sector})</option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Medidas */}
                 <div className="form-group">
                   <label className="form-label">Medidas Customizadas</label>
@@ -8003,30 +8749,29 @@ export default function PedidosPage() {
                   />
                 </div>
 
-                {/* Tiragem */}
+                {/* Tiragem (Opcional) */}
                 <div className="form-group">
-                  <label className="form-label">Tiragem Total (Unidades) *</label>
+                  <label className="form-label">Tiragem Total (Unidades)</label>
                   <input 
                     type="number" 
                     className="form-input" 
-                    required
-                    min={1}
-                    value={formPrintRun}
+                    placeholder="Ex: 1000"
+                    value={formPrintRun || ''}
                     disabled={isReadOnlyForForm('printRun')}
                     onChange={(e) => setFormPrintRun(Number(e.target.value))}
                   />
                 </div>
 
-                {/* Tipo de Envio */}
+                {/* Tipo de Envio (Por Padrão: Não precisa de frete) */}
                 <div className="form-group">
-                  <label className="form-label">Tipo de Frete/Envio *</label>
+                  <label className="form-label">Tipo de Frete/Envio</label>
                   <select 
                     className="form-select"
-                    required
                     value={formShippingType}
                     disabled={isReadOnlyForForm('shipping_type')}
                     onChange={(e) => setFormShippingType(e.target.value as any)}
                   >
+                    <option value="SEM_FRETE">Não precisa de frete</option>
                     <option value="RETIRADA">Cliente Retira</option>
                     <option value="ENTREGA_PROPRIA">Entrega Própria Samppel</option>
                     <option value="TRANSPORTADORA">Transportadora (Coleta)</option>
@@ -8048,13 +8793,13 @@ export default function PedidosPage() {
                   </div>
                 )}
 
-                {/* Vendedora */}
+                {/* Vendedora (Opcional) */}
                 <div className="form-group">
-                  <label className="form-label">Vendedora Responsável *</label>
+                  <label className="form-label">Vendedora Responsável</label>
                   <input 
                     type="text" 
                     className="form-input" 
-                    required
+                    placeholder="Ex: Vendas Samppel"
                     value={formSeller}
                     disabled={isReadOnlyForForm('seller')}
                     onChange={(e) => setFormSeller(e.target.value)}
@@ -9103,6 +9848,10 @@ export default function PedidosPage() {
                       { label: 'Produto/Serviço', value: detailItem.name || '—' },
                       { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
                       { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—' },
+                      { label: 'Data de expedição', value: (() => {
+                        const expRes = calculateExpeditionDate(detailItem, order, { isBusinessDays, chosenDays: orderRangeChoiceMap.get(order.id) });
+                        return expRes.expeditionDate ? expRes.expeditionDate.toLocaleDateString('pt-BR') : '—';
+                      })() },
                       { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
                       { label: 'Nota Fiscal (NF-e)', value: order.invoice_number || '—' },
                       { label: 'Número da Coleta', value: order.pickup_number || '—' },
@@ -9468,7 +10217,7 @@ export default function PedidosPage() {
                   })()}
                 </section>
 
-                {/* Card: Produtos do Pedido */}
+                {/* Card: Informações de Manuseio & Produtos do Pedido */}
                 <section style={{
                   border: '1px solid var(--border)',
                   borderRadius: 'var(--radius-md, 10px)',
@@ -9478,64 +10227,404 @@ export default function PedidosPage() {
                   flexDirection: 'column',
                   gap: '0.75rem'
                 }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
-                    <span style={{ width: '4px', height: '14px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
-                    Produtos do Pedido
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ width: '4px', height: '14px', backgroundColor: 'var(--primary)', borderRadius: '2px', display: 'inline-block' }} />
+                      <span style={{ fontSize: '0.82rem', fontWeight: 800 }}>Informações de Manuseio & Produtos do Pedido</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '0.3rem 0.75rem',
+                        gap: '0.35rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        fontWeight: 700,
+                        boxShadow: 'var(--shadow-xs)'
+                      }}
+                      onClick={() => {
+                        const itemsInOrder = orderItems.filter(i => i.order_id === order.id);
+                        const targetItem = itemsInOrder.find(i => i.id === detailItem?.id) || itemsInOrder[0] || detailItem;
+                        if (targetItem) {
+                          handleOpenHandlingTeamModalForItem(targetItem, targetItem.stage_id);
+                        }
+                      }}
+                      title="Editar ou vincular equipe de manuseio aos produtos deste pedido"
+                    >
+                      <Edit3 size={14} />
+                      <span>Editar Equipe de Manuseio</span>
+                    </button>
                   </div>
-                  <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', textAlign: 'left', minWidth: '450px' }}>
-                      <thead>
-                        <tr style={{ backgroundColor: 'rgba(var(--primary-rgb), 0.04)', borderBottom: '1px solid var(--border)' }}>
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Item</th>
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Produto</th>
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Qtd</th>
-                          {!hideMonetaryValues && <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Valor Un.</th>}
-                          {!hideMonetaryValues && <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'right' }}>Subtotal</th>}
-                          <th style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>Estágio</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {orderItems.filter(i => i.order_id === order.id).map((i: any) => {
-                          const itemStage = stages.find(s => s.id === i.stage_id);
-                          const unitPrice = i.unit_price !== undefined && i.unit_price !== null ? Number(i.unit_price) : (i.product?.price || 0);
-                          const subtotal = i.total_price !== undefined && i.total_price !== null ? Number(i.total_price) : ((i.print_run || 0) * unitPrice);
-                          const isCurrent = i.id === detailItem.id;
-                          return (
-                            <tr key={i.id} style={{ 
-                              borderBottom: '1px solid var(--border)',
-                              backgroundColor: isCurrent ? 'rgba(var(--primary-rgb), 0.04)' : 'transparent',
-                              fontWeight: isCurrent ? 700 : 400
-                            }}>
-                              <td style={{ padding: '0.5rem 0.75rem', color: isCurrent ? 'var(--primary)' : 'var(--text)' }}>
-                                {i.friendly_id || '—'} {isCurrent && '(Este)'}
-                              </td>
-                              <td style={{ padding: '0.5rem 0.75rem' }}>{i.name}</td>
-                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>{(i.print_run || 0).toLocaleString('pt-BR')}</td>
-                              {!hideMonetaryValues && (
-                                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
-                                  R$ {unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              )}
-                              {!hideMonetaryValues && (
-                                <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
-                                  R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              )}
-                              <td style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap' }}>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {orderItems.filter(i => i.order_id === order.id).map((i: any) => {
+                      const itemStage = stages.find(s => s.id === i.stage_id);
+                      const isCurrent = i.id === detailItem.id;
+                      
+                      // Resgata alocações do Map ou fallback para equipe vinculada ao item
+                      let handlingAllocations = itemHandlingTeamsMap.get(i.id) || [];
+                      if (handlingAllocations.length === 0 && i.handling_team_id) {
+                        handlingAllocations = [{
+                          id: i.id + '-default',
+                          tenant_id: i.tenant_id,
+                          order_item_id: i.id,
+                          handling_team_id: i.handling_team_id,
+                          quantity: Number(i.print_run || i.quantity || 0),
+                          team: i.handling_team,
+                          is_completed: false
+                        }];
+                      }
+
+                      const totalItemQty = Number(i.print_run || i.quantity || 0);
+                      const totalSaida = handlingAllocations.reduce((sum, a) => sum + Number(a.quantity || 0), 0);
+                      const totalRetorno = handlingAllocations.reduce((sum, a) => sum + Number(a.return_quantity || 0), 0);
+                      const faltamAlocar = Math.max(0, totalItemQty - totalSaida);
+                      const faltamRetornar = Math.max(0, totalSaida - totalRetorno);
+                      const isRetornoConferido = handlingAllocations.length > 0 && totalRetorno >= totalSaida && handlingAllocations.every(a => a.is_completed);
+                      const isAllConferido = handlingAllocations.length > 0 && totalSaida >= totalItemQty && totalRetorno >= totalItemQty && handlingAllocations.every(a => a.is_completed);
+
+                      return (
+                        <div 
+                          key={i.id} 
+                          style={{
+                            border: `1px solid ${isCurrent ? 'var(--primary)' : 'var(--border)'}`,
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.75rem 0.85rem',
+                            backgroundColor: isCurrent ? 'hsla(var(--primary-rgb), 0.03)' : 'var(--background)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.55rem'
+                          }}
+                        >
+                          {/* Cabeçalho do Item com Botão Fixado Abaixo do Número do Pedido/Item */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flex: '1 1 300px', minWidth: 0 }}>
+                              
+                              {/* Coluna Esquerda Fixa: Número do Item + Botão de Atualizar Manuseio Embaixo */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '115px', flexShrink: 0 }}>
+                                <span style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '4px',
+                                  backgroundColor: isCurrent ? 'var(--primary)' : 'var(--surface)',
+                                  color: isCurrent ? '#fff' : 'var(--text)',
+                                  border: '1px solid var(--border)',
+                                  fontWeight: 800,
+                                  fontSize: '0.8rem',
+                                  textAlign: 'center',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  {i.friendly_id || '—'} {isCurrent && '(Atual)'}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  className="btn btn-outline"
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '0.2rem 0.45rem',
+                                    gap: '0.3rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 700,
+                                    borderColor: 'var(--primary)',
+                                    color: 'var(--primary)',
+                                    whiteSpace: 'nowrap',
+                                    width: '100%'
+                                  }}
+                                  onClick={() => {
+                                    handleOpenHandlingTeamModalForItem(i, i.stage_id);
+                                  }}
+                                  title="Atualizar saídas, retornos e conferências de manuseio deste item"
+                                >
+                                  <RefreshCw size={11} />
+                                  <span>Atualizar Manuseio</span>
+                                </button>
+                              </div>
+
+                              {/* Coluna de Descrição/Nome do Produto (Espaço Amplo Garantido) */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1, minWidth: 0 }}>
+                                <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text)', wordBreak: 'break-word', lineHeight: '1.3' }}>
+                                  {i.name}
+                                </span>
+                                {i.measure && (
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    Medida: <strong>{i.measure}</strong>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Informações da Direita: Tiragem, Estágio e Código de Manuseio Discreto */}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.75rem' }}>
+                                <span>Tiragem: <strong>{totalItemQty.toLocaleString('pt-BR')} un</strong></span>
                                 <span style={{ 
                                   color: itemStage?.color || 'var(--text-muted)',
                                   fontWeight: 700,
                                   fontSize: '0.72rem',
-                                  whiteSpace: 'nowrap'
+                                  padding: '2px 8px',
+                                  borderRadius: '99px',
+                                  backgroundColor: 'var(--surface)',
+                                  border: '1px solid var(--border)'
                                 }}>
                                   {itemStage?.name || 'A produzir'}
                                 </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                              </div>
+
+                              {/* Exibição Discreta do Código de Manuseio */}
+                              <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                                Cód. Manuseio: <span style={{ color: 'var(--primary)', fontFamily: 'monospace', fontWeight: 700 }}>
+                                  {handlingAllocations.map(a => (a.handling_code || '').replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS')).filter(Boolean).join(', ') || `MS${(i.friendly_id || '262/1').replace(/^PV-?/i, '')}/1`}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* EXIBIÇÃO DE OCORRÊNCIA DE FALTA / AVARIA REGISTRADA OU RESOLVIDA */}
+                          {(() => {
+                            const itemShortages = shortagesMap.get(i.id) || [];
+                            const pendingShortage = itemShortages.find(s => s.status === 'PENDENTE_EXPEDICAO');
+                            const resolvedShortage = itemShortages.find(s => s.status === 'RESOLVIDO');
+
+                            if (pendingShortage) {
+                              return (
+                                <div style={{
+                                  padding: '0.5rem 0.75rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)',
+                                  border: '1.5px solid hsla(0, 84.2%, 60.2%, 0.4)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  flexWrap: 'wrap',
+                                  gap: '0.5rem',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 800,
+                                  color: 'hsl(0, 84.2%, 45%)'
+                                }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <AlertTriangle size={16} />
+                                    <div>
+                                      <div>🚨 FALTA / AVARIA REGISTRADA: {pendingShortage.shortage_quantity.toLocaleString('pt-BR')} un (Pendente Expedição)</div>
+                                      <div style={{ fontSize: '0.7rem', fontWeight: 500, opacity: 0.9 }}>
+                                        Motivo: {pendingShortage.reason === 'MANUSEIO_AVARIA' ? 'Avaria no Manuseio' : pendingShortage.reason === 'PRODUCAO_DEFECT' ? 'Falta na Produção' : pendingShortage.reason}
+                                        {pendingShortage.notes ? ` — "${pendingShortage.notes}"` : ''}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{
+                                      padding: '0.3rem 0.65rem',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 800,
+                                      backgroundColor: 'hsl(0, 84.2%, 48%)',
+                                      borderColor: 'hsl(0, 84.2%, 48%)',
+                                      color: '#fff',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      border: 'none'
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setExpeditionTargetShortage(pendingShortage);
+                                      setExpeditionTargetItem(i);
+                                      setExpeditionResolutionType('DESCONTO_FATURA');
+                                      setExpeditionResolutionNotes('');
+                                      setIsExpeditionModalOpen(true);
+                                    }}
+                                  >
+                                    <Scale size={13} />
+                                    <span>💳 Resolver na Expedição</span>
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            if (resolvedShortage) {
+                              return (
+                                <div style={{
+                                  padding: '0.35rem 0.65rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'hsla(142, 71%, 45%, 0.12)',
+                                  border: '1px solid hsla(142, 71%, 45%, 0.3)',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 700,
+                                  color: 'hsl(142, 71%, 32%)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.4rem'
+                                }}>
+                                  <CheckCircle2 size={14} />
+                                  <span>Ocorrência de Falta ({resolvedShortage.shortage_quantity.toLocaleString('pt-BR')} un) Resolvida na Expedição — <strong>{resolvedShortage.resolution_type === 'DESCONTO_FATURA' ? '🟢 Débito / Desconto na Fatura' : resolvedShortage.resolution_type === 'REPOSICAO' ? '🔵 Re-Impressão / Reposição' : '🟡 Aceite Parcial'}</strong></span>
+                                </div>
+                              );
+                            }
+
+                            return null;
+                          })()}
+
+                          {/* Resumo/Status Evidente das Informações de Manuseio */}
+                          {handlingAllocations.length > 0 && (
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '0.5rem',
+                              padding: '0.45rem 0.75rem',
+                              borderRadius: 'var(--radius-xs)',
+                              backgroundColor: isAllConferido ? 'hsla(142, 71%, 45%, 0.1)' : 'hsla(45, 93%, 47%, 0.1)',
+                              border: `1px solid ${isAllConferido ? 'hsla(142, 71%, 45%, 0.3)' : 'hsla(45, 93%, 47%, 0.3)'}`
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 700, color: isAllConferido ? 'hsl(142, 71%, 35%)' : isRetornoConferido ? 'hsl(38, 92%, 35%)' : 'hsl(45, 93%, 35%)' }}>
+                                <CheckCircle2 size={14} />
+                                <span>
+                                  {isAllConferido 
+                                    ? '✓ MANUSEIO TOTALMENTE CONFERIDO E FINALIZADO' 
+                                    : isRetornoConferido 
+                                    ? `✓ RETORNO CONFERIDO (FALTAM ALOCAR ${faltamAlocar.toLocaleString('pt-BR')} UN DA TIRAGEM)` 
+                                    : '⌛ MANUSEIO EM ANDAMENTO'}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', gap: '0.85rem', fontSize: '0.73rem', color: 'var(--text-muted)', alignItems: 'center' }}>
+                                <span>Total Saída: <strong style={{ color: 'var(--text)' }}>{totalSaida.toLocaleString('pt-BR')} un</strong></span>
+                                <span>Total Retorno: <strong style={{ color: isRetornoConferido ? 'hsl(142, 71%, 35%)' : 'var(--text)' }}>{totalRetorno.toLocaleString('pt-BR')} un</strong></span>
+                                {faltamRetornar > 0 ? (
+                                  <span style={{ 
+                                    color: 'hsl(0, 84.2%, 45%)', 
+                                    fontWeight: 800, 
+                                    backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)', 
+                                    padding: '2px 8px', 
+                                    borderRadius: '4px',
+                                    border: '1px solid hsla(0, 84.2%, 60.2%, 0.25)' 
+                                  }}>
+                                    Faltam {faltamRetornar.toLocaleString('pt-BR')} un retornar
+                                  </span>
+                                ) : faltamAlocar > 0 ? (
+                                  <span style={{ 
+                                    color: 'hsl(38, 92%, 35%)', 
+                                    fontWeight: 800, 
+                                    backgroundColor: 'hsla(45, 93%, 47%, 0.15)', 
+                                    padding: '2px 8px', 
+                                    borderRadius: '4px',
+                                    border: '1px solid hsla(45, 93%, 47%, 0.3)' 
+                                  }}>
+                                    ⚠️ Faltam alocar {faltamAlocar.toLocaleString('pt-BR')} un
+                                  </span>
+                                ) : isAllConferido ? (
+                                  <span style={{ 
+                                    color: 'hsl(142, 71%, 35%)', 
+                                    fontWeight: 800, 
+                                    backgroundColor: 'hsla(142, 71%, 45%, 0.12)', 
+                                    padding: '2px 8px', 
+                                    borderRadius: '4px',
+                                    border: '1px solid hsla(142, 71%, 45%, 0.3)' 
+                                  }}>
+                                    ✓ 100% Retornado
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Grade de Alocações / Retornos de Manuseio */}
+                          {handlingAllocations.length > 0 ? (
+                            <div style={{ border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                                <thead>
+                                  <tr style={{ backgroundColor: 'var(--surface)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                                    <th style={{ padding: '0.35rem 0.6rem' }}>Cód. / Equipe</th>
+                                    <th style={{ padding: '0.35rem 0.6rem' }}>Data Saída</th>
+                                    <th style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>Qtd Saída</th>
+                                    <th style={{ padding: '0.35rem 0.6rem' }}>Data Retorno</th>
+                                    <th style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>Qtd Retorno</th>
+                                    <th style={{ padding: '0.35rem 0.6rem', textAlign: 'center' }}>Conferência</th>
+                                    <th style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>Ações</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {handlingAllocations.map((alloc, aIdx) => {
+                                    const teamName = alloc.team?.name || handlingTeams.find(t => t.id === alloc.handling_team_id)?.name || 'Equipe de Manuseio';
+                                    const hCode = (alloc.handling_code || `MS${(i.friendly_id || '262/1').replace(/^PV-?/i, '')}/${aIdx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS');
+                                    return (
+                                      <tr key={aIdx} style={{ borderBottom: aIdx < handlingAllocations.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                                        <td style={{ padding: '0.35rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                          <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: '0.7rem', marginRight: '5px', whiteSpace: 'nowrap' }}>[{hCode}]</span>
+                                          <span style={{ color: 'var(--primary)', whiteSpace: 'nowrap' }}>{teamName}</span>
+                                        </td>
+                                         <td style={{ padding: '0.35rem 0.6rem', color: alloc.departure_date ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                                          {alloc.departure_date ? new Date(alloc.departure_date + 'T00:00:00').toLocaleDateString('pt-BR') : 'Pendente'}
+                                        </td>
+                                         <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                           {Number(alloc.quantity || 0).toLocaleString('pt-BR')}
+                                        </td>
+                                         <td style={{ padding: '0.35rem 0.6rem', color: (alloc.return_date || alloc.completed_at) ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                                          {(alloc.return_date || alloc.completed_at) ? new Date((alloc.return_date || alloc.completed_at) + 'T00:00:00').toLocaleDateString('pt-BR') : 'Pendente'}
+                                        </td>
+                                         <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                           {Number(alloc.return_quantity || 0).toLocaleString('pt-BR')}
+                                        </td>
+                                         <td style={{ padding: "0.35rem 0.6rem", textAlign: "center" }}>
+                                           <span style={{
+                                             fontSize: "0.68rem",
+                                             fontWeight: 700,
+                                             padding: "3px 8px",
+                                             borderRadius: "99px",
+                                             display: "inline-flex",
+                                             alignItems: "center",
+                                             justifyContent: "center",
+                                             gap: "0.3rem",
+                                             backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(45, 93%, 47%, 0.12)",
+                                             color: alloc.is_completed ? "hsl(142, 71%, 32%)" : "hsl(45, 93%, 32%)",
+                                             border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(45, 93%, 47%, 0.3)"}`,
+                                             whiteSpace: "nowrap"
+                                           }}>
+                                             {alloc.is_completed ? (
+                                               <>
+                                                 <CheckCircle2 size={12} />
+                                                 <span>Conferido</span>
+                                               </>
+                                             ) : (
+                                               <>
+                                                 <Clock size={12} />
+                                                 <span>Pendente</span>
+                                               </>
+                                             )}
+                                           </span>
+                                         </td>
+                                        <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>
+                                          <button
+                                            type="button"
+                                            className="btn btn-outline"
+                                            style={{ padding: '0.15rem 0.45rem', fontSize: '0.68rem', fontWeight: 700, display: 'inline-flex', gap: '0.2rem', alignItems: 'center' }}
+                                            onClick={() => handleOpenHandlingTeamModalForItem(i, i.stage_id, alloc.id)}
+                                            title="Editar somente esta equipe de manuseio"
+                                          >
+                                            <Edit3 size={11} /> Editar Equipe
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '0.75rem', fontStyle: 'italic', color: 'var(--text-muted)', backgroundColor: 'var(--surface)', padding: '0.45rem 0.65rem', borderRadius: '4px', border: '1px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span>Nenhuma equipe de manuseio vinculada a este item ainda.</span>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 600 }}>Clique em "Atualizar Manuseio" para alocar equipe e controlar o retorno.</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </section>
 
@@ -10957,6 +12046,299 @@ export default function PedidosPage() {
                 onClick={() => setIsLocationCrudModalOpen(false)}
               >
                 Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DEDICADO: REGISTRAR FALTA / AVARIA DE PRODUTO */}
+      {isShortageModalOpen && shortageItem && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 300000, padding: '1rem', backdropFilter: 'blur(3px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
+            width: '100%', maxWidth: '520px', border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-xl)', overflow: 'hidden', display: 'flex', flexDirection: 'column'
+          }}>
+            <div style={{
+              padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'hsl(0, 84.2%, 45%)', fontWeight: 800, fontSize: '1rem' }}>
+                <AlertTriangle size={20} />
+                <span>Registrar Falta / Avaria de Produto</span>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsShortageModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '0.8rem' }}>
+                <div>Produto: <strong>{shortageItem.name}</strong></div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Pedido: <strong>{shortageItem.friendly_id || shortageItem.order?.pv_number || 'PED'}</strong> | Tiragem Total: <strong>{Number(shortageItem.print_run || shortageItem.quantity || 0).toLocaleString('pt-BR')} un</strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Quantidade em Falta / Perda (un) *</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  value={shortageQty}
+                  onChange={(e) => setShortageQty(Math.max(1, Number(e.target.value)))}
+                  style={{ fontWeight: 800, fontSize: '1rem', color: 'hsl(0, 84.2%, 45%)' }}
+                  min={1}
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Motivo / Causa da Falta *</label>
+                <select
+                  className="form-select"
+                  value={shortageReason}
+                  onChange={(e) => setShortageReason(e.target.value)}
+                  style={{ fontWeight: 600 }}
+                >
+                  <option value="MANUSEIO_AVARIA">⚠️ Avaria no Manuseio (Rasgo, Cola, Sujeira)</option>
+                  <option value="PRODUCAO_DEFECT">⚙️ Falta na Produção / Impressão / Corte</option>
+                  <option value="EXTRAVIO">🚚 Perda Física / Extravio em Transporte</option>
+                  <option value="DEFEITO_MATERIAL">📦 Defeito do Material / Matéria-Prima</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Observações / Detalhes da Ocorrência</label>
+                <textarea
+                  className="form-textarea"
+                  rows={3}
+                  value={shortageNotes}
+                  onChange={(e) => setShortageNotes(e.target.value)}
+                  placeholder="Descreva o que ocorreu com estas peças para orientação da Expedição..."
+                />
+              </div>
+
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', backgroundColor: 'var(--surface)', padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                ℹ️ Esta ocorrência ficará gravada no histórico e <strong>exigirá liquidação na Expedição</strong> (Crédito do Cliente, Reposição ou Aceite).
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', backgroundColor: 'var(--surface)' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setIsShortageModalOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={savingShortage || shortageQty <= 0}
+                style={{ backgroundColor: 'hsl(0, 84.2%, 50%)', borderColor: 'hsl(0, 84.2%, 50%)', fontWeight: 800 }}
+                onClick={async () => {
+                  setSavingShortage(true);
+                  try {
+                    const res = await saveOrderItemShortage({
+                      order_id: shortageItem.order_id,
+                      order_item_id: shortageItem.id,
+                      customer_id: shortageItem.order?.customer_id || shortageItem.customer_id,
+                      shortage_quantity: shortageQty,
+                      reason: shortageReason,
+                      notes: shortageNotes,
+                      reported_by_name: currentOperator.current?.name || 'Operador'
+                    });
+                    
+                    if (res.data) {
+                      showToast(`Falta de ${shortageQty.toLocaleString('pt-BR')} un registrada! Aguardando conferência na Expedição.`);
+                      await fetchShortagesForItem(shortageItem.id);
+                      setIsShortageModalOpen(false);
+                    }
+                  } catch (err) {
+                    showToast('Erro ao registrar falta.');
+                  } finally {
+                    setSavingShortage(false);
+                  }
+                }}
+              >
+                {savingShortage ? 'Gravando...' : 'Salvar Registro de Falta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DEDICADO: LIQUIDAÇÃO DE FALTAS / CRÉDITO E DÉBITO NA EXPEDIÇÃO */}
+      {isExpeditionModalOpen && expeditionTargetShortage && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 300000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
+            width: '100%', maxWidth: '580px', border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-xl)', overflow: 'hidden', display: 'flex', flexDirection: 'column'
+          }}>
+            <div style={{
+              padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              backgroundColor: 'hsla(217, 91.2%, 59.8%, 0.1)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)', fontWeight: 800, fontSize: '1rem' }}>
+                <Scale size={20} />
+                <span>Conferência & Liquidação de Falta (Expedição)</span>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsExpeditionModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.08)', padding: '0.85rem', borderRadius: '8px', border: '1px solid hsla(0, 84.2%, 60.2%, 0.3)' }}>
+                <div style={{ fontWeight: 800, color: 'hsl(0, 84.2%, 45%)', fontSize: '0.9rem' }}>
+                  ⚠️ Ocorrência Registrada: {expeditionTargetShortage.shortage_quantity.toLocaleString('pt-BR')} un em Falta
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text)', marginTop: '4px' }}>
+                  Motivo: <strong>{expeditionTargetShortage.reason === 'MANUSEIO_AVARIA' ? 'Avaria no Manuseio' : expeditionTargetShortage.reason === 'PRODUCAO_DEFECT' ? 'Falta na Produção' : expeditionTargetShortage.reason}</strong>
+                </div>
+                {expeditionTargetShortage.notes && (
+                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '4px' }}>
+                    "{expeditionTargetShortage.notes}"
+                  </div>
+                )}
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  Registrado por: <strong>{expeditionTargetShortage.reported_by_name || 'Operador'}</strong> em {new Date(expeditionTargetShortage.reported_at).toLocaleDateString('pt-BR')}
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 800, fontSize: '0.85rem' }}>Escolha a Forma de Acerto / Liquidação com o Cliente *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.4rem' }}>
+                  
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.65rem 0.85rem',
+                    borderRadius: '8px', border: `1.5px solid ${expeditionResolutionType === 'DESCONTO_FATURA' ? 'var(--primary)' : 'var(--border)'}`,
+                    backgroundColor: expeditionResolutionType === 'DESCONTO_FATURA' ? 'hsla(var(--primary-rgb), 0.05)' : 'var(--background)',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="radio"
+                      name="resolutionType"
+                      checked={expeditionResolutionType === 'DESCONTO_FATURA'}
+                      onChange={() => setExpeditionResolutionType('DESCONTO_FATURA')}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.82rem', color: 'var(--text)' }}>🟢 Lançar Débito / Desconto na Fatura do Cliente</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Abate o valor proporcional das {expeditionTargetShortage.shortage_quantity.toLocaleString('pt-BR')} un no faturamento ou gera saldo credor na conta do cliente.</div>
+                    </div>
+                  </label>
+
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.65rem 0.85rem',
+                    borderRadius: '8px', border: `1.5px solid ${expeditionResolutionType === 'REPOSICAO' ? 'var(--primary)' : 'var(--border)'}`,
+                    backgroundColor: expeditionResolutionType === 'REPOSICAO' ? 'hsla(var(--primary-rgb), 0.05)' : 'var(--background)',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="radio"
+                      name="resolutionType"
+                      checked={expeditionResolutionType === 'REPOSICAO'}
+                      onChange={() => setExpeditionResolutionType('REPOSICAO')}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.82rem', color: 'var(--text)' }}>🔵 Gerar Ordem de Reposição / Re-Impressão ({expeditionTargetShortage.shortage_quantity.toLocaleString('pt-BR')} un)</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Cria uma nova ordem de produção suplementar para produzir as unidades restantes.</div>
+                    </div>
+                  </label>
+
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.65rem 0.85rem',
+                    borderRadius: '8px', border: `1.5px solid ${expeditionResolutionType === 'ACEITE_PARCIAL' ? 'var(--primary)' : 'var(--border)'}`,
+                    backgroundColor: expeditionResolutionType === 'ACEITE_PARCIAL' ? 'hsla(var(--primary-rgb), 0.05)' : 'var(--background)',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="radio"
+                      name="resolutionType"
+                      checked={expeditionResolutionType === 'ACEITE_PARCIAL'}
+                      onChange={() => setExpeditionResolutionType('ACEITE_PARCIAL')}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.82rem', color: 'var(--text)' }}>🟡 Baixa com Aceite de Entrega Parcial</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Registra a concordância formal do cliente para receber a entrega com quantidade menor sem saldo pendente.</div>
+                    </div>
+                  </label>
+
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Observações do Acerto / Protocolo de Liquidação</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={expeditionResolutionNotes}
+                  onChange={(e) => setExpeditionResolutionNotes(e.target.value)}
+                  placeholder="Informe detalhes da negociação, número de protocolo ou autorização do cliente..."
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', backgroundColor: 'var(--surface)' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setIsExpeditionModalOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={savingExpeditionResolution}
+                style={{ fontWeight: 800 }}
+                onClick={async () => {
+                  setSavingExpeditionResolution(true);
+                  try {
+                    const res = await resolveOrderItemShortage(expeditionTargetShortage.id, {
+                      resolution_type: expeditionResolutionType,
+                      resolution_notes: expeditionResolutionNotes,
+                      resolved_by_name: currentOperator.current?.name || 'Expedição'
+                    });
+
+                    if (res.data) {
+                      showToast('Acerto de falta liquidado com sucesso!');
+                      if (expeditionTargetItem) {
+                        await fetchShortagesForItem(expeditionTargetItem.id);
+                      }
+                      setIsExpeditionModalOpen(false);
+                    }
+                  } catch (err) {
+                    showToast('Erro ao liquidar falta.');
+                  } finally {
+                    setSavingExpeditionResolution(false);
+                  }
+                }}
+              >
+                {savingExpeditionResolution ? 'Gravando...' : 'Confirmar e Liquidar Falta'}
               </button>
             </div>
           </div>

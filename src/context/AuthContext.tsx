@@ -31,8 +31,34 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // ID fixo da empresa tenant para o escopo do Portal Samppel
 const DEFAULT_TENANT_ID = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
+const USER_PROFILE_CACHE_KEY = 'samppel_user_profile_cache';
+
+function getCachedProfile(): UserProfile | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(USER_PROFILE_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn('Erro ao ler cache de perfil do usuário:', e);
+  }
+  return null;
+}
+
+function saveCachedProfile(profile: UserProfile | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (profile) {
+      localStorage.setItem(USER_PROFILE_CACHE_KEY, JSON.stringify(profile));
+    } else {
+      localStorage.removeItem(USER_PROFILE_CACHE_KEY);
+    }
+  } catch (e) {
+    console.warn('Erro ao salvar cache de perfil do usuário:', e);
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(() => getCachedProfile());
   const [isLoading, setIsLoading] = useState(true);
 
   const isLoadingRef = useRef(true);
@@ -60,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         await fetchProfile(session.user.id);
       } else {
+        saveCachedProfile(null);
         setUser(null);
         setIsLoading(false);
         isLoadingRef.current = false;
@@ -83,6 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { data: { session } } = await supabase!.auth.getSession();
         if (!session && user) {
+          saveCachedProfile(null);
           setUser(null);
         }
       } catch {
@@ -125,13 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           actual_role: data.role
         } as UserProfile;
 
-        // Se for admin, verifica se há um papel temporário salvo na sessão
-        if (data.role === 'Administrador' && typeof window !== 'undefined') {
-          const savedRole = sessionStorage.getItem('active_role') as UserRole;
-          if (savedRole) {
-            profile.role = savedRole;
-          }
-        }
+        saveCachedProfile(profile);
         setUser(profile);
 
         if (profile.force_password_change && typeof window !== 'undefined') {
@@ -141,25 +163,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } else {
-        // Se a busca falhou ou o perfil não existe, cria um objeto mínimo baseado na sessão para evitar travamentos
-        const { data: sessionData } = await supabase!.auth.getSession();
-        const currentSessionUser = sessionData?.session?.user;
-        if (currentSessionUser) {
-          setUser({
-            id: currentSessionUser.id,
-            tenant_id: DEFAULT_TENANT_ID,
-            full_name: currentSessionUser.user_metadata?.full_name || currentSessionUser.email?.split('@')[0] || 'Usuário',
-            role: (currentSessionUser.user_metadata?.role as UserRole) || 'Produção',
-            actual_role: (currentSessionUser.user_metadata?.role as UserRole) || 'Produção',
-            email: currentSessionUser.email || ''
-          });
+        // Verifica se há perfil em cache local para o mesmo usuário antes do fallback genérico
+        const cached = getCachedProfile();
+        if (cached && cached.id === userId) {
+          setUser(cached);
         } else {
-          setUser(null);
+          // Se a busca falhou e não há cache, cria um objeto mínimo baseado na sessão do auth (papel padrão: Administrador)
+          const { data: sessionData } = await supabase!.auth.getSession();
+          const currentSessionUser = sessionData?.session?.user;
+          if (currentSessionUser) {
+            const fallbackProfile: UserProfile = {
+              id: currentSessionUser.id,
+              tenant_id: DEFAULT_TENANT_ID,
+              full_name: currentSessionUser.user_metadata?.full_name || currentSessionUser.email?.split('@')[0] || 'Usuário',
+              role: (currentSessionUser.user_metadata?.role as UserRole) || 'Administrador',
+              actual_role: (currentSessionUser.user_metadata?.role as UserRole) || 'Administrador',
+              email: currentSessionUser.email || ''
+            };
+            saveCachedProfile(fallbackProfile);
+            setUser(fallbackProfile);
+          } else {
+            saveCachedProfile(null);
+            setUser(null);
+          }
         }
       }
     } catch (err) {
       console.error('Erro ao carregar perfil do usuário:', err);
-      setUser(null);
+      const cached = getCachedProfile();
+      if (cached && cached.id === userId) {
+        setUser(cached);
+      } else {
+        setUser(null);
+      }
     } finally {
       setIsLoading(false);
       isLoadingRef.current = false;
@@ -190,9 +226,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...profile,
           actual_role: profile.role
         } as UserProfile;
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('active_role');
-        }
+        
+        saveCachedProfile(userProfile);
         setUser(userProfile);
         return { data: { user: data.user, profile: userProfile }, error: null };
       }
@@ -221,18 +256,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { data, error: null };
   };
 
-  // Permite mudar o perfil de acesso ativo temporariamente na sessao
+  // Desativado: o perfil ativo é sempre estritamente o perfil real do usuário
   const changeActiveRole = (role: UserRole) => {
-    if (user) {
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('active_role', role);
-      }
-      setUser(prev => prev ? { ...prev, role } : null);
-    }
+    // No-op para produção
   };
 
   // Realiza logout do Supabase
   const logout = async () => {
+    saveCachedProfile(null);
     if (supabase) {
       await supabase.auth.signOut();
     }

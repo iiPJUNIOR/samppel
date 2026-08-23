@@ -33,7 +33,10 @@ import {
   getFactoryLocations,
   createFactoryLocation,
   updateFactoryLocation,
-  deleteFactoryLocation
+  deleteFactoryLocation,
+  getOrders,
+  saveSellerPermissions,
+  getSellerPermissionsMap
 } from '@/services/supabase';
 import { 
   ShieldAlert, 
@@ -132,6 +135,10 @@ export default function ConfiguracoesPage() {
   const [profilesList, setProfilesList] = useState<any[]>([]);
   const [factoryAccountId, setFactoryAccountId] = useState<string>('');
   const [savingFactoryAccount, setSavingFactoryAccount] = useState(false);
+
+  // States para Carteiras e Permissões de Vendedores
+  const [availableSellersList, setAvailableSellersList] = useState<string[]>([]);
+  const [sellerPermissionsMap, setSellerPermissionsMap] = useState<Record<string, { primary_seller_name: string; seller_access_mode: string; allowed_sellers: string[] }>>({});
 
   // States de Convites de Usuários
   const [invitesList, setInvitesList] = useState<any[]>([]);
@@ -327,7 +334,7 @@ export default function ConfiguracoesPage() {
       fetchInvites();
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
-      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes, operatorsRes, stagesRes, profilesRes, locationsRes] = await Promise.all([
+      const [configRes, logsRes, queueRes, machinesRes, teamsRes, pmtRes, settingsRes, operatorsRes, stagesRes, profilesRes, locationsRes, ordersRes] = await Promise.all([
         getContaAzulConfig(),
         getIntegrationLogs(),
         getSyncQueue(),
@@ -338,7 +345,8 @@ export default function ConfiguracoesPage() {
         fetch(`/api/operators?tenantId=${tenantId}`).then(res => res.json()),
         getOrderStages(tenantId),
         getProfilesWithPermissions(tenantId),
-        getFactoryLocations(tenantId)
+        getFactoryLocations(tenantId),
+        getOrders(tenantId)
       ]);
 
       const data = configRes.data;
@@ -357,6 +365,13 @@ export default function ConfiguracoesPage() {
       setPackagingMaterials(pmtRes.data || []);
       setOperatorsList(operatorsRes.data || []);
       setStages(stagesRes.data || []);
+
+      if (ordersRes.data) {
+        const sellers = Array.from(new Set(ordersRes.data.map((o: any) => o.seller_name).filter(Boolean))) as string[];
+        if (!sellers.includes('Vendas Samppel')) sellers.push('Vendas Samppel');
+        setAvailableSellersList(sellers.sort());
+      }
+      setSellerPermissionsMap(getSellerPermissionsMap());
 
       const allProfiles = profilesRes.data || [];
       const mappedProfiles = allProfiles.map((p: any) => ({
@@ -2265,6 +2280,131 @@ export default function ConfiguracoesPage() {
                 Definir como "Terminal de Fábrica" bloqueia esta conta na visualização do Kanban de produção, exigindo PIN de um operador para qualquer movimento.
               </span>
             </div>
+
+            {/* CONFIGURAÇÃO DE CARTEIRA DE VENDEDOR E PERMISSÕES */}
+            {(() => {
+              const currentSellerData = sellerPermissionsMap[activeOp!.id] || {
+                primary_seller_name: activeOp!.full_name || activeOp!.name || '',
+                seller_access_mode: 'OWN',
+                allowed_sellers: [activeOp!.full_name || activeOp!.name || '']
+              };
+
+              const handleSaveUserSellerPermissions = async (
+                profileId: string,
+                primarySellerName: string,
+                sellerAccessMode: 'OWN' | 'SPECIFIC' | 'ALL',
+                allowedSellers: string[]
+              ) => {
+                setSellerPermissionsMap(prev => ({
+                  ...prev,
+                  [profileId]: {
+                    primary_seller_name: primarySellerName,
+                    seller_access_mode: sellerAccessMode,
+                    allowed_sellers: allowedSellers
+                  }
+                }));
+                await saveSellerPermissions(profileId, primarySellerName, sellerAccessMode, allowedSellers);
+              };
+
+              return (
+                <div style={{ marginBottom: '1.5rem', backgroundColor: 'var(--surface-subtle)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary)' }}>
+                    <Users size={16} />
+                    <span>Vendedor Vinculado & Permissões de Carteira</span>
+                  </h4>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+                    Vincule este usuário a um nome de vendedor pré-existente e defina quais carteiras de pedidos ele está autorizado a visualizar.
+                  </p>
+
+                  {/* 1. Vendedor Vinculado (Carteira Principal) */}
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Vendedor Principal Vinculado (Carteira)</label>
+                    <select
+                      className="form-select"
+                      value={currentSellerData.primary_seller_name || ''}
+                      onChange={(e) => handleSaveUserSellerPermissions(activeOp!.id, e.target.value, (currentSellerData.seller_access_mode as any) || 'OWN', currentSellerData.allowed_sellers || [])}
+                      style={{ fontSize: '0.825rem', padding: '0.4rem 0.6rem' }}
+                    >
+                      <option value="">— Selecione o Vendedor (Ex: Isabela Cardoso) —</option>
+                      {availableSellersList.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 2. Modo de Visibilidade de Pedidos */}
+                  <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem', fontWeight: 600 }}>Modo de Visibilidade de Pedidos</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+                        <input 
+                          type="radio" 
+                          name={`seller_mode_${activeOp!.id}`}
+                          value="OWN"
+                          checked={currentSellerData.seller_access_mode === 'OWN' || !currentSellerData.seller_access_mode}
+                          onChange={() => handleSaveUserSellerPermissions(activeOp!.id, currentSellerData.primary_seller_name, 'OWN', [currentSellerData.primary_seller_name || ''])}
+                        />
+                        <span>🔒 <strong>Apenas Próprios Pedidos</strong> (Somente sua própria carteira)</span>
+                      </label>
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+                        <input 
+                          type="radio" 
+                          name={`seller_mode_${activeOp!.id}`}
+                          value="SPECIFIC"
+                          checked={currentSellerData.seller_access_mode === 'SPECIFIC'}
+                          onChange={() => handleSaveUserSellerPermissions(activeOp!.id, currentSellerData.primary_seller_name, 'SPECIFIC', currentSellerData.allowed_sellers || [])}
+                        />
+                        <span>👥 <strong>Vendedores Específicos</strong> (Visualiza sua carteira + carteiras liberadas pelo Admin)</span>
+                      </label>
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+                        <input 
+                          type="radio" 
+                          name={`seller_mode_${activeOp!.id}`}
+                          value="ALL"
+                          checked={currentSellerData.seller_access_mode === 'ALL'}
+                          onChange={() => handleSaveUserSellerPermissions(activeOp!.id, currentSellerData.primary_seller_name, 'ALL', ['*'])}
+                        />
+                        <span>🌐 <strong>Todos os Vendedores</strong> (Acesso irrestrito a todas as carteiras da empresa)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 3. Seleção de Vendedores Liberados se SPECIFIC */}
+                  {currentSellerData.seller_access_mode === 'SPECIFIC' && (
+                    <div style={{ backgroundColor: 'var(--surface)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginTop: '0.5rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text)', display: 'block', marginBottom: '0.4rem' }}>
+                        Selecione quais vendedores este usuário tem autorização para visualizar:
+                      </span>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.4rem' }}>
+                        {availableSellersList.map(seller => {
+                          const isChecked = (currentSellerData.allowed_sellers || []).includes(seller) || seller === currentSellerData.primary_seller_name;
+                          return (
+                            <label key={seller} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  let updated = [...(currentSellerData.allowed_sellers || [])];
+                                  if (e.target.checked) {
+                                    if (!updated.includes(seller)) updated.push(seller);
+                                  } else {
+                                    updated = updated.filter(s => s !== seller);
+                                  }
+                                  handleSaveUserSellerPermissions(activeOp!.id, currentSellerData.primary_seller_name, 'SPECIFIC', updated);
+                                }}
+                              />
+                              <span>{seller} {seller === currentSellerData.primary_seller_name ? '(Próprio)' : ''}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* TABELA DE PERMISSÕES DE ETAPAS */}
             {activeOp!.role === 'Administrador' && !activeOp!.is_factory_account ? (

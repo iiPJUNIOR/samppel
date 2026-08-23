@@ -67,13 +67,12 @@ export default function LoginPage() {
       }
     }
 
-    if (user && !showRoleSelector) {
+    if (user) {
       if (user.force_password_change) {
         router.push('/redefinir-senha?invite=true');
-        return;
-      }
-
-      if (user.role === 'Produção') {
+      } else if (user.is_factory_account) {
+        router.push('/pedidos');
+      } else if (user.role === 'Produção') {
         router.push('/operador-perfil');
       } else if (user.role === 'Fábrica') {
         router.push('/pedidos');
@@ -81,7 +80,7 @@ export default function LoginPage() {
         router.push('/dashboard');
       }
     }
-  }, [user, router, showRoleSelector]);
+  }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

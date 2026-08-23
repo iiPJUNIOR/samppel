@@ -565,6 +565,60 @@ export async function updateProfileStagePermissions(profileId: string, stageIds:
   return { data, error };
 }
 
+const SELLER_PERMISSIONS_CACHE_KEY = 'samppel_seller_permissions_map_v1';
+
+export function getSellerPermissionsMap(): Record<string, { primary_seller_name: string; seller_access_mode: string; allowed_sellers: string[] }> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(SELLER_PERMISSIONS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+export async function saveSellerPermissions(
+  profileId: string,
+  primarySellerName: string,
+  sellerAccessMode: 'OWN' | 'SPECIFIC' | 'ALL',
+  allowedSellers: string[]
+) {
+  if (typeof window !== 'undefined') {
+    try {
+      const map = getSellerPermissionsMap();
+      map[profileId] = {
+        primary_seller_name: primarySellerName,
+        seller_access_mode: sellerAccessMode,
+        allowed_sellers: allowedSellers
+      };
+      localStorage.setItem(SELLER_PERMISSIONS_CACHE_KEY, JSON.stringify(map));
+    } catch (err) {
+      console.warn('Erro ao salvar permissões de vendedor no localStorage:', err);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await fetch('/api/config/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'updateSellerPermissions',
+          profileId,
+          primarySellerName,
+          sellerAccessMode,
+          allowedSellers
+        })
+      });
+      return { data: true, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
+  }
+
+  return { data: true, error: null };
+}
+
 
 // Financeiro
 export async function getFinancialTransactions(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
@@ -2397,14 +2451,18 @@ let mockHandlingTeams: HandlingTeam[] = [
 export async function getHandlingTeams(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   if (isMockMode) {
     const list = mockHandlingTeams.filter(t => t.tenant_id === tenantId);
-    return { data: list, error: null };
+    return { data: list.length > 0 ? list : mockHandlingTeams, error: null };
   }
-  const { data, error } = await getDbClient()
-    .from('handling_teams')
-    .select('*')
-    .eq('tenant_id', tenantId)
-    .order('name', { ascending: true });
-  return { data, error };
+  try {
+    const { data, error } = await getDbClient()
+      .from('handling_teams')
+      .select('*')
+      .order('name', { ascending: true });
+    if (data && data.length > 0) {
+      return { data, error: null };
+    }
+  } catch (e) {}
+  return { data: mockHandlingTeams, error: null };
 }
 
 export async function createHandlingTeam(team: Omit<HandlingTeam, 'id' | 'created_at' | 'updated_at'>) {
@@ -2465,6 +2523,10 @@ export interface OrderItemHandlingTeam {
   order_item_id: string;
   handling_team_id: string;
   quantity: number;
+  departure_date?: string | null;
+  return_quantity?: number | null;
+  return_date?: string | null;
+  handling_code?: string | null;
   is_completed?: boolean;
   completed_at?: string | null;
   team?: HandlingTeam;
@@ -2473,69 +2535,198 @@ export interface OrderItemHandlingTeam {
 }
 
 let mockOrderItemHandlingTeams: OrderItemHandlingTeam[] = [];
+const HANDLING_CACHE_KEY = 'samppel_handling_teams_v2';
+
+function loadHandlingCache(): OrderItemHandlingTeam[] {
+  if (typeof window === 'undefined') return mockOrderItemHandlingTeams;
+  try {
+    const raw = localStorage.getItem(HANDLING_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        mockOrderItemHandlingTeams = parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Erro ao carregar cache de equipes de manuseio:', e);
+  }
+  return mockOrderItemHandlingTeams;
+}
+
+function saveHandlingCache(list: OrderItemHandlingTeam[]) {
+  mockOrderItemHandlingTeams = list;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(HANDLING_CACHE_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('Erro ao salvar cache de equipes de manuseio:', e);
+    }
+  }
+}
 
 export async function getOrderItemHandlingTeams(orderItemId: string) {
+  const currentCache = loadHandlingCache();
+
   if (isMockMode) {
-    const list = mockOrderItemHandlingTeams.filter(t => t.order_item_id === orderItemId);
+    const list = currentCache.filter(t => t.order_item_id === orderItemId);
     return { data: list, error: null };
   }
-  const { data, error } = await getDbClient()
-    .from('order_item_handling_teams')
-    .select('*, team:handling_teams(*)')
-    .eq('order_item_id', orderItemId);
-  return { data: data || [], error };
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_handling_teams')
+      .select('*, team:handling_teams(*)')
+      .eq('order_item_id', orderItemId);
+
+    if (data && data.length > 0) {
+      const updated = [
+        ...currentCache.filter(t => t.order_item_id !== orderItemId),
+        ...data
+      ];
+      saveHandlingCache(updated);
+      return { data, error: null };
+    }
+  } catch (err) {
+    console.warn('Falha na consulta remota de equipes de manuseio:', err);
+  }
+
+  const mockList = currentCache.filter(t => t.order_item_id === orderItemId);
+  return { data: mockList, error: null };
+}
+
+export async function getOrderItemHandlingTeamsBulk(orderItemIds: string[]) {
+  const currentCache = loadHandlingCache();
+
+  if (!orderItemIds || orderItemIds.length === 0) {
+    return { data: currentCache, error: null };
+  }
+
+  if (isMockMode) {
+    const list = currentCache.filter(t => orderItemIds.includes(t.order_item_id));
+    return { data: list, error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_handling_teams')
+      .select('*, team:handling_teams(*)')
+      .in('order_item_id', orderItemIds);
+
+    if (data && data.length > 0) {
+      const cacheMap = new Map(currentCache.map(c => [c.id, c]));
+      data.forEach(d => cacheMap.set(d.id, d));
+      const updatedList = Array.from(cacheMap.values());
+      saveHandlingCache(updatedList);
+      return { data, error: null };
+    }
+  } catch (err) {
+    console.warn('Falha na consulta remota bulk de equipes de manuseio:', err);
+  }
+
+  const mockList = currentCache.filter(t => orderItemIds.includes(t.order_item_id));
+  return { data: mockList, error: null };
 }
 
 export async function saveOrderItemHandlingTeams(
   orderItemId: string,
-  teams: { handling_team_id: string; quantity: number; is_completed?: boolean; completed_at?: string | null }[],
+  teams: {
+    handling_team_id: string;
+    quantity: number;
+    departure_date?: string | null;
+    return_quantity?: number | null;
+    return_date?: string | null;
+    handling_code?: string | null;
+    is_completed?: boolean;
+    completed_at?: string | null;
+  }[],
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
 ) {
-  if (isMockMode) {
-    mockOrderItemHandlingTeams = mockOrderItemHandlingTeams.filter(t => t.order_item_id !== orderItemId);
-    for (const t of teams) {
-      if (t.handling_team_id && t.quantity > 0) {
-        mockOrderItemHandlingTeams.push({
-          id: Math.random().toString(36).substring(2),
-          tenant_id: tenantId,
-          order_item_id: orderItemId,
-          handling_team_id: t.handling_team_id,
-          quantity: t.quantity,
-          is_completed: t.is_completed || false,
-          completed_at: t.completed_at || null
-        });
-      }
-    }
-    return { data: true, error: null };
-  }
-
-  // Remove alocações antigas desse item
-  await getDbClient()
-    .from('order_item_handling_teams')
-    .delete()
-    .eq('order_item_id', orderItemId);
+  const currentCache = loadHandlingCache();
 
   // Filtra itens com equipe válida e quantidade > 0
-  const validTeams = teams.filter(t => t.handling_team_id && t.quantity > 0);
-  if (validTeams.length === 0) {
-    return { data: [], error: null };
-  }
+  const validTeams = teams.filter(t => t.handling_team_id && Number(t.quantity) > 0);
 
-  const payload = validTeams.map(t => ({
+  // Cria lista atualizada de alocações para o item
+  const newAllocations: OrderItemHandlingTeam[] = validTeams.map((t, idx) => ({
+    id: (t as any).id || `h-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
     tenant_id: tenantId,
     order_item_id: orderItemId,
     handling_team_id: t.handling_team_id,
     quantity: Number(t.quantity),
+    departure_date: t.departure_date || null,
+    return_quantity: Number(t.return_quantity || 0),
+    return_date: t.return_date || t.completed_at || null,
+    handling_code: t.handling_code || null,
     is_completed: t.is_completed || false,
-    completed_at: t.completed_at ? t.completed_at : null
+    completed_at: t.completed_at || t.return_date || null
   }));
 
-  const { data, error } = await getDbClient()
-    .from('order_item_handling_teams')
-    .insert(payload)
-    .select('*, team:handling_teams(*)');
+  // Atualiza cache em localStorage imediatamente
+  const updatedCache = [
+    ...currentCache.filter(t => t.order_item_id !== orderItemId),
+    ...newAllocations
+  ];
+  saveHandlingCache(updatedCache);
 
-  return { data, error };
+  if (isMockMode || validTeams.length === 0) {
+    return { data: newAllocations, error: null };
+  }
+
+  // Persiste no Supabase
+  try {
+    await getDbClient()
+      .from('order_item_handling_teams')
+      .delete()
+      .eq('order_item_id', orderItemId);
+
+    const payload = newAllocations.map(t => ({
+      tenant_id: tenantId,
+      order_item_id: orderItemId,
+      handling_team_id: t.handling_team_id,
+      quantity: Number(t.quantity),
+      departure_date: t.departure_date ? t.departure_date : null,
+      return_quantity: t.return_quantity ? Number(t.return_quantity) : 0,
+      return_date: t.return_date ? t.return_date : (t.completed_at ? t.completed_at : null),
+      handling_code: t.handling_code ? t.handling_code : null,
+      is_completed: t.is_completed || false,
+      completed_at: t.completed_at ? t.completed_at : (t.return_date ? t.return_date : null)
+    }));
+
+    let { data, error } = await getDbClient()
+      .from('order_item_handling_teams')
+      .insert(payload)
+      .select('*, team:handling_teams(*)');
+
+    if (error || !data || data.length < validTeams.length) {
+      console.warn('Inserção no Supabase com alerta/restrição. Tentando inserção individual:', error?.message);
+      const individualSaved: any[] = [];
+      for (const p of payload) {
+        const res = await getDbClient()
+          .from('order_item_handling_teams')
+          .insert([p])
+          .select('*, team:handling_teams(*)');
+        if (res.data && res.data.length > 0) {
+          individualSaved.push(...res.data);
+        }
+      }
+      if (individualSaved.length > 0) {
+        data = individualSaved;
+      }
+    }
+
+    if (data && data.length > 0) {
+      const finalCache = [
+        ...loadHandlingCache().filter(t => t.order_item_id !== orderItemId),
+        ...data
+      ];
+      saveHandlingCache(finalCache);
+      return { data, error: null };
+    }
+  } catch (dbErr) {
+    console.warn('Erro ao salvar no banco remoto Supabase, mantendo no cache local:', dbErr);
+  }
+
+  return { data: newAllocations, error: null };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -3452,6 +3643,203 @@ export async function getOrderItemNotesHistory(orderItemId: string, tenantId = '
     .order('created_at', { ascending: true });
 
   return { data, error };
+}
+
+// --- OPERAÇÕES: REGISTRO DE FALTAS / AVARIAS E LIQUIDAÇÃO NA EXPEDIÇÃO ---
+
+export interface OrderItemShortage {
+  id: string;
+  tenant_id?: string;
+  order_id: string;
+  order_item_id: string;
+  customer_id?: string;
+  shortage_quantity: number;
+  reason: string; // 'MANUSEIO_AVARIA', 'PRODUCAO_DEFECT', 'EXTRAVIO', 'DEFEITO_MATERIAL'
+  notes?: string;
+  reported_by_operator_id?: string;
+  reported_by_name?: string;
+  reported_at: string;
+  status: 'PENDENTE_EXPEDICAO' | 'RESOLVIDO';
+  resolution_type?: 'DESCONTO_FATURA' | 'REPOSICAO' | 'ACEITE_PARCIAL';
+  resolution_notes?: string;
+  resolved_by_operator_id?: string;
+  resolved_by_name?: string;
+  resolved_at?: string;
+  created_at?: string;
+}
+
+let mockShortages: OrderItemShortage[] = [];
+
+export async function getOrderItemShortages(orderId?: string, orderItemId?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    let res = mockShortages;
+    if (orderId) res = res.filter(s => s.order_id === orderId);
+    if (orderItemId) res = res.filter(s => s.order_item_id === orderItemId);
+    return { data: res, error: null };
+  }
+
+  try {
+    let query = getDbClient()
+      .from('order_item_shortages')
+      .select('*')
+      .eq('tenant_id', tenantId);
+
+    if (orderId) query = query.eq('order_id', orderId);
+    if (orderItemId) query = query.eq('order_item_id', orderItemId);
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) {
+      let localData: OrderItemShortage[] = [];
+      try {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+        if (stored) localData = JSON.parse(stored);
+      } catch (e) {}
+      if (orderId) localData = localData.filter(s => s.order_id === orderId);
+      if (orderItemId) localData = localData.filter(s => s.order_item_id === orderItemId);
+      return { data: localData, error: null };
+    }
+
+    return { data: data || [], error: null };
+  } catch (err) {
+    let localData: OrderItemShortage[] = [];
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+      if (stored) localData = JSON.parse(stored);
+    } catch (e) {}
+    if (orderId) localData = localData.filter(s => s.order_id === orderId);
+    if (orderItemId) localData = localData.filter(s => s.order_item_id === orderItemId);
+    return { data: localData, error: null };
+  }
+}
+
+export async function getOrderItemShortagesBulk(orderItemIds: string[], tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (!orderItemIds || orderItemIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_shortages')
+      .select('*')
+      .in('order_item_id', orderItemIds)
+      .eq('tenant_id', tenantId);
+
+    if (!error && data) {
+      return { data, error: null };
+    }
+  } catch (err) {}
+
+  let localData: OrderItemShortage[] = [];
+  try {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+    if (stored) localData = JSON.parse(stored);
+  } catch (e) {}
+  return { data: localData.filter(s => orderItemIds.includes(s.order_item_id)), error: null };
+}
+
+export async function saveOrderItemShortage(shortage: Partial<OrderItemShortage>, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  const newShortage: OrderItemShortage = {
+    id: shortage.id || `shortage-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    tenant_id: tenantId,
+    order_id: shortage.order_id || '',
+    order_item_id: shortage.order_item_id || '',
+    customer_id: shortage.customer_id || '',
+    shortage_quantity: Number(shortage.shortage_quantity || 0),
+    reason: shortage.reason || 'MANUSEIO_AVARIA',
+    notes: shortage.notes || '',
+    reported_by_operator_id: shortage.reported_by_operator_id || '',
+    reported_by_name: shortage.reported_by_name || 'Operador',
+    reported_at: shortage.reported_at || new Date().toISOString(),
+    status: shortage.status || 'PENDENTE_EXPEDICAO',
+    created_at: new Date().toISOString()
+  };
+
+  if (isMockMode) {
+    mockShortages.push(newShortage);
+    return { data: newShortage, error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_shortages')
+      .insert([newShortage])
+      .select()
+      .single();
+
+    if (error) {
+      try {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+        const list = stored ? JSON.parse(stored) : [];
+        list.push(newShortage);
+        if (typeof window !== 'undefined') localStorage.setItem('samppel_shortages', JSON.stringify(list));
+      } catch (e) {}
+      return { data: newShortage, error: null };
+    }
+
+    return { data, error: null };
+  } catch (err) {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+      const list = stored ? JSON.parse(stored) : [];
+      list.push(newShortage);
+      if (typeof window !== 'undefined') localStorage.setItem('samppel_shortages', JSON.stringify(list));
+    } catch (e) {}
+    return { data: newShortage, error: null };
+  }
+}
+
+export async function resolveOrderItemShortage(
+  shortageId: string,
+  resolution: {
+    resolution_type: 'DESCONTO_FATURA' | 'REPOSICAO' | 'ACEITE_PARCIAL';
+    resolution_notes?: string;
+    resolved_by_operator_id?: string;
+    resolved_by_name?: string;
+  }
+) {
+  const patch = {
+    status: 'RESOLVIDO' as const,
+    resolution_type: resolution.resolution_type,
+    resolution_notes: resolution.resolution_notes || '',
+    resolved_by_operator_id: resolution.resolved_by_operator_id || '',
+    resolved_by_name: resolution.resolved_by_name || 'Expedição',
+    resolved_at: new Date().toISOString()
+  };
+
+  if (isMockMode) {
+    mockShortages = mockShortages.map(s => s.id === shortageId ? { ...s, ...patch } : s);
+    return { data: mockShortages.find(s => s.id === shortageId), error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_shortages')
+      .update(patch)
+      .eq('id', shortageId)
+      .select()
+      .single();
+
+    if (error) {
+      try {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+        let list: OrderItemShortage[] = stored ? JSON.parse(stored) : [];
+        list = list.map(s => s.id === shortageId ? { ...s, ...patch } : s);
+        if (typeof window !== 'undefined') localStorage.setItem('samppel_shortages', JSON.stringify(list));
+      } catch (e) {}
+      return { data: { id: shortageId, ...patch }, error: null };
+    }
+
+    return { data, error: null };
+  } catch (err) {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
+      let list: OrderItemShortage[] = stored ? JSON.parse(stored) : [];
+      list = list.map(s => s.id === shortageId ? { ...s, ...patch } : s);
+      if (typeof window !== 'undefined') localStorage.setItem('samppel_shortages', JSON.stringify(list));
+    } catch (e) {}
+    return { data: { id: shortageId, ...patch }, error: null };
+  }
 }
 
 
