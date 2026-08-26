@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { 
@@ -9,6 +9,7 @@ import {
   getProducts, 
   createOrder, 
   updateOrder,
+  deleteOrder,
   getOrderStages,
   getOrderItems,
   createOrderItem,
@@ -335,6 +336,41 @@ const initShortagesMapFromCache = (): Map<string, OrderItemShortage[]> => {
 
 export default function PedidosPage() {
   const { user } = useAuth();
+  const isAdmin = 
+    !user || 
+    user?.role === 'Administrador' || 
+    user?.actual_role === 'Administrador' ||
+    user?.role?.toLowerCase() === 'administrador' ||
+    user?.role?.toLowerCase() === 'admin' ||
+    user?.email?.toLowerCase().includes('admin') ||
+    user?.email?.toLowerCase() === 'admin@samppel.com.br';
+
+  const isManualOrder = (order: any): boolean => {
+    if (!order) return true;
+    const caId = order.conta_azul_id;
+    if (!caId) return true;
+    if (typeof caId === 'string' && (
+      caId.startsWith('ca_sale_') || 
+      caId.startsWith('manual_') || 
+      caId.startsWith('mock_') ||
+      caId.length < 20
+    )) {
+      return true;
+    }
+    return false;
+  };
+
+  // Modal de Confirmação de Exclusão de Pedido Manual (Apenas Admin)
+  const [isDeleteConfirmModalOpen, setIsDeleteConfirmModalOpen] = useState(false);
+  const [orderToDelete, setOrderToDelete] = useState<{
+    orderId: string;
+    pvNumber: string;
+    customerName: string;
+    artName: string;
+    measure?: string;
+    printRun?: number;
+  } | null>(null);
+  const [isDeletingManualOrder, setIsDeletingManualOrder] = useState(false);
 
   // Operator secondary authentication
   const [isOpAuthOpen, setIsOpAuthOpen] = useState(false);
@@ -415,6 +451,11 @@ export default function PedidosPage() {
     if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_stage') || '';
     return '';
   });
+  // Filtro de Tamanho / Medidas
+  const [filterSize, setFilterSize] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_size') || '';
+    return '';
+  });
 
   const [pullOrderNumber, setPullOrderNumber] = useState('');
   const [syncingOrderNumber, setSyncingOrderNumber] = useState('');
@@ -428,7 +469,8 @@ export default function PedidosPage() {
     localStorage.setItem('pedidos_filter_conta_azul', filterContaAzulStatus);
     localStorage.setItem('pedidos_filter_release', filterPedidosRelease);
     localStorage.setItem('pedidos_filter_stage', filterStage);
-  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage]);
+    localStorage.setItem('pedidos_filter_size', filterSize);
+  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage, filterSize]);
 
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
@@ -642,47 +684,8 @@ export default function PedidosPage() {
       itemsToMove.push(...orderItems.filter(i => selectedIds.includes(i.id)));
     }
 
-    // Check stock for all items BEFORE moving
-    const targetStage = stages.find(s => s.id === targetStageId);
-    const targetStageIdx = stages.findIndex(s => s.id === targetStageId);
-    const isEnteringProdOrStock = targetStageIdx === 1 || targetStageIdx === 6 || targetStage?.name === 'Em produção' || targetStage?.name === 'Produção' || targetStage?.name === 'Estoque';
-    let stockAlertData = null;
-    
-    if (!insufficientStockMoveBypass.current && isEnteringProdOrStock) {
-      const insufficientItems = [];
-      const sufficientItems = [];
-      
-      for (const itm of itemsToMove) {
-        const fromStageIdx = itm.stage_id ? stages.findIndex(s => s.id === itm.stage_id) : 0;
-        if (fromStageIdx === 0 && itm.product_id) {
-          const qtyRequired = itm.print_run || itm.quantity || 1;
-          const currentStock = await checkProductStock(itm.product_id);
-          if (currentStock - qtyRequired < 0) {
-            insufficientItems.push({
-              item: itm,
-              productName: itm.product?.name || itm.name || itm.art_name,
-              qtyRequired,
-              currentStock
-            });
-          } else {
-            sufficientItems.push(itm);
-          }
-        } else {
-          sufficientItems.push(itm);
-        }
-      }
-      
-      if (insufficientItems.length > 0) {
-        stockAlertData = { insufficientItems, sufficientItems };
-      }
-    }
-
-    if (stockAlertData) {
-      setInsufficientStockData(stockAlertData);
-      setSiblingMoveTargetStageId(targetStageId);
-      setIsInsufficientStockModalOpen(true);
-      return;
-    }
+    // Verificação de estoque desativada a pedido do usuário
+    // Movimentação direta de cards permitida livremente sem bloqueio de estoque insuficiente
 
     setSiblingMoveItem(null);
     setSiblingMoveTargetStageId('');
@@ -1216,16 +1219,19 @@ export default function PedidosPage() {
         getFinancialTransactions(tenantId),
       ]);
 
+      const fetchedOrders = ordersRes.data || [];
       const fetchedProducts = productsRes.data || [];
-      setOrders(ordersRes.data || []);
+      setOrders(fetchedOrders);
       setCustomers(customersRes.data || []);
       setProducts(fetchedProducts);
       setStages(stagesRes.data || []);
 
       const joinedItems = (itemsRes.data || []).map((item: any) => {
         const prod = fetchedProducts.find((p: any) => p.id === item.product_id) || item.product || null;
+        const ord = fetchedOrders.find((o: any) => o.id === item.order_id) || item.order || null;
         return {
           ...item,
+          order: ord,
           product: prod
         };
       });
@@ -1976,33 +1982,8 @@ export default function PedidosPage() {
       }
     }
 
-    // ---------------------------------------------------------------
-    // REGRA DE ESTOQUE: VERIFICAR E BAIXAR AO ENTRAR EM PRODUÇÃO OU ESTOQUE
-    // A baixa ocorre ao sair da primeira coluna (Pedidos/A produzir) para "Em produção" ou "Estoque"
-    // ---------------------------------------------------------------
-    const fromStageIdxStock = currentStageId ? stages.findIndex(s => s.id === currentStageId) : 0;
-    const targetStageIdxStock = stages.findIndex(s => s.id === targetStageId);
-    const isEnteringProductionOrStock = fromStageIdxStock === 0 && (targetStageIdxStock === 1 || targetStageIdxStock === 6 || targetStage.name === 'Em produção' || targetStage.name === 'Produção' || targetStage.name === 'Estoque');
-    
-    if (isEnteringProductionOrStock && item.product_id && !insufficientStockMoveBypass.current) {
-      const qtyRequired = item.print_run || item.quantity || 1;
-      const currentStock = await checkProductStock(item.product_id);
-
-      if ((currentStock - qtyRequired) < 0) {
-        setInsufficientStockData({
-          insufficientItems: [{
-            item: item,
-            productName: item.product?.name || item.name || item.art_name,
-            qtyRequired,
-            currentStock
-          }],
-          sufficientItems: []
-        });
-        setSiblingMoveTargetStageId(targetStageId);
-        setIsInsufficientStockModalOpen(true);
-        return; // Interrompe para abrir o modal didático
-      }
-    }
+    // Verificação de estoque desativada a pedido do usuário
+    // Movimentação direta de cards permitida livremente sem bloqueio de estoque insuficiente
 
 
     setLoading(true);
@@ -2053,6 +2034,8 @@ export default function PedidosPage() {
         // inicializa a data de início da produção do pedido.
         const fromStageIdx = currentStageId ? stages.findIndex(s => s.id === currentStageId) : 0;
         const targetStageIdx = stages.findIndex(s => s.id === targetStageId);
+        const isEnteringProductionOrStock = fromStageIdx === 0 && (targetStageIdx === 1 || targetStageIdx === 6 || targetStage.name === 'Em produção' || targetStage.name === 'Produção' || targetStage.name === 'Estoque');
+
         if (fromStageIdx === 0 && targetStageIdx > 0 && !item.order?.production_start_date) {
           const todayStr = new Date().toISOString().split('T')[0];
           await updateOrder(item.order_id, { production_start_date: todayStr });
@@ -3539,6 +3522,52 @@ export default function PedidosPage() {
     setIsModalOpen(true);
   };
 
+  const handleRequestDeleteManualOrder = (order: any, item?: any) => {
+    if (!isAdmin) {
+      alert('Apenas usuários com perfil de Administrador têm permissão para excluir pedidos manuais.');
+      return;
+    }
+    const pvNumber = order?.pv_number || (order?.id ? `ID: ${order.id.slice(0, 8)}` : 'Manual');
+    const customerName = order?.customer?.name || (customers.find(c => c.id === order?.customer_id)?.name) || 'Cliente não identificado';
+    const artName = item?.name || order?.art_name || 'Arte/Produto';
+    const measure = item?.measure || order?.measure || '';
+    const printRun = item?.print_run || order?.print_run || 0;
+
+    setOrderToDelete({
+      orderId: order?.id || item?.order_id,
+      pvNumber,
+      customerName,
+      artName,
+      measure,
+      printRun
+    });
+    setIsDeleteConfirmModalOpen(true);
+  };
+
+  const handleConfirmDeleteManualOrder = async () => {
+    if (!orderToDelete || !isAdmin) return;
+    setIsDeletingManualOrder(true);
+    try {
+      const { error } = await deleteOrder(orderToDelete.orderId);
+      if (error) {
+        alert('Erro ao excluir pedido: ' + error.message);
+      } else {
+        setIsDeleteConfirmModalOpen(false);
+        setOrderToDelete(null);
+        setIsModalOpen(false);
+        setIsDetailModalOpen(false);
+        setSelectedItem(null);
+        setSelectedOrder(null);
+        await fetchAllData();
+      }
+    } catch (err: any) {
+      console.error('Erro ao excluir pedido manual:', err);
+      alert('Falha ao excluir pedido manual.');
+    } finally {
+      setIsDeletingManualOrder(false);
+    }
+  };
+
   const resolveCustomerId = async (name: string) => {
     if (!name || !name.trim()) return null;
     const existingCust = customers.find(c => c.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -3681,8 +3710,15 @@ export default function PedidosPage() {
     e.preventDefault();
 
     if (modalType === 'create') {
-      let targetStage = stages.find(s => s.name === 'A produzir') || stages[0];
-      let targetStatus = 'A produzir';
+      const productNameOrArt = formArtName.trim();
+      if (!productNameOrArt) {
+        alert('Por favor, informe ou selecione o Produto / Arte da Embalagem.');
+        return;
+      }
+
+      // Destino Inicial Obrigatório: Produção ou Estoque (Nunca Pedidos)
+      let targetStage = stages.find(s => s.name === 'Em produção' || s.name === 'Produção') || stages[1] || stages[0];
+      let targetStatus = 'Em produção';
       let targetSector: any = 'Impressão';
 
       if (formInitialDestination === 'ESTOQUE') {
@@ -3704,7 +3740,7 @@ export default function PedidosPage() {
         measure: formMeasure,
         print_run: Number(formPrintRun),
         boxes_count: Number(formBoxes),
-        freight_value: Number(formFreight),
+        freight_value: 0,
         seller_name: formSeller || 'Vendas Samppel',
         notes: formNotes,
         internal_notes: formInternalNotes,
@@ -3715,9 +3751,9 @@ export default function PedidosPage() {
 
         pv_number: formPvNumber || `PV-${Date.now().toString().substring(8)}`,
         op_number: formOpNumber || null,
-        art_name: formArtName || 'Arte Genérica',
+        art_name: productNameOrArt,
         packaging_type: formPackagingType,
-        shipping_type: formShippingType,
+        shipping_type: 'SEM_FRETE',
         first_payment_date: formFirstPaymentDate || null,
         installments_total: Number(formInstallmentsTotal),
         installments_paid: Number(formInstallmentsPaid),
@@ -3736,7 +3772,7 @@ export default function PedidosPage() {
           order_id: newOrder.id,
           product_id: newOrder.product_id,
           item_type: 'PRODUTO' as const,
-          name: newOrder.art_name || 'Item Principal',
+          name: productNameOrArt,
           measure: newOrder.measure,
           print_run: newOrder.print_run,
           boxes_count: newOrder.boxes_count,
@@ -3878,6 +3914,33 @@ export default function PedidosPage() {
     return true;
   };
 
+  // Lista dinâmica de todos os tamanhos/medidas presentes nos cards e pedidos
+  const availableSizes = useMemo(() => {
+    const sizesSet = new Set<string>();
+    (orderItems || []).forEach((item: any) => {
+      const m = getItemRealMeasure(item);
+      if (m && m !== '—' && m.trim().length > 0) {
+        sizesSet.add(m.trim());
+      }
+      if (item.measure && item.measure !== '—' && item.measure !== '15x10x5 cm' && item.measure.trim().length > 0) {
+        sizesSet.add(item.measure.trim());
+      }
+    });
+    (orders || []).forEach((order: any) => {
+      const m = getItemRealMeasure(order);
+      if (m && m !== '—' && m.trim().length > 0) {
+        sizesSet.add(m.trim());
+      }
+      if (order.measure && order.measure !== '—' && order.measure !== '15x10x5 cm' && order.measure.trim().length > 0) {
+        sizesSet.add(order.measure.trim());
+      }
+      if (order.size && order.size !== '—' && order.size.trim().length > 0) {
+        sizesSet.add(order.size.trim());
+      }
+    });
+    return Array.from(sizesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [orderItems, orders]);
+
   // Lógica de Filtros
   const filteredOrders = orders.filter(order => {
     if (isVendedor && user) {
@@ -3890,7 +3953,13 @@ export default function PedidosPage() {
       cleanPvForMatch(order.pv_number || '') === filterSearchOrder.toLowerCase()
     ) : true;
     const matchContaAzulStatus = filterContaAzulStatus ? order.conta_azul_status === filterContaAzulStatus : true;
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
+    const matchSize = filterSize ? (
+      getItemRealMeasure(order).toLowerCase() === filterSize.toLowerCase() ||
+      (order.measure || '').toLowerCase() === filterSize.toLowerCase() ||
+      (order.size || '').toLowerCase() === filterSize.toLowerCase() ||
+      (order.product_name || order.art_name || order.name || '').toLowerCase().includes(filterSize.toLowerCase())
+    ) : true;
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchSize;
   });
 
   // Helper para verificar se um item de pedido está configurado para ser vinculado ao primeiro item (Sem Produção)
@@ -4004,7 +4073,23 @@ export default function PedidosPage() {
       matchStage = stageName.toLowerCase() === filterStage.toLowerCase();
     }
 
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage;
+    // Filtro de Tamanho / Medidas
+    let matchSize = true;
+    if (filterSize) {
+      const itemMeasure = getItemRealMeasure(item).toLowerCase();
+      const parentMeasure = getItemRealMeasure(parentOrder).toLowerCase();
+      const targetSize = filterSize.toLowerCase();
+      matchSize = itemMeasure === targetSize ||
+        (item.measure || '').toLowerCase() === targetSize ||
+        (item.name || '').toLowerCase().includes(targetSize) ||
+        (item.art_name || '').toLowerCase().includes(targetSize) ||
+        parentMeasure === targetSize ||
+        (parentOrder.measure || '').toLowerCase() === targetSize ||
+        (parentOrder.size || '').toLowerCase() === targetSize ||
+        (parentOrder.product_name || parentOrder.art_name || parentOrder.name || '').toLowerCase().includes(targetSize);
+    }
+
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage && matchSize;
   });
 
   const getFreightBadgeStyle = (shippingType: string, notesFreight?: string | null) => {
@@ -4218,7 +4303,8 @@ export default function PedidosPage() {
           filterSeller,
           filterContaAzulStatus,
           filterPedidosRelease,
-          filterStage
+          filterStage,
+          filterSize
         ].filter(Boolean).length;
 
         return (
@@ -4563,6 +4649,19 @@ export default function PedidosPage() {
                   ))}
                 </select>
 
+                {/* Tamanhos / Medidas */}
+                <select
+                  className="form-select"
+                  value={filterSize}
+                  onChange={(e) => setFilterSize(e.target.value)}
+                  style={{ height: '30px', fontSize: '0.76rem', padding: '0.2rem 0.45rem', flex: '1 1 120px', minWidth: '105px', maxWidth: '160px', borderRadius: 'var(--radius-sm)' }}
+                >
+                  <option value="">Tamanho (Todos)</option>
+                  {availableSizes.map((size: string) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+
                 {/* Limpar Filtros Button */}
                 {activeFiltersCount > 0 && (
                   <button
@@ -4581,6 +4680,7 @@ export default function PedidosPage() {
                       setFilterContaAzulStatus('');
                       setFilterPedidosRelease('');
                       setFilterStage('');
+                      setFilterSize('');
                       if (typeof window !== 'undefined') {
                         localStorage.removeItem('pedidos_filter_customer');
                         localStorage.removeItem('pedidos_filter_seller');
@@ -4588,6 +4688,7 @@ export default function PedidosPage() {
                         localStorage.removeItem('pedidos_filter_conta_azul');
                         localStorage.removeItem('pedidos_filter_release');
                         localStorage.removeItem('pedidos_filter_stage');
+                        localStorage.removeItem('pedidos_filter_size');
                       }
                     }}
                   >
@@ -4654,9 +4755,29 @@ export default function PedidosPage() {
             const sortDir = columnSortDirs[stage.id] || 'asc';
             const isFirstColumn = originalIdx === 0;
 
+            const getItemExpeditionTimestamp = (item: any): number => {
+              const parentOrder = item.order || {};
+              const orderId = parentOrder.id || item.order_id;
+              const config = orderDeadlineConfigMap.get(orderId);
+              const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
+              const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
+
+              const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
+              if (expRes?.expeditionDate) {
+                return expRes.expeditionDate.getTime();
+              }
+              if (parentOrder.delivery_date) {
+                return new Date(parentOrder.delivery_date).getTime();
+              }
+              if (parentOrder.order_date) {
+                return new Date(parentOrder.order_date).getTime();
+              }
+              return 0;
+            };
+
             const stageItems = [...stageItemsRaw].sort((a, b) => {
-              const aDate = new Date(a.order?.order_date || 0).getTime();
-              const bDate = new Date(b.order?.order_date || 0).getTime();
+              const aExpTime = getItemExpeditionTimestamp(a);
+              const bExpTime = getItemExpeditionTimestamp(b);
               const aAprovado = (a.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
               const bAprovado = (b.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
 
@@ -4679,6 +4800,16 @@ export default function PedidosPage() {
                 if (!aAprovado && bAprovado) return 1;
               }
 
+              // Ordenação primária pela Data de Expedição
+              if (aExpTime && bExpTime) {
+                return sortDir === 'asc' ? aExpTime - bExpTime : bExpTime - aExpTime;
+              }
+              if (aExpTime && !bExpTime) return -1;
+              if (!aExpTime && bExpTime) return 1;
+
+              // Fallback por data do pedido
+              const aDate = new Date(a.order?.order_date || 0).getTime();
+              const bDate = new Date(b.order?.order_date || 0).getTime();
               return sortDir === 'asc' ? aDate - bDate : bDate - aDate;
             });
 
@@ -4739,7 +4870,7 @@ export default function PedidosPage() {
                       {/* Sort toggle button */}
                       {!isVirtual && (
                         <button
-                          title={columnSortDirs[stage.id] === 'desc' ? 'Mais novos primeiro' : 'Mais antigos primeiro'}
+                          title={columnSortDirs[stage.id] === 'desc' ? 'Data de expedição: Decrescente (Clique para Crescente)' : 'Data de expedição: Crescente (Clique para Decrescente)'}
                           onClick={(e) => {
                             e.stopPropagation();
                             setColumnSortDirs(prev => ({
@@ -5710,14 +5841,30 @@ export default function PedidosPage() {
                               );
                             })()}
 
-                            <button 
-                              onClick={() => handleOpenEdit(item)} 
-                              className="btn btn-primary" 
-                              style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
-                            >
-                              {isReadOnlyForForm('customer') ? <Eye size={10} /> : <Edit3 size={10} />}
-                              <span>{isReadOnlyForForm('customer') ? 'Ver' : 'Edit'}</span>
-                            </button>
+                            <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+                              {isAdmin && isManualOrder(parentOrder) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestDeleteManualOrder(parentOrder, item);
+                                  }}
+                                  className="btn btn-danger"
+                                  style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
+                                  title="Excluir este pedido manual (Apenas Administrador)"
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => handleOpenEdit(item)} 
+                                className="btn btn-primary" 
+                                style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
+                              >
+                                {isReadOnlyForForm('customer') ? <Eye size={10} /> : <Edit3 size={10} />}
+                                <span>{isReadOnlyForForm('customer') ? 'Ver' : 'Edit'}</span>
+                              </button>
+                            </div>
                           </div>
 
                         </div>
@@ -8690,20 +8837,40 @@ export default function PedidosPage() {
                   </datalist>
                 </div>
 
-                {/* Seleção do Produto (Opcional) */}
+                {/* Produto / Arte da Embalagem (Obrigatório - Digite ou selecione do catálogo) */}
                 <div className="form-group">
-                  <label className="form-label">Produto de Embalagem (Opcional)</label>
-                  <select 
-                    className="form-select"
-                    value={formProduct}
-                    disabled={isReadOnlyForForm('product')}
-                    onChange={(e) => setFormProduct(e.target.value)}
-                  >
-                    <option value="">— Selecione o Produto (Opcional) —</option>
+                  <label className="form-label">Produto / Arte da Embalagem *</label>
+                  <input
+                    type="text"
+                    list="products-list"
+                    className="form-input"
+                    required
+                    placeholder="Ex: SACOLA PARDA 32X24X11,5 (Digite ou selecione do catálogo)"
+                    value={formArtName}
+                    disabled={isReadOnlyForForm('art_name')}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormArtName(val);
+                      const matched = products.find(p => p.name.toLowerCase() === val.trim().toLowerCase());
+                      if (matched) {
+                        setFormProduct(matched.id);
+                        setFormSelectedProductStock(matched.stock_quantity);
+                        if (!formMeasure) {
+                          setFormMeasure(getItemRealMeasure(matched));
+                        }
+                      } else {
+                        setFormProduct('');
+                        setFormSelectedProductStock(null);
+                      }
+                    }}
+                  />
+                  <datalist id="products-list">
                     {products.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} (Estoque: {p.stock_quantity})</option>
+                      <option key={p.id} value={p.name}>
+                        {p.name} (Estoque: {Number(p.stock_quantity || 0).toLocaleString('pt-BR')} un)
+                      </option>
                     ))}
-                  </select>
+                  </datalist>
                   {formSelectedProductStock !== null && (
                     <span style={{ 
                       fontSize: '0.75rem', 
@@ -8715,7 +8882,7 @@ export default function PedidosPage() {
                       marginTop: '2px'
                     }}>
                       {formSelectedProductStock < formPrintRun ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
-                      Estoque disponível: {formSelectedProductStock.toLocaleString()} un
+                      Estoque disponível: {Number(formSelectedProductStock).toLocaleString('pt-BR')} un
                     </span>
                   )}
                 </div>
@@ -8762,35 +8929,38 @@ export default function PedidosPage() {
                   />
                 </div>
 
-                {/* Tipo de Envio (Por Padrão: Não precisa de frete) */}
-                <div className="form-group">
-                  <label className="form-label">Tipo de Frete/Envio</label>
-                  <select 
-                    className="form-select"
-                    value={formShippingType}
-                    disabled={isReadOnlyForForm('shipping_type')}
-                    onChange={(e) => setFormShippingType(e.target.value as any)}
-                  >
-                    <option value="SEM_FRETE">Não precisa de frete</option>
-                    <option value="RETIRADA">Cliente Retira</option>
-                    <option value="ENTREGA_PROPRIA">Entrega Própria Samppel</option>
-                    <option value="TRANSPORTADORA">Transportadora (Coleta)</option>
-                  </select>
-                </div>
+                {/* Tipo de Envio e Valor do Frete (Ocultos no cadastro de Novo Pedido, pois são fabricações para estoque) */}
+                {modalType !== 'create' && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Tipo de Frete/Envio</label>
+                      <select 
+                        className="form-select"
+                        value={formShippingType}
+                        disabled={isReadOnlyForForm('shipping_type')}
+                        onChange={(e) => setFormShippingType(e.target.value as any)}
+                      >
+                        <option value="SEM_FRETE">Não precisa de frete</option>
+                        <option value="RETIRADA">Cliente Retira</option>
+                        <option value="ENTREGA_PROPRIA">Entrega Própria Samppel</option>
+                        <option value="TRANSPORTADORA">Transportadora (Coleta)</option>
+                      </select>
+                    </div>
 
-                {/* Valor do Frete */}
-                {!hideMonetaryValues && (
-                  <div className="form-group">
-                    <label className="form-label">Valor do Frete (R$)</label>
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      className="form-input" 
-                      value={formFreight}
-                      disabled={isReadOnlyForForm('freight')}
-                      onChange={(e) => setFormFreight(Number(e.target.value))}
-                    />
-                  </div>
+                    {!hideMonetaryValues && (
+                      <div className="form-group">
+                        <label className="form-label">Valor do Frete (R$)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          className="form-input" 
+                          value={formFreight}
+                          disabled={isReadOnlyForForm('freight')}
+                          onChange={(e) => setFormFreight(Number(e.target.value))}
+                        />
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Vendedora (Opcional) */}
@@ -9297,17 +9467,35 @@ export default function PedidosPage() {
                 paddingTop: '1.25rem',
                 borderTop: '1px solid var(--border)',
                 display: 'flex',
-                justifyContent: 'flex-end',
+                alignItems: 'center',
+                justifyContent: 'space-between',
                 gap: '0.75rem'
               }}>
-                <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-secondary">
-                  Fechar
-                </button>
-                {(!isReadOnlyForForm('customer') || !isReadOnlyForForm('status') || !isReadOnlyForForm('machine_id')) && (
-                  <button type="submit" className="btn btn-primary">
-                    {modalType === 'create' ? 'Salvar Pedido' : 'Salvar Alterações'}
+                <div>
+                  {modalType === 'edit' && isAdmin && selectedOrder && isManualOrder(selectedOrder) && (
+                    <button 
+                      type="button" 
+                      onClick={() => handleRequestDeleteManualOrder(selectedOrder, selectedItem)}
+                      className="btn btn-danger"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}
+                      title="Excluir este pedido manual (Apenas Administrador)"
+                    >
+                      <Trash2 size={13} />
+                      <span>Excluir Pedido Manual</span>
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-secondary">
+                    Fechar
                   </button>
-                )}
+                  {(!isReadOnlyForForm('customer') || !isReadOnlyForForm('status') || !isReadOnlyForForm('machine_id')) && (
+                    <button type="submit" className="btn btn-primary">
+                      {modalType === 'create' ? 'Salvar Pedido' : 'Salvar Alterações'}
+                    </button>
+                  )}
+                </div>
               </footer>
             </form>
           </div>
@@ -10688,7 +10876,23 @@ export default function PedidosPage() {
                 </button>
 
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {order.conta_azul_id && (
+                  {isAdmin && isManualOrder(order) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDetailModalOpen(false);
+                        handleRequestDeleteManualOrder(order, detailItem);
+                      }}
+                      className="btn btn-danger"
+                      style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                      title="Excluir este pedido manual definitivamente"
+                    >
+                      <Trash2 size={13} />
+                      <span>Excluir Pedido Manual</span>
+                    </button>
+                  )}
+
+                  {!isManualOrder(order) && (
                     <button
                       onClick={() => handleSyncSingleOrder(order.id)}
                       disabled={syncingSingleOrder}
@@ -12339,6 +12543,147 @@ export default function PedidosPage() {
                 }}
               >
                 {savingExpeditionResolution ? 'Gravando...' : 'Confirmar e Liquidar Falta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================
+          MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE PEDIDO MANUAL (ADMIN)
+          ======================================== */}
+      {isDeleteConfirmModalOpen && orderToDelete && (
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div 
+            className="modal-content" 
+            style={{ 
+              maxWidth: '520px', 
+              width: '90%', 
+              backgroundColor: 'var(--surface)', 
+              borderRadius: 'var(--radius-lg, 12px)', 
+              boxShadow: '0 20px 40px rgba(0,0,0,0.4)', 
+              border: '2px solid var(--danger)',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Header com Alerta */}
+            <div style={{ 
+              backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)', 
+              borderBottom: '1px solid hsla(0, 84.2%, 60.2%, 0.25)', 
+              padding: '1.25rem 1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem'
+            }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--danger)',
+                flexShrink: 0
+              }}>
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--danger)' }}>
+                  Confirmar Exclusão de Pedido Manual
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Ação restrita exclusivamente a Administradores
+                </span>
+              </div>
+            </div>
+
+            {/* Conteúdo do Modal */}
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Box de Alerta Destacado */}
+              <div style={{
+                backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.08)',
+                border: '1.5px dashed hsla(0, 84.2%, 60.2%, 0.4)',
+                borderRadius: 'var(--radius-md, 8px)',
+                padding: '0.85rem 1rem',
+                color: 'var(--text)'
+              }}>
+                <div style={{ fontWeight: 800, color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <AlertCircle size={16} />
+                  ATENÇÃO: ESTA AÇÃO É DEFINITIVA E NÃO PODERÁ SER DESFEITA!
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4, color: 'var(--text-muted)' }}>
+                  Esta operação excluirá permanentemente o pedido manual, seus itens vinculados e todo o histórico associado do banco de dados. <strong>Não haverá como recuperar esses dados após a confirmação.</strong>
+                </p>
+              </div>
+
+              {/* Detalhes do Pedido Selecionado */}
+              <div style={{
+                backgroundColor: 'var(--background)',
+                borderRadius: 'var(--radius-md, 8px)',
+                padding: '0.85rem 1rem',
+                border: '1px solid var(--border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                fontSize: '0.82rem'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Identificador / PV:</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{orderToDelete.pvNumber}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Cliente:</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{orderToDelete.customerName}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Produto / Arte:</span>
+                  <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{orderToDelete.artName}</span>
+                </div>
+                {orderToDelete.printRun ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Tiragem:</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{Number(orderToDelete.printRun).toLocaleString('pt-BR')} un</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Rodapé com Ações */}
+            <div style={{
+              padding: '1rem 1.5rem',
+              backgroundColor: 'var(--background)',
+              borderTop: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '0.75rem'
+            }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isDeletingManualOrder}
+                onClick={() => {
+                  setIsDeleteConfirmModalOpen(false);
+                  setOrderToDelete(null);
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={isDeletingManualOrder}
+                onClick={handleConfirmDeleteManualOrder}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontWeight: 800,
+                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)'
+                }}
+              >
+                <Trash2 size={15} />
+                <span>{isDeletingManualOrder ? 'Excluindo...' : 'Sim, Excluir Definitivamente'}</span>
               </button>
             </div>
           </div>
