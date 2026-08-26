@@ -4728,9 +4728,31 @@ export default function PedidosPage() {
             overflowY: 'hidden',
             paddingTop: '0.25rem',
             paddingBottom: '0.5rem',
-            boxSizing: 'border-box'
+            boxSizing: 'border-box',
+            position: 'relative'
           }}
         >
+          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSize || filterSearchOrder) && filteredOrderItems.length === 0 && (
+            <div style={{
+              position: 'absolute',
+              top: '40%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              opacity: 0.1,
+              pointerEvents: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 0,
+              width: '100%',
+              color: 'var(--text-muted, #64748b)'
+            }}>
+              <Search size={120} strokeWidth={1.5} />
+              <h2 style={{ fontSize: '3.5rem', fontWeight: 900, marginTop: '1rem', marginBottom: '0.5rem', letterSpacing: '-1.5px', textTransform: 'uppercase' }}>Filtro Ativado</h2>
+              <p style={{ fontSize: '1.5rem', fontWeight: 600 }}>Não há pedidos correspondentes à busca.</p>
+            </div>
+          )}
           {(() => {
             const columns = [...visibleStages.map((s) => ({ ...s, isVirtual: false, originalIdx: stages.findIndex(stg => stg.id === s.id) }))];
             if (columns.length > 0) {
