@@ -181,28 +181,92 @@ export async function updateSupplier(id: string, updates: any) {
 }
 
 // Produtos & Estoque
+export interface Product {
+  id: string;
+  tenant_id: string;
+  name: string;
+  sku?: string | null;
+  description?: string | null;
+  price?: number;
+  stock_quantity: number;
+  category?: 'LISAS' | 'PERSONALIZADA' | string;
+  conta_azul_id?: string | null;
+  bind_to_first_item?: boolean;
+  bind_requires_handling?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+function parseProductCategory(p: any): string {
+  if (p.category) return p.category;
+  if (p.description && typeof p.description === 'string') {
+    const match = p.description.match(/\[CATEGORIA:\s*([A-Z_]+)\]/i);
+    if (match && match[1]) return match[1].toUpperCase();
+  }
+  const normName = (p.name || '').toLowerCase();
+  if (normName.includes('sem impress') || normName.includes('lisa') || normName.includes('padrao')) {
+    return 'LISAS';
+  }
+  return 'PERSONALIZADA';
+}
+
+function encodeProductDescription(desc: string | null | undefined, category: string | undefined): string {
+  let cleanDesc = (desc || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim();
+  if (category) {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[CATEGORIA:${category}]` : `[CATEGORIA:${category}]`;
+  }
+  return cleanDesc;
+}
+
 export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   if (isMockMode) return { data: mockProducts.filter(p => p.tenant_id === tenantId), error: null };
   const { data, error } = await getDbClient().from('products').select('*').eq('tenant_id', tenantId).order('name');
+  if (data) {
+    const mapped = data.map((p: any) => ({
+      ...p,
+      category: parseProductCategory(p),
+      description: (p.description || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim()
+    }));
+    return { data: mapped, error: null };
+  }
   return { data, error };
 }
 
 export async function createProduct(product: any) {
+  const category = product.category || 'LISAS';
+  const description = encodeProductDescription(product.description, category);
+  const payload = {
+    ...product,
+    description,
+    category
+  };
+
   const newProd = {
     id: product.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
     tenant_id: product.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
     stock_quantity: product.stock_quantity || 0,
     created_at: new Date().toISOString(),
-    ...product
+    ...payload
   };
   if (isMockMode) {
     mockProducts.unshift(newProd);
     await enqueueSync(newProd.tenant_id, 'PRODUCT', newProd.id, 'CREATE');
     return { data: newProd, error: null };
   }
-  const { data, error } = await getDbClient().from('products').insert([product]).select().single();
+  let { data, error } = await getDbClient().from('products').insert([payload]).select().single();
+  if (error && error.message?.includes('category')) {
+    const { category: _, ...restProd } = payload;
+    const retryRes = await getDbClient().from('products').insert([restProd]).select().single();
+    data = retryRes.data;
+    error = retryRes.error;
+  }
   if (!error && data) {
     await enqueueSync(data.tenant_id, 'PRODUCT', data.id, 'CREATE');
+    data = {
+      ...data,
+      category: parseProductCategory(data),
+      description: (data.description || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim()
+    };
   }
   return { data, error };
 }
@@ -216,9 +280,26 @@ export async function updateProduct(id: string, updates: any) {
     }
     return { data: updated, error: null };
   }
-  const { data, error } = await getDbClient().from('products').update(updates).eq('id', id).select().single();
+
+  const payload = { ...updates };
+  if (payload.category !== undefined) {
+    payload.description = encodeProductDescription(payload.description, payload.category);
+  }
+
+  let { data, error } = await getDbClient().from('products').update(payload).eq('id', id).select().single();
+  if (error && error.message?.includes('category')) {
+    const { category: _, ...restUpdates } = payload;
+    const retryRes = await getDbClient().from('products').update(restUpdates).eq('id', id).select().single();
+    data = retryRes.data;
+    error = retryRes.error;
+  }
   if (!error && data) {
     await enqueueSync(data.tenant_id, 'PRODUCT', data.id, 'UPDATE');
+    data = {
+      ...data,
+      category: parseProductCategory(data),
+      description: (data.description || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim()
+    };
   }
   return { data, error };
 }
@@ -347,9 +428,41 @@ export async function createOrder(order: any) {
     return { data: newOrder, error: null };
   }
   
-  const { data, error } = await getDbClient().from('orders').insert([order]).select().single();
+  let orderToInsert = { ...order };
+  if (!orderToInsert.product_id) {
+    // Busca o primeiro produto disponível para satisfazer a FK NOT NULL da tabela orders
+    const { data: existingProd } = await getDbClient()
+      .from('products')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    if (existingProd?.id) {
+      orderToInsert.product_id = existingProd.id;
+    } else {
+      // Se não houver produtos cadastrados, cria um produto genérico padrão
+      const { data: newProd } = await getDbClient()
+        .from('products')
+        .insert([{
+          tenant_id: orderToInsert.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+          name: 'Produto Sob Encomenda / Geral',
+          description: '[CATEGORIA:PERSONALIZADA]',
+          price: 0,
+          stock_quantity: 0
+        }])
+        .select('id')
+        .single();
+      if (newProd?.id) {
+        orderToInsert.product_id = newProd.id;
+      }
+    }
+  }
+  
+  const { data, error } = await getDbClient().from('orders').insert([orderToInsert]).select().single();
   if (!error && data) {
-    await adjustStock(data.product_id, -data.boxes_count, 'PEDIDO', `Pedido #${data.order_number} cadastrado`, data.tenant_id);
+    if (order.product_id) {
+      await adjustStock(data.product_id, -data.boxes_count, 'PEDIDO', `Pedido #${data.order_number} cadastrado`, data.tenant_id);
+    }
     
     const { data: prod } = await getDbClient().from('products').select('price').eq('id', data.product_id).single();
     const { data: cust } = await getDbClient().from('customers').select('name').eq('id', data.customer_id).single();
@@ -393,6 +506,22 @@ export async function updateOrder(id: string, updates: any) {
     }
     await enqueueSync(data.tenant_id, 'ORDER', data.id, 'UPDATE');
   }
+  return { data, error };
+}
+
+export async function deleteOrder(id: string) {
+  if (isMockMode) {
+    mockOrders = mockOrders.filter(o => o.id !== id);
+    mockOrderItems = mockOrderItems.filter(i => i.order_id !== id);
+    return { data: null, error: null };
+  }
+
+  // Deleta itens do pedido
+  await getDbClient().from('order_items').delete().eq('order_id', id);
+  // Deleta transações financeiras se houver
+  await getDbClient().from('financial_transactions').delete().eq('order_id', id);
+  // Deleta o registro em orders
+  const { data, error } = await getDbClient().from('orders').delete().eq('id', id).select().single();
   return { data, error };
 }
 
