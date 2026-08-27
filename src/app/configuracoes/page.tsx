@@ -2310,8 +2310,8 @@ export default function ConfiguracoesPage() {
               </span>
             </div>
 
-            {/* CONFIGURAÇÃO DE CARTEIRA DE VENDEDOR E PERMISSÕES */}
-            {(() => {
+            {/* CONFIGURAÇÃO DE CARTEIRA DE VENDEDOR E PERMISSÕES (Exclusivo para perfis de Vendedor/Comercial) */}
+            {(activeOp!.role === 'Vendedor' || activeOp!.role === 'Comercial') && !activeOp!.is_factory_account && (() => {
               const currentSellerData = sellerPermissionsMap[activeOp!.id] || {
                 primary_seller_name: activeOp!.full_name || activeOp!.name || '',
                 seller_access_mode: 'OWN',
