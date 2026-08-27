@@ -2125,29 +2125,54 @@ export default function ConfiguracoesPage() {
                     </td>
                     <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{op.email}</td>
                     <td>
-                      <select
-                        value={op.is_factory_account ? 'Fábrica' : (op.role || 'Produção')}
-                        onChange={(e) => handleUpdateOperatorRole(op.id, e.target.value)}
-                        disabled={savingFactoryAccount}
-                        style={{
-                          padding: '0.3rem 0.6rem',
-                          borderRadius: '6px',
-                          fontSize: '0.8rem',
-                          fontWeight: 600,
-                          border: '1px solid var(--border)',
-                          backgroundColor: op.is_factory_account ? 'rgba(234, 179, 8, 0.12)' : 
-                                           op.role === 'Administrador' ? 'rgba(59, 130, 246, 0.12)' : 'var(--surface)',
-                          color: op.is_factory_account ? '#b45309' : 
-                                 op.role === 'Administrador' ? '#1d4ed8' : 'var(--text)',
-                          cursor: 'pointer',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="Administrador">Administrador</option>
-                        <option value="Produção">Produção</option>
-                        <option value="Fábrica">Terminal de Fábrica</option>
-                        <option value="Vendedor">Vendedor</option>
-                      </select>
+                      {(() => {
+                        const currentRole = op.is_factory_account || op.role === 'Fábrica' ? 'Fábrica' : (op.role || 'Produção');
+                        let bg = 'var(--surface)';
+                        let color = 'var(--text)';
+                        let borderColor = 'var(--border)';
+
+                        if (currentRole === 'Fábrica') {
+                          bg = 'rgba(234, 179, 8, 0.14)';
+                          color = '#b45309';
+                          borderColor = 'rgba(234, 179, 8, 0.4)';
+                        } else if (currentRole === 'Administrador') {
+                          bg = 'rgba(59, 130, 246, 0.12)';
+                          color = '#1d4ed8';
+                          borderColor = 'rgba(59, 130, 246, 0.35)';
+                        } else if (currentRole === 'Vendedor') {
+                          bg = 'rgba(168, 85, 247, 0.12)';
+                          color = '#7e22ce';
+                          borderColor = 'rgba(168, 85, 247, 0.35)';
+                        } else if (currentRole === 'Produção') {
+                          bg = 'rgba(16, 185, 129, 0.12)';
+                          color = '#047857';
+                          borderColor = 'rgba(16, 185, 129, 0.35)';
+                        }
+
+                        return (
+                          <select
+                            value={currentRole}
+                            onChange={(e) => handleUpdateOperatorRole(op.id, e.target.value)}
+                            disabled={savingFactoryAccount}
+                            style={{
+                              padding: '0.3rem 0.6rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              border: `1px solid ${borderColor}`,
+                              backgroundColor: bg,
+                              color: color,
+                              cursor: 'pointer',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="Administrador">Administrador</option>
+                            <option value="Produção">Produção</option>
+                            <option value="Fábrica">Terminal de Fábrica</option>
+                            <option value="Vendedor">Vendedor</option>
+                          </select>
+                        );
+                      })()}
                     </td>
                     <td>
                       <span className={`badge ${op.status === 'ATIVO' ? 'badge-success' : 'badge-danger'}`}>
