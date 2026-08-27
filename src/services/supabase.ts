@@ -229,22 +229,22 @@ function parseProductCustomer(p: any): string | null {
 }
 
 function parseProductBindToFirst(p: any): boolean {
-  if (p.bind_to_first_item !== undefined) return !!p.bind_to_first_item;
   if (p.description && typeof p.description === 'string') {
-    return /\[BIND_FIRST:TRUE\]/i.test(p.description);
+    if (/\[BIND_FIRST:TRUE\]/i.test(p.description)) return true;
+    if (/\[BIND_FIRST:FALSE\]/i.test(p.description)) return false;
   }
-  return false;
+  return !!p.bind_to_first_item;
 }
 
 function parseProductBindHandling(p: any): boolean {
-  if (p.bind_requires_handling !== undefined) return !!p.bind_requires_handling;
   if (p.description && typeof p.description === 'string') {
-    return /\[BIND_HANDLING:TRUE\]/i.test(p.description);
+    if (/\[BIND_HANDLING:TRUE\]/i.test(p.description)) return true;
+    if (/\[BIND_HANDLING:FALSE\]/i.test(p.description)) return false;
   }
-  return false;
+  return !!p.bind_requires_handling;
 }
 
-function encodeProductDescription(desc: string | null | undefined, category: string | undefined, measure: string | undefined, customerId: string | undefined, bindToFirst: boolean = false, bindHandling: boolean = false): string {
+function encodeProductDescription(desc: string | null | undefined, category: string | undefined, measure: string | undefined, customerId: string | undefined, bindToFirst: boolean | undefined = false, bindHandling: boolean | undefined = false): string {
   let cleanDesc = (desc || '')
     .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
     .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
@@ -263,9 +263,13 @@ function encodeProductDescription(desc: string | null | undefined, category: str
   }
   if (bindToFirst) {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[BIND_FIRST:TRUE]` : `[BIND_FIRST:TRUE]`;
+  } else {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[BIND_FIRST:FALSE]` : `[BIND_FIRST:FALSE]`;
   }
   if (bindHandling) {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[BIND_HANDLING:TRUE]` : `[BIND_HANDLING:TRUE]`;
+  } else {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[BIND_HANDLING:FALSE]` : `[BIND_HANDLING:FALSE]`;
   }
   return cleanDesc;
 }
@@ -359,9 +363,7 @@ export async function updateProduct(id: string, updates: any) {
   }
 
   const payload = { ...updates };
-  if (payload.category !== undefined || payload.measure !== undefined || payload.customer_id !== undefined || payload.description !== undefined) {
-    payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id, payload.bind_to_first_item, payload.bind_requires_handling);
-  }
+  payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id, payload.bind_to_first_item, payload.bind_requires_handling);
   
   delete payload.measure;
   delete payload.customer_id;
