@@ -228,11 +228,29 @@ function parseProductCustomer(p: any): string | null {
   return null;
 }
 
-function encodeProductDescription(desc: string | null | undefined, category: string | undefined, measure: string | undefined, customerId: string | undefined): string {
+function parseProductBindToFirst(p: any): boolean {
+  if (p.bind_to_first_item !== undefined) return !!p.bind_to_first_item;
+  if (p.description && typeof p.description === 'string') {
+    return /\[BIND_FIRST:TRUE\]/i.test(p.description);
+  }
+  return false;
+}
+
+function parseProductBindHandling(p: any): boolean {
+  if (p.bind_requires_handling !== undefined) return !!p.bind_requires_handling;
+  if (p.description && typeof p.description === 'string') {
+    return /\[BIND_HANDLING:TRUE\]/i.test(p.description);
+  }
+  return false;
+}
+
+function encodeProductDescription(desc: string | null | undefined, category: string | undefined, measure: string | undefined, customerId: string | undefined, bindToFirst: boolean = false, bindHandling: boolean = false): string {
   let cleanDesc = (desc || '')
     .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
     .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
     .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+    .replace(/\s*\[BIND_FIRST:\s*(TRUE|FALSE)\]/gi, '')
+    .replace(/\s*\[BIND_HANDLING:\s*(TRUE|FALSE)\]/gi, '')
     .trim();
   if (category) {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[CATEGORIA:${category}]` : `[CATEGORIA:${category}]`;
@@ -242,6 +260,12 @@ function encodeProductDescription(desc: string | null | undefined, category: str
   }
   if (customerId) {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[CLIENTE:${customerId}]` : `[CLIENTE:${customerId}]`;
+  }
+  if (bindToFirst) {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[BIND_FIRST:TRUE]` : `[BIND_FIRST:TRUE]`;
+  }
+  if (bindHandling) {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[BIND_HANDLING:TRUE]` : `[BIND_HANDLING:TRUE]`;
   }
   return cleanDesc;
 }
@@ -255,10 +279,14 @@ export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99
       category: parseProductCategory(p),
       measure: parseProductMeasure(p),
       customer_id: parseProductCustomer(p),
+      bind_to_first_item: parseProductBindToFirst(p),
+      bind_requires_handling: parseProductBindHandling(p),
       description: (p.description || '')
         .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
         .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
         .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+        .replace(/\s*\[BIND_FIRST:\s*(TRUE|FALSE)\]/gi, '')
+        .replace(/\s*\[BIND_HANDLING:\s*(TRUE|FALSE)\]/gi, '')
         .trim()
     }));
     return { data: mapped, error: null };
@@ -268,7 +296,7 @@ export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99
 
 export async function createProduct(product: any) {
   const category = product.category || 'LISAS';
-  const description = encodeProductDescription(product.description, category, product.measure, product.customer_id);
+  const description = encodeProductDescription(product.description, category, product.measure, product.customer_id, product.bind_to_first_item, product.bind_requires_handling);
   const payload = {
     ...product,
     description,
@@ -306,10 +334,14 @@ export async function createProduct(product: any) {
       category: parseProductCategory(data),
       measure: parseProductMeasure(data),
       customer_id: parseProductCustomer(data),
+      bind_to_first_item: parseProductBindToFirst(data),
+      bind_requires_handling: parseProductBindHandling(data),
       description: (data.description || '')
         .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
         .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
         .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+        .replace(/\s*\[BIND_FIRST:\s*(TRUE|FALSE)\]/gi, '')
+        .replace(/\s*\[BIND_HANDLING:\s*(TRUE|FALSE)\]/gi, '')
         .trim()
     };
   }
@@ -328,7 +360,7 @@ export async function updateProduct(id: string, updates: any) {
 
   const payload = { ...updates };
   if (payload.category !== undefined || payload.measure !== undefined || payload.customer_id !== undefined || payload.description !== undefined) {
-    payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id);
+    payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id, payload.bind_to_first_item, payload.bind_requires_handling);
   }
   
   delete payload.measure;
@@ -350,12 +382,35 @@ export async function updateProduct(id: string, updates: any) {
       category: parseProductCategory(data),
       measure: parseProductMeasure(data),
       customer_id: parseProductCustomer(data),
+      bind_to_first_item: parseProductBindToFirst(data),
+      bind_requires_handling: parseProductBindHandling(data),
       description: (data.description || '')
         .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
         .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
         .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+        .replace(/\s*\[BIND_FIRST:\s*(TRUE|FALSE)\]/gi, '')
+        .replace(/\s*\[BIND_HANDLING:\s*(TRUE|FALSE)\]/gi, '')
         .trim()
     };
+  }
+  return { data, error };
+}
+
+export async function deleteProduct(id: string) {
+  if (isMockMode) {
+    const idx = mockProducts.findIndex(p => p.id === id);
+    if (idx !== -1) mockProducts.splice(idx, 1);
+    return { data: null, error: null };
+  }
+  const { data, error } = await getDbClient()
+    .from('products')
+    .delete()
+    .eq('id', id)
+    .select()
+    .single();
+    
+  if (!error && data) {
+    await enqueueSync(data.tenant_id, 'PRODUCT', data.id, 'DELETE');
   }
   return { data, error };
 }

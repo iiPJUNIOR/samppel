@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getProducts, createProduct, updateProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
+import { getProducts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2 } from 'lucide-react';
 
 function StockInlineEdit({ product, onSave }: { product: any, onSave: (id: string, newStock: number) => Promise<void> }) {
   const [val, setVal] = useState(product.stock_quantity?.toString() || '0');
@@ -237,6 +237,17 @@ export default function ProdutosPage() {
     setIsFormModalOpen(true);
   };
 
+  const handleDeleteProduct = async (product: any) => {
+    if (confirm(`Tem certeza que deseja apagar o produto "${product.name}"?\nIsso não será possível se ele já estiver sendo usado em pedidos ou em estoques vinculados.`)) {
+      const res = await deleteProduct(product.id);
+      if (res.error) {
+        alert('Erro ao apagar produto. É provável que ele já esteja vinculado a um pedido ou estoque (Ação bloqueada pelo banco de dados por segurança).');
+      } else {
+        await fetchProducts();
+      }
+    }
+  };
+
   const handleOpenEdit = (product: any) => {
     setModalType('edit');
     setSelectedProduct(product);
@@ -272,7 +283,7 @@ export default function ProdutosPage() {
       bind_requires_handling: formBindToFirstItem ? formBindRequiresHandling : false,
       category: formCategory,
       measure: formMeasure || null,
-      customer_id: formCustomer || null,
+      customer_id: formCategory === 'PERSONALIZADA' ? (formCustomer || null) : null,
       stock_quantity: modalType === 'create' ? Number(formStock) : undefined
     };
 
@@ -388,7 +399,19 @@ export default function ProdutosPage() {
     return matchesSearch && matchesTab;
   });
 
-  const filteredCustomStocks = customStocks.filter(s => 
+  const allCustomerStocks = [
+    ...customStocks,
+    ...products.filter(p => p.category === 'PERSONALIZADA').map(p => ({
+      id: `prod-${p.id}`,
+      customer: customers.find(c => c.id === p.customer_id) || { name: 'Cliente Não Vinculado' },
+      product: p,
+      quantity: p.stock_quantity || 0,
+      created_at: p.created_at,
+      updated_at: p.updated_at
+    }))
+  ];
+
+  const filteredCustomStocks = allCustomerStocks.filter(s => 
     s.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
     s.product?.name?.toLowerCase().includes(search.toLowerCase())
   );
@@ -400,7 +423,7 @@ export default function ProdutosPage() {
   const numCols = 6 + (isAdmin ? 1 : 0) - (isVendedor ? 1 : 0);
 
   const lisasCount = products.filter(p => p.category === 'LISAS').length;
-  const customStocksCount = customStocks.length;
+  const customStocksCount = allCustomerStocks.length;
 
   return (
     <div className="page-container">
@@ -591,6 +614,25 @@ export default function ProdutosPage() {
                             <span>Editar</span>
                           </button>
                         )}
+
+                        {canEditDetails && (
+                          <button
+                            onClick={() => handleDeleteProduct(product)}
+                            title="Apagar produto"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                              padding: '0.375rem 0.75rem', background: 'transparent',
+                              border: '1px solid #ef4444', borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.75rem', fontWeight: 500, color: '#ef4444',
+                              cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                          >
+                            <Trash2 size={12} />
+                            <span>Apagar</span>
+                          </button>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -739,19 +781,21 @@ export default function ProdutosPage() {
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Cliente Vinculado (Opcional)</label>
-                <select 
-                  className="form-select"
-                  value={formCustomer}
-                  onChange={(e) => setFormCustomer(e.target.value)}
-                >
-                  <option value="">— Nenhum —</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
+              {formCategory === 'PERSONALIZADA' && (
+                <div className="form-group">
+                  <label className="form-label">Cliente Vinculado (Opcional)</label>
+                  <select 
+                    className="form-select"
+                    value={formCustomer}
+                    onChange={(e) => setFormCustomer(e.target.value)}
+                  >
+                    <option value="">— Nenhum —</option>
+                    {customers.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="form-group">
                 <label className="form-label">Descrição Técnica das Medidas e Papel</label>
