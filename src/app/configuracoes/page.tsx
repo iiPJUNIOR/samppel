@@ -2255,7 +2255,7 @@ export default function ConfiguracoesPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div className="card" style={{
+          <div className="card no-scrollbar" style={{
             width: '100%',
             maxWidth: '650px',
             backgroundColor: 'var(--surface)',
@@ -2264,7 +2264,9 @@ export default function ConfiguracoesPage() {
             padding: '2rem',
             position: 'relative',
             maxHeight: '90vh',
-            overflowY: 'auto'
+            overflowY: 'auto',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none'
           }}>
             <button
               onClick={() => setSelectedOperatorForPermissions(null)}
@@ -2492,7 +2494,7 @@ export default function ConfiguracoesPage() {
                   </div>
                 </div>
 
-                <div className="table-responsive" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                <div className="table-responsive no-scrollbar" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                   <table className="table" style={{ margin: 0 }}>
                     <thead>
                       <tr style={{ backgroundColor: 'var(--background)' }}>
