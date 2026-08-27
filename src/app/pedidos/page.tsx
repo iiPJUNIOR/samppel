@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
-import { 
-  getOrders, 
-  getCustomers, 
-  getProducts, 
-  createOrder, 
+import {
+  getOrders,
+  getCustomers,
+  getProducts,
+  createOrder,
   updateOrder,
   deleteOrder,
   getOrderStages,
@@ -66,13 +66,13 @@ import {
 import { parseDeadlineFromNotes, isCardOverdue, calculateExpeditionDate, detectScopeDays } from '@/services/deadline_service';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
-import { 
-  Plus, 
-  Search, 
-  Filter, 
-  Edit3, 
-  CheckCircle2, 
-  HelpCircle, 
+import {
+  Plus,
+  Search,
+  Filter,
+  Edit3,
+  CheckCircle2,
+  HelpCircle,
   AlertCircle,
   Truck,
   Eye,
@@ -124,7 +124,7 @@ const extractProductionDeadline = (notes: string | null): string | null => {
   if (!notes) return null;
   const match = notes.match(/(?:PRAZO\s*(?:DE\s*(?:PRODUÇÃO|ENTREGA))?|PRAZO\s*PRODUÇÃO):\s*([^.\n\r]+)/i);
   if (match) return match[1].trim();
-  
+
   const altMatch = notes.match(/(ATÉ\s*\d+\s*DIAS\s*(?:APÓS|CORRIDOS)[^.\n\r]*)/i);
   return altMatch ? altMatch[1].trim() : null;
 };
@@ -132,10 +132,10 @@ const extractProductionDeadline = (notes: string | null): string | null => {
 // Extrair detalhes estruturados do pedido
 const extractOrderDetails = (notes: string | null) => {
   if (!notes) return null;
-  
+
   // Cut the notes at "ABAIXO:" to ignore client-only info.
   const relevantNotes = notes.split(/ABAIXO:/i)[0];
-  
+
   const extract = (keyRegex: RegExp) => {
     const match = relevantNotes.match(keyRegex);
     return match ? match[1].trim() : null;
@@ -211,7 +211,7 @@ const checkIsDelayed = (item: any, stagesList: any[]): boolean => {
 
   const startDate = new Date(parentOrder.production_start_date + 'T12:00:00');
   const limitDate = new Date(startDate.getTime() + deadlineDays * 24 * 60 * 60 * 1000);
-  
+
   return Date.now() > limitDate.getTime();
 };
 
@@ -288,7 +288,7 @@ const initOrderDeadlineConfigMap = (): Map<string, { isBusinessDays: boolean; ch
           }
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   }
   return map;
 };
@@ -309,7 +309,7 @@ const initHandlingTeamsMapFromCache = (): Map<string, OrderItemHandlingTeam[]> =
           });
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
   return map;
 };
@@ -329,16 +329,16 @@ const initShortagesMapFromCache = (): Map<string, OrderItemShortage[]> => {
           });
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
   return map;
 };
 
 export default function PedidosPage() {
   const { user } = useAuth();
-  const isAdmin = 
-    !user || 
-    user?.role === 'Administrador' || 
+  const isAdmin =
+    !user ||
+    user?.role === 'Administrador' ||
     user?.actual_role === 'Administrador' ||
     user?.role?.toLowerCase() === 'administrador' ||
     user?.role?.toLowerCase() === 'admin' ||
@@ -350,8 +350,8 @@ export default function PedidosPage() {
     const caId = order.conta_azul_id;
     if (!caId) return true;
     if (typeof caId === 'string' && (
-      caId.startsWith('ca_sale_') || 
-      caId.startsWith('manual_') || 
+      caId.startsWith('ca_sale_') ||
+      caId.startsWith('manual_') ||
       caId.startsWith('mock_') ||
       caId.length < 20
     )) {
@@ -378,7 +378,7 @@ export default function PedidosPage() {
     item: any;
     targetStageId: string;
   } | null>(null);
-  
+
   // Listas de dados
   const [orders, setOrders] = useState<any[]>([]);
   const [orderItems, setOrderItems] = useState<any[]>([]);
@@ -388,11 +388,11 @@ export default function PedidosPage() {
   const [stages, setStages] = useState<any[]>([]);
   const [userPermissions, setUserPermissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Estado para controlar a animação de mudança de etapa
   const [recentlyMovedOrderId, setRecentlyMovedOrderId] = useState<string | null>(null);
   const [recentlyMovedItemId, setRecentlyMovedItemId] = useState<string | null>(null);
-  
+
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
 
   useEffect(() => {
@@ -418,7 +418,7 @@ export default function PedidosPage() {
     return () => {
       document.querySelector('.app-container')?.classList.remove('kanban-mode');
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [filterCustomer, setFilterCustomer] = useState(() => {
@@ -576,7 +576,7 @@ export default function PedidosPage() {
   const [expeditionTransitionType, setExpeditionTransitionType] = useState<'NENHUM' | 'FALTA' | 'CORTESIA'>('NENHUM');
   const [expeditionTransitionQuantity, setExpeditionTransitionQuantity] = useState(0);
   const [expeditionTransitionNotes, setExpeditionTransitionNotes] = useState('');
-  
+
   // Estados para Consolidação de Expedição (Irmãos e Frete)
   const [expeditionSiblings, setExpeditionSiblings] = useState<any[]>([]);
   const [expeditionSelectedSiblings, setExpeditionSelectedSiblings] = useState<string[]>([]);
@@ -638,13 +638,13 @@ export default function PedidosPage() {
   const handleConfirmInsufficientStockMove = async (selectedInsufficientItems: any[]) => {
     if (!siblingMoveTargetStageId || !insufficientStockData) return;
     const itemsToMove = [...(insufficientStockData.sufficientItems || []), ...selectedInsufficientItems];
-    
+
     setIsInsufficientStockModalOpen(false);
     setInsufficientStockData(null);
-    
+
     insufficientStockMoveBypass.current = true;
     siblingMoveBypass.current = true;
-    
+
     for (const itm of itemsToMove) {
       await moveOrderItemToStage(itm, siblingMoveTargetStageId);
     }
@@ -795,7 +795,7 @@ export default function PedidosPage() {
   const [toastNotification, setToastNotification] = useState<{ message: string; type: 'success' | 'info'; id: number } | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
-  
+
   // Custom Pointer Events DND Refs
   const dragCloneRef = useRef<HTMLElement | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
@@ -906,7 +906,7 @@ export default function PedidosPage() {
       try {
         const obj = Object.fromEntries(updatedMap);
         localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(obj));
-      } catch (e) {}
+      } catch (e) { }
     }
 
     setIsDeadlineModalOpen(false);
@@ -940,7 +940,7 @@ export default function PedidosPage() {
           return updated;
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const handleOpenHandlingTeamModalForItem = async (item: any, targetStageId: string, targetAllocationId?: string) => {
@@ -1295,7 +1295,7 @@ export default function PedidosPage() {
         if (typeof window !== 'undefined' && Array.isArray(teamsBulkRes.data)) {
           try {
             localStorage.setItem('samppel_handling_teams_v2', JSON.stringify(teamsBulkRes.data));
-          } catch (e) {}
+          } catch (e) { }
         }
         setItemHandlingTeamsMap(teamsMap);
         setShortagesMap(sMap);
@@ -1316,12 +1316,12 @@ export default function PedidosPage() {
       if (user.role === 'Administrador' && !user.is_factory_account) {
         return; // Admin tem permissão irrestrita por padrão
       }
-      
+
       const { data, error } = await supabase
         .from('profile_stage_permissions')
         .select('stage_id, can_enter, can_exit')
         .eq('profile_id', user.id);
-        
+
       if (data) {
         setUserPermissions(data);
       }
@@ -1387,7 +1387,7 @@ export default function PedidosPage() {
       if (importStartDate) queryParams.append('startDate', importStartDate);
       if (importEndDate) queryParams.append('endDate', importEndDate);
 
-      const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, { 
+      const res = await fetch(`/api/sync/import-orders?${queryParams.toString()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userRole: user?.role }),
@@ -1469,7 +1469,7 @@ export default function PedidosPage() {
   useEffect(() => {
     const checkAndTransitionOverdueItems = async () => {
       if (orderItems.length === 0 || stages.length === 0 || loading) return;
-      
+
       const atrasadoStage = stages.find(s => s.name === 'Atrasado');
       if (!atrasadoStage) return;
 
@@ -1506,7 +1506,7 @@ export default function PedidosPage() {
 
   const handleOpAuthSuccess = async (operatorId: string, operatorName: string) => {
     setIsOpAuthOpen(false);
-    
+
     currentOperator.current = { id: operatorId, name: operatorName };
 
     if (authActionType.current === 'save_details') {
@@ -1573,7 +1573,7 @@ export default function PedidosPage() {
     if (currentStage?.name === 'Manuseio' && targetStage.name !== 'Manuseio' && targetStage.name !== 'Atrasado' && !handlingTeamMoveBypass.current) {
       const { data: teams } = await getOrderItemHandlingTeams(item.id);
       const isUserAdmin = user?.role === 'Administrador' || (user?.role as string) === 'Admin';
-      
+
       const uncompletedLots = (teams || []).filter(t => {
         const hasSaida = !!t.departure_date && Number(t.quantity) > 0;
         const hasRetorno = (!!t.return_date || !!t.completed_at) && Number(t.return_quantity) > 0;
@@ -1604,7 +1604,7 @@ export default function PedidosPage() {
           const lotSummary = (teams && teams.length > 0)
             ? `Existe(m) ${uncompletedLots.length} de ${teams.length} equipe(s) pendente(s) de retorno/conferência.`
             : 'Nenhuma equipe de manuseio cadastrada para este item.';
-          
+
           const confirmForce = window.confirm(
             `⚠️ ATENÇÃO ADMINISTRADOR\n\n` +
             `Este item possui pendências na etapa Manuseio:\n${lotSummary}\n\n` +
@@ -1682,8 +1682,8 @@ export default function PedidosPage() {
     // ---------------------------------------------------------------
     // REGRA DE ALERTA DE PRODUÇÃO (A produzir -> Em produção/Estoque)
     // ---------------------------------------------------------------
-    const isMovingFromPedidosToProductionOrStock = 
-      (!currentStage || currentStage.name === 'Pedidos' || currentStage.name === 'A produzir') && 
+    const isMovingFromPedidosToProductionOrStock =
+      (!currentStage || currentStage.name === 'Pedidos' || currentStage.name === 'A produzir') &&
       (targetStage.name === 'Em produção' || targetStage.name === 'Estoque');
 
     if (isMovingFromPedidosToProductionOrStock && !productionAlertBypass.current) {
@@ -1696,7 +1696,7 @@ export default function PedidosPage() {
         try {
           const { data: credits } = await getCustomerStockCredits(customerId, 'ATIVO', tenantId);
           const activeCredit = (credits || []).find((c: any) => c.product_id === productId);
-          
+
           if (activeCredit) {
             setProductionAlertData(activeCredit);
             setProductionAlertItem(item);
@@ -1714,10 +1714,10 @@ export default function PedidosPage() {
     }
 
     // REGRA DE MANUSEIO: Vincular equipes de manuseio ao entrar na etapa 'Manuseio'
-    if (targetStage.name === 'Manuseio' && 
-        currentStage?.name !== 'Manuseio' && 
-        !handlingTeamMoveBypass.current) {
-      
+    if (targetStage.name === 'Manuseio' &&
+      currentStage?.name !== 'Manuseio' &&
+      !handlingTeamMoveBypass.current) {
+
       handleOpenHandlingTeamModalForItem(item, targetStageId);
       return;
     }
@@ -1728,19 +1728,19 @@ export default function PedidosPage() {
     // ---------------------------------------------------------------
     if (targetStage.name === 'Expedição' && !expeditionTransitionMoveBypass.current) {
       const siblingItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && i.stage_id !== targetStageId);
-      
+
       setExpeditionTransitionItem(item);
       setExpeditionTransitionTargetStageId(targetStageId);
-      
+
       // Ocorrências
       setExpeditionTransitionType('NENHUM');
       setExpeditionTransitionQuantity(0);
       setExpeditionTransitionNotes(item.expedition_notes || '');
-      
+
       // Irmãos (Consolidação)
       setExpeditionSiblings(siblingItems);
       setExpeditionSelectedSiblings(siblingItems.map(s => s.id)); // Default todos
-      
+
       // Frete Consolidado
       setSelectedShippingType(parentOrder?.shipping_type || '');
       setExpeditionFreightVolumes(1);
@@ -1802,7 +1802,7 @@ export default function PedidosPage() {
         try {
           const raw = localStorage.getItem(`samppel_mv_${item.id}`);
           if (raw) lastMove = JSON.parse(raw);
-        } catch {}
+        } catch { }
 
         const withinGrace =
           lastMove &&
@@ -1870,17 +1870,17 @@ export default function PedidosPage() {
     if (isMovingFromPedidosToProductionOrStock) {
       const customerId = item.order?.customer_id;
       const productId = item.product_id;
-      
-      const activeCredit = customerCredits.find(c => 
-        c.customer_id === customerId && 
-        c.product_id === productId && 
-        c.credit_type === 'PENDENCIA_ENTREGA' && 
+
+      const activeCredit = customerCredits.find(c =>
+        c.customer_id === customerId &&
+        c.product_id === productId &&
+        c.credit_type === 'PENDENCIA_ENTREGA' &&
         c.remaining_quantity > 0
       );
-      
-      const activeStock = customerStocks.find(s => 
-        s.customer_id === customerId && 
-        s.product_id === productId && 
+
+      const activeStock = customerStocks.find(s =>
+        s.customer_id === customerId &&
+        s.product_id === productId &&
         s.quantity > 0
       );
 
@@ -1955,7 +1955,7 @@ export default function PedidosPage() {
     // Regra de negócio: Alerta didático de pedido bloqueado (sem sinal ou em atraso) ao mover para Produção, Estoque ou qualquer etapa
     const isParentPaid = !!parentOrder?.first_payment_date;
     const isOverdue = hasOverdueInstallments(item.order_id) || checkIsDelayed(item, stages);
-    
+
     if ((!isParentPaid || isOverdue) && !blockedPaymentBypass.current) {
       setBlockedPaymentItem(item);
       setBlockedPaymentTargetStageId(targetStageId);
@@ -2017,7 +2017,7 @@ export default function PedidosPage() {
         const boundSubItems = orderItems.filter(i => i.order_id === item.order_id && isItemBoundToFirstItem(i));
         if (boundSubItems.length > 0) {
           try {
-            await Promise.all(boundSubItems.map(sib => 
+            await Promise.all(boundSubItems.map(sib =>
               updateOrderItem(sib.id, {
                 stage_id: targetStageId,
                 status: targetStatus,
@@ -2074,7 +2074,7 @@ export default function PedidosPage() {
             movedAt: Date.now(),
             movedByUserId: user?.id
           }));
-        } catch {}
+        } catch { }
 
         setRecentlyMovedItemId(item.id);
         showToast(`${item.friendly_id || item.order?.pv_number || 'Pedido'} movimentado para "${targetStage.name}"`);
@@ -2142,13 +2142,13 @@ export default function PedidosPage() {
                     setSyncProgress(100);
                     setSyncStep('Sincronização concluída com sucesso!');
                     setSyncResult({ success: true });
-                    
+
                     const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
                     const [ordersRes, finRes] = await Promise.all([
                       getOrders(tenantId),
                       getFinancialTransactions(tenantId)
                     ]);
-                    
+
                     if (ordersRes.data) {
                       setOrders(ordersRes.data);
                       const match = ordersRes.data.find((o: any) => o.id === orderId);
@@ -2162,7 +2162,7 @@ export default function PedidosPage() {
                             ...blockedPaymentItem,
                             order: updatedOrder
                           };
-                          
+
                           const isPaid = !!updatedOrder.first_payment_date;
                           const isStillOverdue = hasOverdueInstallments(updatedOrder.id) || checkIsDelayed(updatedItem, stages);
 
@@ -2186,7 +2186,7 @@ export default function PedidosPage() {
                     if (finRes.data) {
                       setFinancialTransactions(finRes.data);
                     }
-                    
+
                     fetchAllData();
                   } else {
                     const errMsg = chunk.error || chunk.result?.message || 'Erro desconhecido ao sincronizar pedido.';
@@ -2260,10 +2260,10 @@ export default function PedidosPage() {
                     setSyncStep('Sincronização concluída com sucesso!');
                     setSyncResult({ success: true });
                     setPullOrderNumber(''); // Limpar campo após puxar
-                    
+
                     // Recarregar os dados para que o novo card apareça
                     const refreshedOrders = await fetchAllData();
-                    
+
                     // Buscar o pv_number do pedido importado e setar automaticamente no filtro local
                     if (chunk.result && chunk.result.orderId && refreshedOrders) {
                       const importedOrder = refreshedOrders.find((o: any) => o.id === chunk.result.orderId);
@@ -2349,7 +2349,7 @@ export default function PedidosPage() {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
       const { data: orderRes } = await getOrders(tenantId);
       const updatedOrder = (orderRes || []).find((o: any) => o.id === parentOrder.id);
-      
+
       if (updatedOrder && updatedOrder.conta_azul_status !== 'Em andamento') {
         alert('Pedido atualizado no Conta Azul e agora consta como Aprovado! Iniciando a produção/separação...');
         setIsOrderInProgressModalOpen(false);
@@ -2595,7 +2595,7 @@ export default function PedidosPage() {
     setLoading(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      
+
       if (suggestionAction === 'CONSUMIR_CREDITO' && suggestionCredit) {
         const qtyToConsume = Math.min(suggestionQuantityToConsume, suggestionCredit.remaining_quantity);
         const newRemaining = suggestionCredit.remaining_quantity - qtyToConsume;
@@ -2621,7 +2621,7 @@ export default function PedidosPage() {
           notes: `Abatimento efetuado: Consumidos ${qtyToConsume} de crédito de falta pendente do PV original.`,
           created_by_name: user?.full_name || user?.email || 'Sistema'
         });
-      } 
+      }
       else if (suggestionAction === 'CONSUMIR_ESTOQUE' && suggestionStock) {
         const qtyToConsume = Math.min(suggestionQuantityToConsume, suggestionStock.quantity);
         const newQty = suggestionStock.quantity - qtyToConsume;
@@ -2716,7 +2716,7 @@ export default function PedidosPage() {
         if (dragPendingTarget.current.hasPointerCapture(activePointerId.current)) {
           dragPendingTarget.current.releasePointerCapture(activePointerId.current);
         }
-      } catch (err) {}
+      } catch (err) { }
     }
     if (dragCloneRef.current && dragCloneRef.current.parentNode) {
       dragCloneRef.current.parentNode.removeChild(dragCloneRef.current);
@@ -2734,7 +2734,7 @@ export default function PedidosPage() {
     setDraggedItemId(null);
     setDragOverStageId(null);
     setDragOverIndex(null);
-    
+
     document.removeEventListener('pointermove', handlePointerMove);
     document.removeEventListener('pointerup', handlePointerUp);
     document.removeEventListener('pointercancel', handlePointerCancel);
@@ -2876,9 +2876,9 @@ export default function PedidosPage() {
     clone.style.webkitUserSelect = 'none';
     clone.style.transition = 'none';
     clone.style.transform = `translate3d(${clientX - dragOffset.current.x}px, ${clientY - dragOffset.current.y}px, 0) rotate(2deg)`;
-    
+
     document.body.appendChild(clone);
-    
+
     dragCloneRef.current = clone;
     activeDragItemId.current = item.id;
     setDraggedItemId(item.id);
@@ -2912,7 +2912,7 @@ export default function PedidosPage() {
 
     const currentTarget = e.currentTarget as HTMLElement;
     const rect = currentTarget.getBoundingClientRect();
-    
+
     activePointerId.current = e.pointerId;
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     lastPointerPos.current = { x: e.clientX, y: e.clientY };
@@ -2967,7 +2967,7 @@ export default function PedidosPage() {
   const handlePointerUp = async (e: PointerEvent) => {
     const wasActive = isDragActive.current;
     const itemId = activeDragItemId.current;
-    
+
     let targetStageId = currentOverStageId.current;
     if (!targetStageId && wasActive) {
       const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
@@ -3012,7 +3012,7 @@ export default function PedidosPage() {
     setFormNotes('');
     setFormInternalNotes('');
     setFormInitialDestination('PRODUCAO');
-    
+
     // Inicia na primeira etapa
     const firstStage = stages[0];
     setFormStageId(firstStage?.id || '');
@@ -3178,7 +3178,7 @@ export default function PedidosPage() {
     const { item, siblings, targetStageId } = linkedItemsWarningData;
     setIsLinkedItemsWarningOpen(false);
     setLinkedItemsWarningData(null);
-    
+
     // Captura o operador autenticado do PIN antes de chamar as funções que limpam a ref!
     const savedOpId = currentOperator.current?.id;
     const savedOpName = currentOperator.current?.name;
@@ -3207,7 +3207,7 @@ export default function PedidosPage() {
           handlingTeamMoveBypass.current = true;
           expeditionTransitionMoveBypass.current = true;
           adminMoveOverride.current = true;
-          
+
           await moveOrderItemToStage(fullSib, targetStageId, savedOpId, savedOpName);
         }
       }
@@ -3225,7 +3225,7 @@ export default function PedidosPage() {
     const { item, targetStageId } = linkedItemsWarningData;
     setIsLinkedItemsWarningOpen(false);
     setLinkedItemsWarningData(null);
-    
+
     const savedOpId = currentOperator.current?.id;
     const savedOpName = currentOperator.current?.name;
 
@@ -3298,7 +3298,7 @@ export default function PedidosPage() {
   const handleDeleteSector = async (id: string) => {
     const secToDelete = productionSectors.find(s => s.id === id);
     if (!secToDelete) return;
-    
+
     // Verificar se tem máquina associada
     const hasMachine = productionMachines.some(m => m.sector === secToDelete.name);
     if (hasMachine) {
@@ -3401,7 +3401,7 @@ export default function PedidosPage() {
       setSelectedItem(entity);
       const order = entity.order || {};
       setSelectedOrder(order);
-      
+
       const cust = customers.find(c => c.id === order.customer_id);
       setFormCustomer(cust ? cust.name : '');
       setFormProduct(entity.product_id || '');
@@ -4096,13 +4096,13 @@ export default function PedidosPage() {
     if (notesFreight) {
       const nfUpper = notesFreight.toUpperCase();
       if (nfUpper.includes('ENTREGA') && !nfUpper.includes('CORREIO') && !nfUpper.includes('SEDEX')) {
-         return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: capitalizeText(notesFreight) };
+        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: capitalizeText(notesFreight) };
       }
       if (nfUpper.includes('CORREIO') || nfUpper.includes('SEDEX') || nfUpper.includes('PAC') || nfUpper.includes('TRANSP')) {
-         return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: capitalizeText(notesFreight) };
+        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: capitalizeText(notesFreight) };
       }
       if (nfUpper.includes('LALA') || nfUpper.includes('MOTO')) {
-         return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: capitalizeText(notesFreight) };
+        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: capitalizeText(notesFreight) };
       }
       return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: capitalizeText(notesFreight) };
     }
@@ -4137,11 +4137,11 @@ export default function PedidosPage() {
   });
 
   const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial' || user?.role === 'Vendedor';
-  
+
   const isReadOnlyForForm = (field: string) => {
     if (modalType === 'create') return false;
     if (user?.role === 'Administrador' || user?.role === 'Comercial' || user?.role === 'Vendedor') return false;
-    
+
     // Se o usuário for Produção ou Fábrica:
     if (user?.role === 'Produção' || user?.role === 'Fábrica') {
       // Eles podem alterar o Setor de Produção Física, a Máquina Vinculada, Observações e Anotações Internas
@@ -4155,11 +4155,11 @@ export default function PedidosPage() {
     if (user?.role === 'Estoque' || user?.role === 'Expedição') {
       return true;
     }
-    
+
     if (user?.role === 'Financeiro') {
       return !['status', 'firstPaymentDate', 'installmentsPaid', 'installmentsTotal', 'productionStartDate', 'internalNotes'].includes(field);
     }
-    
+
     return true;
   };
 
@@ -4168,16 +4168,16 @@ export default function PedidosPage() {
     if (order?.status === 'Atrasado') return true;
 
     const orderTransactions = financialTransactions.filter(t => t.order_id === orderId);
-    const hasOverdue = orderTransactions.some(t => 
-      t.status === 'PENDENTE' && 
-      t.due_date && 
+    const hasOverdue = orderTransactions.some(t =>
+      t.status === 'PENDENTE' &&
+      t.due_date &&
       new Date(t.due_date + 'T23:59:59') < new Date()
     );
     return hasOverdue;
   };
 
   return (
-    <div 
+    <div
       className="page-container"
       style={viewMode === 'kanban' ? {
         display: 'flex',
@@ -4196,7 +4196,7 @@ export default function PedidosPage() {
             Acompanhe a produção física pelo Kanban ou gerencie o status de faturamento na listagem.
           </p>
         </div>
-        
+
         {/* Controles de importação: só no modo lista (no kanban ficam na filter bar) */}
         {viewMode !== 'kanban' && !['Produção', 'Fábrica'].includes(user?.role || '') && (
           <div className="page-header-actions">
@@ -4204,9 +4204,9 @@ export default function PedidosPage() {
               {/* Opção 1: Importar por Período */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem', whiteSpace: 'nowrap' }}>Importar Período:</span>
-                <input 
-                  type="date" 
-                  value={importStartDate} 
+                <input
+                  type="date"
+                  value={importStartDate}
                   onChange={(e) => setImportStartDate(e.target.value)}
                   disabled={importing}
                   style={{
@@ -4221,9 +4221,9 @@ export default function PedidosPage() {
                   }}
                 />
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
-                <input 
-                  type="date" 
-                  value={importEndDate} 
+                <input
+                  type="date"
+                  value={importEndDate}
                   onChange={(e) => setImportEndDate(e.target.value)}
                   disabled={importing}
                   style={{
@@ -4237,10 +4237,10 @@ export default function PedidosPage() {
                     width: '110px'
                   }}
                 />
-                <button 
-                  onClick={handleImportOrders} 
+                <button
+                  onClick={handleImportOrders}
                   disabled={importing}
-                  className="btn btn-secondary" 
+                  className="btn btn-secondary"
                   style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
                 >
                   <RefreshCw size={12} className={importing ? 'spinner' : ''} />
@@ -4257,10 +4257,10 @@ export default function PedidosPage() {
                   <Download size={12} />
                   Importar Nº:
                 </span>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="Ex: 406"
-                  value={pullOrderNumber} 
+                  value={pullOrderNumber}
                   onChange={(e) => setPullOrderNumber(e.target.value)}
                   disabled={importing}
                   onKeyDown={(e) => {
@@ -4279,10 +4279,10 @@ export default function PedidosPage() {
                     outline: 'none'
                   }}
                 />
-                <button 
-                  onClick={() => handleSyncOrderByNumber(pullOrderNumber)} 
+                <button
+                  onClick={() => handleSyncOrderByNumber(pullOrderNumber)}
                   disabled={importing || !pullOrderNumber.trim()}
-                  className="btn btn-secondary" 
+                  className="btn btn-secondary"
                   style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
                 >
                   <Download size={12} />
@@ -4325,10 +4325,10 @@ export default function PedidosPage() {
           >
             {/* ═══ SESSÃO 1: CABEÇALHO SUPERIOR (ALINHADO DA ESQUERDA) ═══ */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', width: '100%', flexWrap: 'wrap' }}>
-              
+
               {/* Esquerda: Logo + Ações alinhadas sequencialmente a partir da esquerda */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', flex: 1 }}>
-                
+
                 {/* Logo da Samppel */}
                 <div className="filterbar-logo" style={{ display: 'flex', alignItems: 'center', paddingRight: '0.75rem', borderRight: '1px solid var(--border)', flexShrink: 0 }}>
                   <Image
@@ -4713,13 +4713,13 @@ export default function PedidosPage() {
           <Loader2 size={40} className="spinner" style={{ color: 'var(--primary)' }} />
         </div>
       ) : viewMode === 'kanban' ? (
-        
+
         /* 1. VISUALIZAÇÃO KANBAN */
-        <div 
+        <div
           className="no-scrollbar kanban-board-container"
-          style={{ 
-            display: 'flex', 
-            gap: '0.75rem', 
+          style={{
+            display: 'flex',
+            gap: '0.75rem',
             width: '100%',
             flex: '1 1 0',
             minHeight: 0,
@@ -4771,1161 +4771,1160 @@ export default function PedidosPage() {
               const stageItemsRaw = isVirtual
                 ? filteredOrderItems.filter(item => checkIsDelayed(item, stages))
                 : filteredOrderItems.filter(item =>
-                    item.stage_id === stage.id || (!item.stage_id && originalIdx === 0)
-                  );
+                  item.stage_id === stage.id || (!item.stage_id && originalIdx === 0)
+                );
 
-            const sortDir = columnSortDirs[stage.id] || 'asc';
-            const isFirstColumn = originalIdx === 0;
+              const sortDir = columnSortDirs[stage.id] || 'asc';
+              const isFirstColumn = originalIdx === 0;
 
-            const getItemExpeditionTimestamp = (item: any): number => {
-              const parentOrder = item.order || {};
-              const orderId = parentOrder.id || item.order_id;
-              const config = orderDeadlineConfigMap.get(orderId);
-              const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
-              const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
+              const getItemExpeditionTimestamp = (item: any): number => {
+                const parentOrder = item.order || {};
+                const orderId = parentOrder.id || item.order_id;
+                const config = orderDeadlineConfigMap.get(orderId);
+                const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
+                const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
 
-              const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
-              if (expRes?.expeditionDate) {
-                return expRes.expeditionDate.getTime();
-              }
-              if (parentOrder.delivery_date) {
-                return new Date(parentOrder.delivery_date).getTime();
-              }
-              if (parentOrder.order_date) {
-                return new Date(parentOrder.order_date).getTime();
-              }
-              return 0;
-            };
+                const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
+                if (expRes?.expeditionDate) {
+                  return expRes.expeditionDate.getTime();
+                }
+                if (parentOrder.delivery_date) {
+                  return new Date(parentOrder.delivery_date).getTime();
+                }
+                if (parentOrder.order_date) {
+                  return new Date(parentOrder.order_date).getTime();
+                }
+                return 0;
+              };
 
-            const stageItems = [...stageItemsRaw].sort((a, b) => {
-              const aExpTime = getItemExpeditionTimestamp(a);
-              const bExpTime = getItemExpeditionTimestamp(b);
-              const aAprovado = (a.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
-              const bAprovado = (b.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
+              const stageItems = [...stageItemsRaw].sort((a, b) => {
+                const aExpTime = getItemExpeditionTimestamp(a);
+                const bExpTime = getItemExpeditionTimestamp(b);
+                const aAprovado = (a.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
+                const bAprovado = (b.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
 
-              // Regra de prioridade da primeira coluna:
-              // Se possuir autorização "AUT." E o pagamento estiver recebido, vai pro topo absoluto.
-              if (isFirstColumn) {
-                const aAuth = extractAuthorization(a.notes || a.order?.notes);
-                const bAuth = extractAuthorization(b.notes || b.order?.notes);
-                const aReleased = !!a.order?.first_payment_date;
-                const bReleased = !!b.order?.first_payment_date;
+                // Regra de prioridade da primeira coluna:
+                // Se possuir autorização "AUT." E o pagamento estiver recebido, vai pro topo absoluto.
+                if (isFirstColumn) {
+                  const aAuth = extractAuthorization(a.notes || a.order?.notes);
+                  const bAuth = extractAuthorization(b.notes || b.order?.notes);
+                  const aReleased = !!a.order?.first_payment_date;
+                  const bReleased = !!b.order?.first_payment_date;
 
-                const aPriority = !!aAuth && aReleased;
-                const bPriority = !!bAuth && bReleased;
+                  const aPriority = !!aAuth && aReleased;
+                  const bPriority = !!bAuth && bReleased;
 
-                if (aPriority && !bPriority) return -1;
-                if (!aPriority && bPriority) return 1;
+                  if (aPriority && !bPriority) return -1;
+                  if (!aPriority && bPriority) return 1;
 
-                // Caso empatem em prioridade, mantém a ordenação por Aprovados
-                if (aAprovado && !bAprovado) return -1;
-                if (!aAprovado && bAprovado) return 1;
-              }
+                  // Caso empatem em prioridade, mantém a ordenação por Aprovados
+                  if (aAprovado && !bAprovado) return -1;
+                  if (!aAprovado && bAprovado) return 1;
+                }
 
-              // Ordenação primária pela Data de Expedição
-              if (aExpTime && bExpTime) {
-                return sortDir === 'asc' ? aExpTime - bExpTime : bExpTime - aExpTime;
-              }
-              if (aExpTime && !bExpTime) return -1;
-              if (!aExpTime && bExpTime) return 1;
+                // Ordenação primária pela Data de Expedição
+                if (aExpTime && bExpTime) {
+                  return sortDir === 'asc' ? aExpTime - bExpTime : bExpTime - aExpTime;
+                }
+                if (aExpTime && !bExpTime) return -1;
+                if (!aExpTime && bExpTime) return 1;
 
-              // Fallback por data do pedido
-              const aDate = new Date(a.order?.order_date || 0).getTime();
-              const bDate = new Date(b.order?.order_date || 0).getTime();
-              return sortDir === 'asc' ? aDate - bDate : bDate - aDate;
-            });
+                // Fallback por data do pedido
+                const aDate = new Date(a.order?.order_date || 0).getTime();
+                const bDate = new Date(b.order?.order_date || 0).getTime();
+                return sortDir === 'asc' ? aDate - bDate : bDate - aDate;
+              });
 
-            const isEmpty = stageItems.length === 0;
+              const isEmpty = stageItems.length === 0;
 
-            return (
-              <div
-                key={stage.id}
-                className="kanban-column"
-                data-stage-id={stage.id}
+              return (
+                <div
+                  key={stage.id}
+                  className="kanban-column"
+                  data-stage-id={stage.id}
 
-                style={{
-                  flex: isEmpty ? '0 0 140px' : '1 1 280px',
-                  minWidth: isEmpty ? '140px' : '260px',
-                  maxWidth: isEmpty ? '140px' : '450px',
-                  alignSelf: 'stretch',
-                  backgroundColor: isEmpty ? 'hsla(0, 0%, 50%, 0.02)' : 'var(--background)',
-                  border: isVirtual 
-                    ? '2px dashed var(--danger)' 
-                    : isEmpty ? '1px dashed var(--border)' : '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0.4rem 0.4rem 0.2rem 0.4rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.35rem',
-                  height: '100%',
-                  maxHeight: '100%',
-                  boxSizing: 'border-box',
-                  transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                  overflow: 'hidden',
-                  position: 'relative'
-                }}
-              >
-                {/* Header da Coluna */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', borderBottom: `2px solid ${stage.color}`, paddingBottom: '0.25rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', overflow: 'hidden' }}>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: stage.color, flexShrink: 0 }} />
-                      <span
-                        style={{
-                          fontWeight: 700,
-                          fontSize: '0.75rem',
-                          color: isVirtual ? 'var(--danger)' : 'var(--text)',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          maxWidth: '180px'
-                        }}
-                        title={stage.name}
-                      >
-                        {stage.name}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <span className={`badge ${isVirtual ? 'badge-danger' : 'badge-secondary'}`} style={{ fontSize: '0.65rem', padding: '1px 5px', fontWeight: 600 }}>
-                        {stageItems.length}
-                      </span>
-                      {/* Sort toggle button */}
-                      {!isVirtual && (
-                        <button
-                          title={columnSortDirs[stage.id] === 'desc' ? 'Data de expedição: Decrescente (Clique para Crescente)' : 'Data de expedição: Crescente (Clique para Decrescente)'}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setColumnSortDirs(prev => ({
-                              ...prev,
-                              [stage.id]: prev[stage.id] === 'desc' ? 'asc' : 'desc'
-                            }));
-                          }}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--text-muted)', padding: '1px 3px',
-                            display: 'flex', alignItems: 'center',
-                            borderRadius: '3px',
-                            transition: 'color 0.15s ease',
-                            fontSize: '0.65rem', lineHeight: 1
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
-                          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                        >
-                          {columnSortDirs[stage.id] === 'desc' ? '↓' : '↑'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Quick filter chips para a coluna "Pedidos" */}
-                  {(isFirstColumn || stage.name === 'Pedidos') && (
-                    <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                      <button
-                        onClick={() => setFilterPedidosRelease('')}
-                        style={{
-                          fontSize: '0.6rem',
-                          padding: '1px 5px',
-                          borderRadius: '3px',
-                          border: filterPedidosRelease === '' ? '1px solid var(--primary)' : '1px solid var(--border)',
-                          backgroundColor: filterPedidosRelease === '' ? 'var(--surface)' : 'transparent',
-                          color: filterPedidosRelease === '' ? 'var(--primary)' : 'var(--text-muted)',
-                          cursor: 'pointer',
-                          fontWeight: filterPedidosRelease === '' ? 700 : 500,
-                          lineHeight: '1.2'
-                        }}
-                      >
-                        Todos
-                      </button>
-                      <button
-                        onClick={() => setFilterPedidosRelease('liberados')}
-                        style={{
-                          fontSize: '0.6rem',
-                          padding: '1px 5px',
-                          borderRadius: '3px',
-                          border: filterPedidosRelease === 'liberados' ? '1px solid #10b981' : '1px solid var(--border)',
-                          backgroundColor: filterPedidosRelease === 'liberados' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                          color: filterPedidosRelease === 'liberados' ? '#10b981' : 'var(--text-muted)',
-                          cursor: 'pointer',
-                          fontWeight: filterPedidosRelease === 'liberados' ? 700 : 500,
-                          lineHeight: '1.2'
-                        }}
-                        title="Filtrar apenas pedidos liberados para produção"
-                      >
-                        Liberados
-                      </button>
-                      <button
-                        onClick={() => setFilterPedidosRelease('bloqueados')}
-                        style={{
-                          fontSize: '0.6rem',
-                          padding: '1px 5px',
-                          borderRadius: '3px',
-                          border: filterPedidosRelease === 'bloqueados' ? '1px solid #ef4444' : '1px solid var(--border)',
-                          backgroundColor: filterPedidosRelease === 'bloqueados' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                          color: filterPedidosRelease === 'bloqueados' ? '#ef4444' : 'var(--text-muted)',
-                          cursor: 'pointer',
-                          fontWeight: filterPedidosRelease === 'bloqueados' ? 700 : 500,
-                          lineHeight: '1.2'
-                        }}
-                        title="Filtrar apenas pedidos bloqueados aguardando pagamento/sinal"
-                      >
-                        Bloqueados
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Lista de Cards da Etapa */}
-                <div 
-                  className="no-scrollbar"
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '0.5rem', 
-                    overflowY: 'auto',
-                    flex: 1,
-                    minHeight: 0,
-                    paddingBottom: '0.25rem'
+                  style={{
+                    flex: isEmpty ? '0 0 140px' : '1 1 280px',
+                    minWidth: isEmpty ? '140px' : '260px',
+                    maxWidth: isEmpty ? '140px' : '450px',
+                    alignSelf: 'stretch',
+                    backgroundColor: isEmpty ? 'hsla(0, 0%, 50%, 0.02)' : 'var(--background)',
+                    border: isVirtual
+                      ? '2px dashed var(--danger)'
+                      : isEmpty ? '1px dashed var(--border)' : '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.4rem 0.4rem 0.2rem 0.4rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.35rem',
+                    height: '100%',
+                    maxHeight: '100%',
+                    boxSizing: 'border-box',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    overflow: 'hidden',
+                    position: 'relative'
                   }}
                 >
-                  {stageItems.length === 0 ? (
-                    <>
-                      {dragOverStageId === stage.id && draggedItemId && (
-                        <div className="kanban-drop-placeholder">
-                          Encaixar nesta etapa
-                        </div>
-                      )}
-                      <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', padding: '1.5rem 0', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
-                        Vazio
-                      </div>
-                    </>
-                  ) : (
-                    stageItems.map((item, idx) => {
-                      const parentOrder = item.order || {};
-                      const isReleased = !!parentOrder.first_payment_date;
-                      const overShort = item.over_short_quantity || 0;
-                      const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
-                      const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type, orderDetails?.freteInfo);
-                      const isBeingDragged = draggedItemId === item.id;
-                      const showPlaceholderBefore = dragOverStageId === stage.id && dragOverIndex === idx && !isBeingDragged;
-                      
-                      return (
-                        <React.Fragment key={item.id}>
-                          {showPlaceholderBefore && (
-                            <div className="kanban-drop-placeholder">
-                              Encaixar nesta etapa
-                            </div>
-                          )}
-                          <div 
-                            className={`kanban-card-base ${recentlyMovedItemId === item.id ? 'pulse-glow' : ''} ${isBeingDragged ? 'kanban-card-dragging' : ''}`}
-                            onPointerDown={(e) => handlePointerDown(e, item)}
-                            style={{ 
-                              touchAction: 'pan-y',
-                              userSelect: 'none',
-                              backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
-                              borderTop: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
-                              borderRight: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
-                              borderBottom: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
-                              borderLeft: `3px solid ${stage.color}`,
-                              borderRadius: 'var(--radius-sm)',
-                              padding: '0.5rem',
-                              cursor: 'pointer',
-                              boxShadow: isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '0.35rem'
-                            }}
-                            onClick={(e) => {
-                              // Abre detalhes apenas em clique direto (não durante ou após um drag)
-                              if (wasJustDragged.current) {
-                                wasJustDragged.current = false;
-                                return;
-                              }
-                              const target = e.target as HTMLElement;
-                              const isButton = target.closest('button');
-
-                              if (!isButton) handleOpenDetail(item);
-                            }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'translateY(-1px)';
-                            e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-md)' : '0 4px 6px rgba(239, 68, 68, 0.15)';
-                            if (!isReleased) {
-                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
-                            }
+                  {/* Header da Coluna */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', borderBottom: `2px solid ${stage.color}`, paddingBottom: '0.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', overflow: 'hidden' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: stage.color, flexShrink: 0 }} />
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '0.75rem',
+                            color: isVirtual ? 'var(--danger)' : 'var(--text)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            maxWidth: '180px'
                           }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = 'none';
-                            e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)';
-                            if (!isReleased) {
-                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
-                            }
+                          title={stage.name}
+                        >
+                          {stage.name}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <span className={`badge ${isVirtual ? 'badge-danger' : 'badge-secondary'}`} style={{ fontSize: '0.65rem', padding: '1px 5px', fontWeight: 600 }}>
+                          {stageItems.length}
+                        </span>
+                        {/* Sort toggle button */}
+                        {!isVirtual && (
+                          <button
+                            title={columnSortDirs[stage.id] === 'desc' ? 'Data de expedição: Decrescente (Clique para Crescente)' : 'Data de expedição: Crescente (Clique para Decrescente)'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setColumnSortDirs(prev => ({
+                                ...prev,
+                                [stage.id]: prev[stage.id] === 'desc' ? 'asc' : 'desc'
+                              }));
+                            }}
+                            style={{
+                              background: 'none', border: 'none', cursor: 'pointer',
+                              color: 'var(--text-muted)', padding: '1px 3px',
+                              display: 'flex', alignItems: 'center',
+                              borderRadius: '3px',
+                              transition: 'color 0.15s ease',
+                              fontSize: '0.65rem', lineHeight: 1
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                          >
+                            {columnSortDirs[stage.id] === 'desc' ? '↓' : '↑'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick filter chips para a coluna "Pedidos" */}
+                    {(isFirstColumn || stage.name === 'Pedidos') && (
+                      <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button
+                          onClick={() => setFilterPedidosRelease('')}
+                          style={{
+                            fontSize: '0.6rem',
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            border: filterPedidosRelease === '' ? '1px solid var(--primary)' : '1px solid var(--border)',
+                            backgroundColor: filterPedidosRelease === '' ? 'var(--surface)' : 'transparent',
+                            color: filterPedidosRelease === '' ? 'var(--primary)' : 'var(--text-muted)',
+                            cursor: 'pointer',
+                            fontWeight: filterPedidosRelease === '' ? 700 : 500,
+                            lineHeight: '1.2'
                           }}
                         >
-                          {/* PV e OP */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '2px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: 700, fontSize: '0.725rem', color: 'var(--text)' }}>
-                                {item.friendly_id || '---'}
-                              </span>
-                              {!isReleased && (
-                                <span title="Pedido Bloqueado (Aguardando Pagamento/Sinal)" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                                  <AlertTriangle size={11} color="var(--danger)" style={{ flexShrink: 0 }} />
-                                </span>
-                              )}
-                              {hasOverdueInstallments(item.order_id) && (
-                                <span 
-                                  className="blinking-dot" 
-                                  style={{
-                                    width: '8px',
-                                    height: '8px',
-                                    borderRadius: '50%',
-                                    backgroundColor: '#EF4444',
-                                    display: 'inline-block',
-                                    boxShadow: '0 0 8px #EF4444',
-                                    animation: 'blinkAnimation 1.2s infinite ease-in-out',
-                                    marginLeft: '2px',
-                                    marginRight: '2px',
-                                    flexShrink: 0
-                                  }}
-                                  title="Atenção: Parcela em atraso no Conta Azul!"
-                                />
-                              )}
-                              {parentOrder.conta_azul_status && (() => {
-                                const badgeStyle = getContaAzulStatusStyle(parentOrder.conta_azul_status);
-                                return (
-                                  <span style={{
-                                    fontSize: '0.55rem',
-                                    fontWeight: 700,
-                                    padding: '1px 4px',
-                                    borderRadius: '3px',
-                                    backgroundColor: badgeStyle.backgroundColor,
-                                    color: badgeStyle.color,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.01em',
-                                    display: 'inline-block',
-                                    lineHeight: '1'
-                                  }}>
-                                    {parentOrder.conta_azul_status}
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                            {parentOrder.op_number && (
-                              <span 
-                                style={{ 
-                                  fontSize: '0.625rem', 
-                                  color: 'var(--primary)', 
-                                  fontWeight: 600, 
-                                  backgroundColor: 'rgba(var(--primary-rgb), 0.1)', 
-                                  padding: '1px 4px', 
-                                  borderRadius: '3px',
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                {parentOrder.op_number}
-                              </span>
+                          Todos
+                        </button>
+                        <button
+                          onClick={() => setFilterPedidosRelease('liberados')}
+                          style={{
+                            fontSize: '0.6rem',
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            border: filterPedidosRelease === 'liberados' ? '1px solid #10b981' : '1px solid var(--border)',
+                            backgroundColor: filterPedidosRelease === 'liberados' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                            color: filterPedidosRelease === 'liberados' ? '#10b981' : 'var(--text-muted)',
+                            cursor: 'pointer',
+                            fontWeight: filterPedidosRelease === 'liberados' ? 700 : 500,
+                            lineHeight: '1.2'
+                          }}
+                          title="Filtrar apenas pedidos liberados para produção"
+                        >
+                          Liberados
+                        </button>
+                        <button
+                          onClick={() => setFilterPedidosRelease('bloqueados')}
+                          style={{
+                            fontSize: '0.6rem',
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            border: filterPedidosRelease === 'bloqueados' ? '1px solid #ef4444' : '1px solid var(--border)',
+                            backgroundColor: filterPedidosRelease === 'bloqueados' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                            color: filterPedidosRelease === 'bloqueados' ? '#ef4444' : 'var(--text-muted)',
+                            cursor: 'pointer',
+                            fontWeight: filterPedidosRelease === 'bloqueados' ? 700 : 500,
+                            lineHeight: '1.2'
+                          }}
+                          title="Filtrar apenas pedidos bloqueados aguardando pagamento/sinal"
+                        >
+                          Bloqueados
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Lista de Cards da Etapa */}
+                  <div
+                    className="no-scrollbar"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                      overflowY: 'auto',
+                      flex: 1,
+                      minHeight: 0,
+                      paddingBottom: '0.25rem'
+                    }}
+                  >
+                    {stageItems.length === 0 ? (
+                      <>
+                        {dragOverStageId === stage.id && draggedItemId && (
+                          <div className="kanban-drop-placeholder">
+                            Encaixar nesta etapa
+                          </div>
+                        )}
+                        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', padding: '1.5rem 0', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                          Vazio
+                        </div>
+                      </>
+                    ) : (
+                      stageItems.map((item, idx) => {
+                        const parentOrder = item.order || {};
+                        const isReleased = !!parentOrder.first_payment_date;
+                        const overShort = item.over_short_quantity || 0;
+                        const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+                        const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type, orderDetails?.freteInfo);
+                        const isBeingDragged = draggedItemId === item.id;
+                        const showPlaceholderBefore = dragOverStageId === stage.id && dragOverIndex === idx && !isBeingDragged;
+
+                        return (
+                          <React.Fragment key={item.id}>
+                            {showPlaceholderBefore && (
+                              <div className="kanban-drop-placeholder">
+                                Encaixar nesta etapa
+                              </div>
                             )}
-                          </div>
-
-                          {/* Arte & Cliente */}
-                          <div>
-                            <div style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem', lineHeight: '1.1', wordBreak: 'break-all' }}>
-                              {item.name || 'Arte'}
-                            </div>
-                            <div 
-                              style={{ 
-                                fontSize: '0.65rem', 
-                                color: 'var(--text-muted)', 
-                                marginTop: '1px',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                maxWidth: '120px'
-                              }} 
-                              title={parentOrder.customer?.name}
-                            >
-                              {parentOrder.customer?.name}
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '1px' }}>
-                            {/* Destaque de Faturamento */}
-                            {(() => {
-                              const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
-                              if (!isFaturado) return null;
-                              
-                              const text = orderDetails?.faturamento ? orderDetails.faturamento.toUpperCase() : 'PEDIDO FATURADO';
-                              return (
-                                <div style={{
-                                  backgroundColor: 'hsla(220, 90%, 50%, 0.1)',
-                                  border: '1px solid hsla(220, 90%, 50%, 0.35)',
-                                  color: 'hsl(220, 90%, 40%)',
-                                  borderRadius: 'var(--radius-sm)',
-                                  padding: '2px 6px',
-                                  fontSize: '0.65rem',
-                                  fontWeight: 800,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.2rem',
-                                  width: 'fit-content'
-                                }}>
-                                  <CheckCircle2 size={10} strokeWidth={2.5} />
-                                  {text}
-                                </div>
-                              );
-                            })()}
-                          </div>
-
-                          {/* Exibição Calculada da Data de Expedição com Botões Inline DU / DC */}
-                          {(() => {
-                            const orderId = parentOrder.id || item.order_id;
-                            const config = orderDeadlineConfigMap.get(orderId);
-                            const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
-                            const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
-
-                            const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
-                            if (!expRes.expeditionDate) return null;
-                            const isOverdue = isCardOverdue(item, stages, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
-                            const isAdminUser = user?.role === 'Administrador';
-
-                            return (
-                              <div style={{ 
-                                fontSize: '0.66rem', 
-                                marginTop: '3px', 
-                                marginBottom: '2px',
-                                display: 'flex', 
+                            <div
+                              className={`kanban-card-base ${recentlyMovedItemId === item.id ? 'pulse-glow' : ''} ${isBeingDragged ? 'kanban-card-dragging' : ''}`}
+                              onPointerDown={(e) => handlePointerDown(e, item)}
+                              style={{
+                                touchAction: 'pan-y',
+                                userSelect: 'none',
+                                backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
+                                borderTop: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                                borderRight: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                                borderBottom: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                                borderLeft: `3px solid ${stage.color}`,
+                                borderRadius: 'var(--radius-sm)',
+                                padding: '0.5rem',
+                                cursor: 'pointer',
+                                boxShadow: isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)',
+                                display: 'flex',
                                 flexDirection: 'column',
-                                gap: '2px'
-                              }}>
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  flexWrap: 'wrap',
-                                  gap: '0.25rem',
-                                  color: isOverdue ? 'var(--danger)' : 'var(--text-muted)',
-                                  fontWeight: isOverdue ? 700 : 400
-                                }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                                    <span>Data de expedição: <strong style={{ color: isOverdue ? 'var(--danger)' : 'var(--text)', fontSize: '0.72rem' }}>{expRes.expeditionDate.toLocaleDateString('pt-BR')}</strong></span>
-
-                                    {/* Botões Inline DU (Dias Úteis) e DC (Dias Corridos) */}
-                                    {isAdminUser ? (
-                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const updatedMap = new Map(orderDeadlineConfigMap);
-                                            const current = updatedMap.get(orderId) || { isBusinessDays: true, chosenDays: expRes.scopeDays };
-                                            updatedMap.set(orderId, { ...current, isBusinessDays: true });
-                                            setOrderDeadlineConfigMap(updatedMap);
-                                            if (typeof window !== 'undefined') {
-                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
-                                            }
-                                          }}
-                                          style={{
-                                            fontSize: '0.58rem',
-                                            fontWeight: 800,
-                                            padding: '1px 4px',
-                                            borderRadius: '3px',
-                                            border: '1px solid var(--border)',
-                                            backgroundColor: effectiveIsBusiness ? 'var(--primary)' : 'var(--surface)',
-                                            color: effectiveIsBusiness ? '#ffffff' : 'var(--text-muted)',
-                                            cursor: 'pointer'
-                                          }}
-                                          title="Calcular por Dias Úteis (pula fins de semana)"
-                                        >
-                                          DU
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const updatedMap = new Map(orderDeadlineConfigMap);
-                                            const current = updatedMap.get(orderId) || { isBusinessDays: true, chosenDays: expRes.scopeDays };
-                                            updatedMap.set(orderId, { ...current, isBusinessDays: false });
-                                            setOrderDeadlineConfigMap(updatedMap);
-                                            if (typeof window !== 'undefined') {
-                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
-                                            }
-                                          }}
-                                          style={{
-                                            fontSize: '0.58rem',
-                                            fontWeight: 800,
-                                            padding: '1px 4px',
-                                            borderRadius: '3px',
-                                            border: '1px solid var(--border)',
-                                            backgroundColor: !effectiveIsBusiness ? 'var(--primary)' : 'var(--surface)',
-                                            color: !effectiveIsBusiness ? '#ffffff' : 'var(--text-muted)',
-                                            cursor: 'pointer'
-                                          }}
-                                          title="Calcular por Dias Corridos"
-                                        >
-                                          DC
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <span style={{ fontSize: '0.56rem', fontWeight: 800, padding: '1px 3px', borderRadius: '3px', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                                        {effectiveIsBusiness ? 'DU' : 'DC'}
-                                      </span>
-                                    )}
-
-                                    {/* Se houver Faixa de Escopo (ex: 30 a 35 dias), exibe botões inline [30d] [35d] */}
-                                    {expRes.hasRange && isAdminUser && (
-                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '2px' }}>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const updatedMap = new Map(orderDeadlineConfigMap);
-                                            const current = updatedMap.get(orderId) || { isBusinessDays: effectiveIsBusiness, chosenDays: expRes.scopeDays };
-                                            updatedMap.set(orderId, { ...current, chosenDays: expRes.minDays });
-                                            setOrderDeadlineConfigMap(updatedMap);
-                                            if (typeof window !== 'undefined') {
-                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
-                                            }
-                                          }}
-                                          style={{
-                                            fontSize: '0.58rem',
-                                            fontWeight: 800,
-                                            padding: '1px 4px',
-                                            borderRadius: '3px',
-                                            border: '1px solid var(--border)',
-                                            backgroundColor: expRes.scopeDays === expRes.minDays ? 'var(--primary)' : 'var(--surface)',
-                                            color: expRes.scopeDays === expRes.minDays ? '#ffffff' : 'var(--text-muted)',
-                                            cursor: 'pointer'
-                                          }}
-                                          title={`Considerar ${expRes.minDays} dias`}
-                                        >
-                                          {expRes.minDays}d
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const updatedMap = new Map(orderDeadlineConfigMap);
-                                            const current = updatedMap.get(orderId) || { isBusinessDays: effectiveIsBusiness, chosenDays: expRes.scopeDays };
-                                            updatedMap.set(orderId, { ...current, chosenDays: expRes.maxDays });
-                                            setOrderDeadlineConfigMap(updatedMap);
-                                            if (typeof window !== 'undefined') {
-                                              try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) {}
-                                            }
-                                          }}
-                                          style={{
-                                            fontSize: '0.58rem',
-                                            fontWeight: 800,
-                                            padding: '1px 4px',
-                                            borderRadius: '3px',
-                                            border: '1px solid var(--border)',
-                                            backgroundColor: expRes.scopeDays === expRes.maxDays ? 'var(--primary)' : 'var(--surface)',
-                                            color: expRes.scopeDays === expRes.maxDays ? '#ffffff' : 'var(--text-muted)',
-                                            cursor: 'pointer'
-                                          }}
-                                          title={`Considerar ${expRes.maxDays} dias`}
-                                        >
-                                          {expRes.maxDays}d
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {isOverdue && <span style={{ fontSize: '0.58rem', color: 'var(--danger)', fontWeight: 800 }}>(Atrasado)</span>}
-                                  {parentOrder.conta_azul_status === 'Em andamento' && (
-                                    <span style={{ fontSize: '0.58rem', color: '#eab308', fontWeight: 700 }}>(Orçamento)</span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()}
-
-                          {/* Informações Extras (Clichê, Pagamento) */}
-                          {(orderDetails?.cliche || orderDetails?.meioPag || orderDetails?.formaPag) && (
-                            <div style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '1px',
-                              fontSize: '0.62rem',
-                              color: 'var(--text-muted)',
-                              marginTop: '2px',
-                              marginBottom: '2px'
-                            }}>
-                              {orderDetails.cliche && (
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>Clichê:</span>
-                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={orderDetails.cliche}>{capitalizeText(orderDetails.cliche)}</span>
-                                </div>
-                              )}
-                              {orderDetails.meioPag && (
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>Pgto:</span>
-                                  <span>{capitalizeText(orderDetails.meioPag)}{orderDetails.formaPag ? ` - ${capitalizeText(orderDetails.formaPag)}` : ''}</span>
-                                </div>
-                              )}
-                              {!orderDetails.meioPag && orderDetails.formaPag && (
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>Pgto:</span>
-                                  <span>{capitalizeText(orderDetails.formaPag)}</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Produto e Tiragem */}
-                          <div style={{ fontSize: '0.65rem', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', padding: '0.2rem 0', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2px', alignItems: 'center' }}>
-                              {item.adjusted_production_quantity !== undefined && item.adjusted_production_quantity !== null ? (
-                                <span style={{ fontWeight: 700, color: item.adjusted_quantity_math?.includes('(Falta)') ? 'hsl(346.8, 77.2%, 49.8%)' : 'hsl(142.1, 76.2%, 36.3%)' }}>
-                                  {item.adjusted_production_quantity?.toLocaleString('pt-BR')} un (Líquido)
-                                </span>
-                              ) : (
-                                <span>{item.print_run?.toLocaleString('pt-BR')} un</span>
-                              )}
-                              <span style={{ fontWeight: 600 }}>
-                                {(() => {
-                                  const d = extractOrderDetails(item.notes || parentOrder.notes);
-                                  if (d?.embalagem) return capitalizeText(d.embalagem);
-                                  return item.boxes_count ? `${item.boxes_count}${item.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null;
-                                })()}
-                              </span>
-                            </div>
-                            
-                            {item.adjusted_quantity_math && (
-                              <div style={{ 
-                                fontSize: '0.58rem', 
-                                color: 'var(--text-muted)', 
-                                backgroundColor: 'var(--background)',
-                                padding: '1px 4px',
-                                borderRadius: '3px',
-                                border: '1px solid var(--border)',
-                                marginTop: '1px',
-                                fontFamily: 'monospace',
-                                display: 'inline-block',
-                                width: 'fit-content'
-                              }} title="Matemática do Saldo Acumulado Aplicado">
-                                {item.adjusted_quantity_math}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Setor, Tipo e Localização */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem', gap: '2px' }}>
-
-                            <span 
-                              style={{ 
-                                color: 'var(--text-muted)',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                maxWidth: '55px'
-                              }} 
-                              title={item.physical_location || 'Salão'}
-                            >
-                              {item.physical_location || 'Salão'}
-                            </span>
-                          </div>
-
-                          {/* Destaque / Badge do Tipo de Frete e Liberação */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1px', flexWrap: 'wrap', gap: '2px' }}>
-                            <span 
-                              style={{ 
-                                fontSize: '0.6rem', 
-                                padding: '1px 4px', 
-                                borderRadius: '3px',
-                                backgroundColor: freightStyle.backgroundColor,
-                                color: freightStyle.color,
-                                fontWeight: 600
+                                gap: '0.35rem'
                               }}
-                            >
-                              {freightStyle.label}
-                            </span>
-
-                            {isReleased ? (
-                              <span className="badge badge-success" style={{ display: 'inline-flex', gap: '0.15rem', fontSize: '0.6rem', padding: '1px 4px' }}>
-                                <CheckCircle2 size={8} />
-                                Lib.
-                              </span>
-                            ) : (
-                              <span className="badge badge-danger" style={{ display: 'inline-flex', gap: '0.15rem', fontSize: '0.6rem', padding: '1px 4px' }}>
-                                <AlertCircle size={8} />
-                                Bloq.
-                              </span>
-                            )}
-
-                            {adjustments.some(adj => adj.order_item_id === item.id) && (
-                              <span 
-                                className="badge" 
-                                style={{ 
-                                  display: 'inline-flex', 
-                                  alignItems: 'center',
-                                  gap: '0.15rem', 
-                                  fontSize: '0.6rem', 
-                                  padding: '1px 4px', 
-                                  backgroundColor: 'hsla(168, 83.8%, 38.6%, 0.15)', 
-                                  color: 'hsl(168, 83.8%, 38.6%)', 
-                                  fontWeight: 600 
-                                }}
-                                title={`Conferência realizada: ${
-                                  (adjustments.find(adj => adj.order_item_id === item.id)?.difference_quantity || 0) > 0 ? 'Sobra' : 'Falta'
-                                } de ${Math.abs(adjustments.find(adj => adj.order_item_id === item.id)?.difference_quantity || 0)} unidades.`}
-                              >
-                                <Scale size={8} />
-                                Conf.
-                              </span>
-                            )}
-
-                            {parentOrder.conta_azul_status === 'Em andamento' ? (
-                              <span 
-                                className="badge" 
-                                style={{ 
-                                  display: 'inline-flex', 
-                                  alignItems: 'center',
-                                  gap: '0.15rem', 
-                                  fontSize: '0.6rem', 
-                                  padding: '1px 4.5px',
-                                  backgroundColor: 'rgba(234, 179, 8, 0.1)',
-                                  color: '#eab308',
-                                  border: '1px solid rgba(234, 179, 8, 0.3)',
-                                  fontWeight: 700,
-                                  borderRadius: '3px'
-                                }}
-                                title="Orçamento em andamento no Conta Azul!"
-                              >
-                                <Clock size={8} />
-                                Orçamento em andamento
-                              </span>
-                            ) : checkIsDelayed(item, stages) ? (
-                              <span 
-                                className="badge" 
-                                style={{ 
-                                  display: 'inline-flex', 
-                                  alignItems: 'center',
-                                  gap: '0.15rem', 
-                                  fontSize: '0.6rem', 
-                                  padding: '1px 4.5px',
-                                  backgroundColor: 'var(--danger)',
-                                  color: 'white',
-                                  fontWeight: 700,
-                                  borderRadius: '3px'
-                                }}
-                                title="Atrasado pelo cronômetro de produção!"
-                              >
-                                <AlertTriangle size={8} />
-                                ATRASADO
-                              </span>
-                            ) : null}
-                          </div>
-
-
-
-                          {/* Informações adicionais como Prazo e Vendedora + Botão Mover no Mobile */}
-                          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
-                            <span>Vend: {parentOrder.seller_name || 'Samppel'}</span>
-
-                            {/* Botão Mover de Etapa (Mobile) */}
-                            <button
-                              type="button"
                               onClick={(e) => {
-                                e.stopPropagation();
-                                if (canUserMoveItemStage(item)) {
-                                  setItemToMoveStage(item);
-                                  setIsMoveStageModalOpen(true);
+                                // Abre detalhes apenas em clique direto (não durante ou após um drag)
+                                if (wasJustDragged.current) {
+                                  wasJustDragged.current = false;
+                                  return;
+                                }
+                                const target = e.target as HTMLElement;
+                                const isButton = target.closest('button');
+
+                                if (!isButton) handleOpenDetail(item);
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                                e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-md)' : '0 4px 6px rgba(239, 68, 68, 0.15)';
+                                if (!isReleased) {
+                                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
                                 }
                               }}
-                              disabled={!canUserMoveItemStage(item)}
-                              className="btn btn-secondary mobile-only-flex"
-                              style={{
-                                fontSize: '0.62rem',
-                                padding: '1px 6px',
-                                height: '22px',
-                                alignItems: 'center',
-                                gap: '0.2rem',
-                                fontWeight: 600,
-                                opacity: canUserMoveItemStage(item) ? 1 : 0.45,
-                                cursor: canUserMoveItemStage(item) ? 'pointer' : 'not-allowed'
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = 'none';
+                                e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)';
+                                if (!isReleased) {
+                                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                                }
                               }}
-                              title={canUserMoveItemStage(item) ? 'Mover este pedido de etapa' : 'Sem permissão para mover de etapa'}
                             >
-                              <ArrowRightLeft size={10} />
-                              <span>Mover</span>
-                            </button>
-                          </div>
-
-                          {/* Exibição da Máquina Vinculada (Mostra no card apenas se tiver máquina vinculada) */}
-                          {(() => {
-                            const linkedMachine = productionMachines.find(m => m.id === item.machine_id) || item.machine;
-                            if (!linkedMachine) return null;
-                            return (
-                              <div style={{ 
-                                display: 'inline-flex', 
-                                alignItems: 'center', 
-                                gap: '0.25rem',
-                                fontSize: '0.6rem',
-                                fontWeight: 700,
-                                color: 'hsl(217, 91%, 38%)',
-                                backgroundColor: 'hsla(217, 91%, 60%, 0.1)',
-                                border: '1px solid hsla(217, 91%, 60%, 0.25)',
-                                padding: '1.5px 6px',
-                                borderRadius: '4px',
-                                marginTop: '3px',
-                                width: 'fit-content'
-                              }}>
-                                <Cpu size={9} />
-                                <span>Máquina: {linkedMachine.name}</span>
+                              {/* PV e OP */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '2px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: 700, fontSize: '0.725rem', color: 'var(--text)' }}>
+                                    {item.friendly_id || '---'}
+                                  </span>
+                                  {!isReleased && (
+                                    <span title="Pedido Bloqueado (Aguardando Pagamento/Sinal)" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                      <AlertTriangle size={11} color="var(--danger)" style={{ flexShrink: 0 }} />
+                                    </span>
+                                  )}
+                                  {hasOverdueInstallments(item.order_id) && (
+                                    <span
+                                      className="blinking-dot"
+                                      style={{
+                                        width: '8px',
+                                        height: '8px',
+                                        borderRadius: '50%',
+                                        backgroundColor: '#EF4444',
+                                        display: 'inline-block',
+                                        boxShadow: '0 0 8px #EF4444',
+                                        animation: 'blinkAnimation 1.2s infinite ease-in-out',
+                                        marginLeft: '2px',
+                                        marginRight: '2px',
+                                        flexShrink: 0
+                                      }}
+                                      title="Atenção: Parcela em atraso no Conta Azul!"
+                                    />
+                                  )}
+                                  {parentOrder.conta_azul_status && (() => {
+                                    const badgeStyle = getContaAzulStatusStyle(parentOrder.conta_azul_status);
+                                    return (
+                                      <span style={{
+                                        fontSize: '0.55rem',
+                                        fontWeight: 700,
+                                        padding: '1px 4px',
+                                        borderRadius: '3px',
+                                        backgroundColor: badgeStyle.backgroundColor,
+                                        color: badgeStyle.color,
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.01em',
+                                        display: 'inline-block',
+                                        lineHeight: '1'
+                                      }}>
+                                        {parentOrder.conta_azul_status}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+                                {parentOrder.op_number && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.625rem',
+                                      color: 'var(--primary)',
+                                      fontWeight: 600,
+                                      backgroundColor: 'rgba(var(--primary-rgb), 0.1)',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    {parentOrder.op_number}
+                                  </span>
+                                )}
                               </div>
-                            );
-                          })()}
 
-                          {/* Badge(s) de Equipe(s) de Manuseio com Suporte a Múltiplas Equipes, Códigos e Status Finalizado */}
-                          {(item.production_sector === 'Manuseio' || stage.name === 'Manuseio') && (() => {
-                            const rawAllocations = itemHandlingTeamsMap.get(item.id) || [];
-                            const totalPrintRun = Number(item.print_run || item.quantity || 0);
+                              {/* Arte & Cliente */}
+                              <div>
+                                <div style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.75rem', lineHeight: '1.1', wordBreak: 'break-all' }}>
+                                  {item.name || 'Arte'}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    color: 'var(--text-muted)',
+                                    marginTop: '1px',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    maxWidth: '120px'
+                                  }}
+                                  title={parentOrder.customer?.name}
+                                >
+                                  {parentOrder.customer?.name}
+                                </div>
+                              </div>
 
-                            // Fallback seguro se não houver alocações detalhadas mas houver equipe atribuída ao item
-                            let itemAllocations = rawAllocations;
-                            if (itemAllocations.length === 0 && item.handling_team_id) {
-                              itemAllocations = [{
-                                id: item.id + '-fallback',
-                                tenant_id: item.tenant_id,
-                                order_item_id: item.id,
-                                handling_team_id: item.handling_team_id,
-                                quantity: totalPrintRun,
-                                team: item.handling_team,
-                                is_completed: item.handling_status === 'CONFERIDO' || item.is_completed || false,
-                                handling_code: item.handling_code
-                              }];
-                            }
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '1px' }}>
+                                {/* Destaque de Faturamento */}
+                                {(() => {
+                                  const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
+                                  if (!isFaturado) return null;
 
-                            const totalAllocated = itemAllocations.reduce((sum, a) => sum + Number(a.quantity || 0), 0);
-                            const remainingQty = Math.max(0, totalPrintRun - totalAllocated);
-                            const isAllConferido = itemAllocations.length > 0 && totalAllocated >= totalPrintRun && itemAllocations.every(a => a.is_completed);
-                            const rawPv = item.friendly_id || item.order?.pv_number || (item.order_id ? item.order_id.slice(0, 6) : '262/1');
-                            const itemPv = rawPv.replace(/^PV-?/i, '');
-                            
-                            return (
-                              <div 
-                                style={{
+                                  const text = orderDetails?.faturamento ? orderDetails.faturamento.toUpperCase() : 'PEDIDO FATURADO';
+                                  return (
+                                    <div style={{
+                                      backgroundColor: 'hsla(220, 90%, 50%, 0.1)',
+                                      border: '1px solid hsla(220, 90%, 50%, 0.35)',
+                                      color: 'hsl(220, 90%, 40%)',
+                                      borderRadius: 'var(--radius-sm)',
+                                      padding: '2px 6px',
+                                      fontSize: '0.65rem',
+                                      fontWeight: 800,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.2rem',
+                                      width: 'fit-content'
+                                    }}>
+                                      <CheckCircle2 size={10} strokeWidth={2.5} />
+                                      {text}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+
+                              {/* Exibição Calculada da Data de Expedição com Botões Inline DU / DC */}
+                              {(() => {
+                                const orderId = parentOrder.id || item.order_id;
+                                const config = orderDeadlineConfigMap.get(orderId);
+                                const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
+                                const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
+
+                                const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
+                                if (!expRes.expeditionDate) return null;
+                                const isOverdue = isCardOverdue(item, stages, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
+                                const isAdminUser = user?.role === 'Administrador';
+
+                                return (
+                                  <div style={{
+                                    fontSize: '0.66rem',
+                                    marginTop: '3px',
+                                    marginBottom: '2px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px'
+                                  }}>
+                                    <div style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      flexWrap: 'wrap',
+                                      gap: '0.25rem',
+                                      color: isOverdue ? 'var(--danger)' : 'var(--text-muted)',
+                                      fontWeight: isOverdue ? 700 : 400
+                                    }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                        <span>Data de expedição: <strong style={{ color: isOverdue ? 'var(--danger)' : 'var(--text)', fontSize: '0.72rem' }}>{expRes.expeditionDate.toLocaleDateString('pt-BR')}</strong></span>
+
+                                        {/* Botões Inline DU (Dias Úteis) e DC (Dias Corridos) */}
+                                        {isAdminUser ? (
+                                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const updatedMap = new Map(orderDeadlineConfigMap);
+                                                const current = updatedMap.get(orderId) || { isBusinessDays: true, chosenDays: expRes.scopeDays };
+                                                updatedMap.set(orderId, { ...current, isBusinessDays: true });
+                                                setOrderDeadlineConfigMap(updatedMap);
+                                                if (typeof window !== 'undefined') {
+                                                  try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) { }
+                                                }
+                                              }}
+                                              style={{
+                                                fontSize: '0.58rem',
+                                                fontWeight: 800,
+                                                padding: '1px 4px',
+                                                borderRadius: '3px',
+                                                border: '1px solid var(--border)',
+                                                backgroundColor: effectiveIsBusiness ? 'var(--primary)' : 'var(--surface)',
+                                                color: effectiveIsBusiness ? '#ffffff' : 'var(--text-muted)',
+                                                cursor: 'pointer'
+                                              }}
+                                              title="Calcular por Dias Úteis (pula fins de semana)"
+                                            >
+                                              DU
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const updatedMap = new Map(orderDeadlineConfigMap);
+                                                const current = updatedMap.get(orderId) || { isBusinessDays: true, chosenDays: expRes.scopeDays };
+                                                updatedMap.set(orderId, { ...current, isBusinessDays: false });
+                                                setOrderDeadlineConfigMap(updatedMap);
+                                                if (typeof window !== 'undefined') {
+                                                  try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) { }
+                                                }
+                                              }}
+                                              style={{
+                                                fontSize: '0.58rem',
+                                                fontWeight: 800,
+                                                padding: '1px 4px',
+                                                borderRadius: '3px',
+                                                border: '1px solid var(--border)',
+                                                backgroundColor: !effectiveIsBusiness ? 'var(--primary)' : 'var(--surface)',
+                                                color: !effectiveIsBusiness ? '#ffffff' : 'var(--text-muted)',
+                                                cursor: 'pointer'
+                                              }}
+                                              title="Calcular por Dias Corridos"
+                                            >
+                                              DC
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <span style={{ fontSize: '0.56rem', fontWeight: 800, padding: '1px 3px', borderRadius: '3px', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                                            {effectiveIsBusiness ? 'DU' : 'DC'}
+                                          </span>
+                                        )}
+
+                                        {/* Se houver Faixa de Escopo (ex: 30 a 35 dias), exibe botões inline [30d] [35d] */}
+                                        {expRes.hasRange && isAdminUser && (
+                                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '2px' }}>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const updatedMap = new Map(orderDeadlineConfigMap);
+                                                const current = updatedMap.get(orderId) || { isBusinessDays: effectiveIsBusiness, chosenDays: expRes.scopeDays };
+                                                updatedMap.set(orderId, { ...current, chosenDays: expRes.minDays });
+                                                setOrderDeadlineConfigMap(updatedMap);
+                                                if (typeof window !== 'undefined') {
+                                                  try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) { }
+                                                }
+                                              }}
+                                              style={{
+                                                fontSize: '0.58rem',
+                                                fontWeight: 800,
+                                                padding: '1px 4px',
+                                                borderRadius: '3px',
+                                                border: '1px solid var(--border)',
+                                                backgroundColor: expRes.scopeDays === expRes.minDays ? 'var(--primary)' : 'var(--surface)',
+                                                color: expRes.scopeDays === expRes.minDays ? '#ffffff' : 'var(--text-muted)',
+                                                cursor: 'pointer'
+                                              }}
+                                              title={`Considerar ${expRes.minDays} dias`}
+                                            >
+                                              {expRes.minDays}d
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const updatedMap = new Map(orderDeadlineConfigMap);
+                                                const current = updatedMap.get(orderId) || { isBusinessDays: effectiveIsBusiness, chosenDays: expRes.scopeDays };
+                                                updatedMap.set(orderId, { ...current, chosenDays: expRes.maxDays });
+                                                setOrderDeadlineConfigMap(updatedMap);
+                                                if (typeof window !== 'undefined') {
+                                                  try { localStorage.setItem('samppel_order_deadline_configs', JSON.stringify(Object.fromEntries(updatedMap))); } catch (e) { }
+                                                }
+                                              }}
+                                              style={{
+                                                fontSize: '0.58rem',
+                                                fontWeight: 800,
+                                                padding: '1px 4px',
+                                                borderRadius: '3px',
+                                                border: '1px solid var(--border)',
+                                                backgroundColor: expRes.scopeDays === expRes.maxDays ? 'var(--primary)' : 'var(--surface)',
+                                                color: expRes.scopeDays === expRes.maxDays ? '#ffffff' : 'var(--text-muted)',
+                                                cursor: 'pointer'
+                                              }}
+                                              title={`Considerar ${expRes.maxDays} dias`}
+                                            >
+                                              {expRes.maxDays}d
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {isOverdue && <span style={{ fontSize: '0.58rem', color: 'var(--danger)', fontWeight: 800 }}>(Atrasado)</span>}
+                                      {parentOrder.conta_azul_status === 'Em andamento' && (
+                                        <span style={{ fontSize: '0.58rem', color: '#eab308', fontWeight: 700 }}>(Orçamento)</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Informações Extras (Clichê, Pagamento) */}
+                              {(orderDetails?.cliche || orderDetails?.meioPag || orderDetails?.formaPag) && (
+                                <div style={{
                                   display: 'flex',
                                   flexDirection: 'column',
-                                  gap: '0.2rem',
-                                  marginTop: '3px'
-                                }}
-                              >
-                                {itemAllocations.length > 0 ? (
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem' }}>
-                                    {itemAllocations.map((alloc, idx) => {
-                                      const teamName = alloc.team?.name || handlingTeams.find(t => t.id === alloc.handling_team_id)?.name || 'Equipe';
-                                      const hCode = (alloc.handling_code || `MS${itemPv}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS');
-                                      return (
-                                        <div
-                                          key={alloc.id || idx}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleOpenHandlingTeamModalForItem(item, item.stage_id, alloc.id);
-                                          }}
-                                          style={{
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            gap: "0.2rem",
-                                            padding: "1px 5px",
-                                            borderRadius: "4px",
-                                            backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(271, 91.2%, 65.1%, 0.12)",
-                                            border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(271, 91.2%, 65.1%, 0.3)"}`,
-                                            fontSize: "0.6rem",
-                                            fontWeight: 700,
-                                            color: alloc.is_completed ? "hsl(142, 71%, 35%)" : "hsl(271, 91.2%, 55%)",
-                                            cursor: "pointer"
-                                          }}
-                                          title={`Clique para editar a equipe ${teamName} (${hCode})`}
-                                        >
-                                          <Users size={9} />
-                                          <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
-                                          <span style={{ fontSize: '0.55rem', opacity: 0.85, fontWeight: 600 }}>• {hCode}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                ) : (
-                                  <div style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    padding: '2px 5px',
-                                    borderRadius: '4px',
-                                    background: item.handling_team_id
-                                      ? 'hsla(271, 91.2%, 65.1%, 0.12)'
-                                      : 'hsla(0, 84.2%, 60.2%, 0.08)',
-                                    border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`
-                                  }}>
-                                    <span style={{ 
-                                      fontSize: '0.6rem', 
-                                      fontWeight: 700,
-                                      color: item.handling_team_id ? 'hsl(271, 91.2%, 55%)' : 'hsl(0, 84.2%, 50%)'
-                                    }}>
-                                      {item.handling_team_id
-                                        ? `${handlingTeams.find(t => t.id === item.handling_team_id)?.name || 'Equipe'} (${totalPrintRun.toLocaleString('pt-BR')} un)`
-                                        : 'Sem equipe vinculada (Clique para definir)'
-                                      }
-                                    </span>
-                                  </div>
-                                )}
+                                  gap: '1px',
+                                  fontSize: '0.62rem',
+                                  color: 'var(--text-muted)',
+                                  marginTop: '2px',
+                                  marginBottom: '2px'
+                                }}>
+                                  {orderDetails.cliche && (
+                                    <div style={{ display: 'flex', gap: '4px' }}>
+                                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>Clichê:</span>
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={orderDetails.cliche}>{capitalizeText(orderDetails.cliche)}</span>
+                                    </div>
+                                  )}
+                                  {orderDetails.meioPag && (
+                                    <div style={{ display: 'flex', gap: '4px' }}>
+                                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>Pgto:</span>
+                                      <span>{capitalizeText(orderDetails.meioPag)}{orderDetails.formaPag ? ` - ${capitalizeText(orderDetails.formaPag)}` : ''}</span>
+                                    </div>
+                                  )}
+                                  {!orderDetails.meioPag && orderDetails.formaPag && (
+                                    <div style={{ display: 'flex', gap: '4px' }}>
+                                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>Pgto:</span>
+                                      <span>{capitalizeText(orderDetails.formaPag)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
 
-                                {/* Badge de Status: "Manuseio concluído" se finalizado (100% alocado e conferido) ou "Faltam xxx" se pendente */}
-                                {isAllConferido ? (
-                                  <div style={{
-                                    fontSize: '0.6rem',
-                                    fontWeight: 800,
-                                    padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    backgroundColor: 'hsla(142, 71%, 45%, 0.15)',
-                                    color: 'hsl(142, 71%, 32%)',
-                                    border: '1px solid hsla(142, 71%, 45%, 0.35)',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    width: 'fit-content'
-                                  }}>
-                                    <CheckCircle2 size={10} />
-                                    <span>✓ Manuseio concluído</span>
-                                  </div>
-                                ) : remainingQty > 0 ? (
-                                  <div style={{
-                                    fontSize: '0.58rem',
-                                    fontWeight: 800,
-                                    padding: '1px 5px',
-                                    borderRadius: '3px',
-                                    backgroundColor: 'hsla(38, 92%, 50%, 0.15)',
-                                    color: 'hsl(38, 92%, 35%)',
-                                    border: '1px solid hsla(38, 92%, 50%, 0.4)',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.2rem',
-                                    width: 'fit-content'
-                                  }}>
-                                    <AlertTriangle size={9} />
-                                    <span>Faltam {remainingQty.toLocaleString('pt-BR')} un para manuseio</span>
-                                  </div>
-                                ) : (
+                              {/* Produto e Tiragem */}
+                              <div style={{ fontSize: '0.65rem', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', padding: '0.2rem 0', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '2px', alignItems: 'center' }}>
+                                  {item.adjusted_production_quantity !== undefined && item.adjusted_production_quantity !== null ? (
+                                    <span style={{ fontWeight: 700, color: item.adjusted_quantity_math?.includes('(Falta)') ? 'hsl(346.8, 77.2%, 49.8%)' : 'hsl(142.1, 76.2%, 36.3%)' }}>
+                                      {item.adjusted_production_quantity?.toLocaleString('pt-BR')} un (Líquido)
+                                    </span>
+                                  ) : (
+                                    <span>{item.print_run?.toLocaleString('pt-BR')} un</span>
+                                  )}
+                                  <span style={{ fontWeight: 600 }}>
+                                    {(() => {
+                                      const d = extractOrderDetails(item.notes || parentOrder.notes);
+                                      if (d?.embalagem) return capitalizeText(d.embalagem);
+                                      return item.boxes_count ? `${item.boxes_count}${item.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null;
+                                    })()}
+                                  </span>
+                                </div>
+
+                                {item.adjusted_quantity_math && (
                                   <div style={{
                                     fontSize: '0.58rem',
-                                    fontWeight: 800,
-                                    padding: '1px 5px',
+                                    color: 'var(--text-muted)',
+                                    backgroundColor: 'var(--background)',
+                                    padding: '1px 4px',
                                     borderRadius: '3px',
-                                    backgroundColor: 'hsla(45, 93%, 47%, 0.15)',
-                                    color: 'hsl(45, 93%, 35%)',
-                                    border: '1px solid hsla(45, 93%, 47%, 0.4)',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.2rem',
+                                    border: '1px solid var(--border)',
+                                    marginTop: '1px',
+                                    fontFamily: 'monospace',
+                                    display: 'inline-block',
                                     width: 'fit-content'
-                                  }}>
-                                    <Clock size={9} />
-                                    <span>Manuseio em andamento (Pendente conferência)</span>
+                                  }} title="Matemática do Saldo Acumulado Aplicado">
+                                    {item.adjusted_quantity_math}
                                   </div>
                                 )}
                               </div>
-                            );
-                          })()}
-                          {/* Badge de Embalagem — aparece somente em "Em revisão" */}
-                          {stage.name === 'Em revisão' && (
-                            <button
-                              onClick={() => handleOpenPackagingModal(item)}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.25rem',
-                                marginTop: '4px',
-                                padding: '3px 6px',
-                                borderRadius: '4px',
-                                border: `1px solid ${itemsWithPackaging.has(item.id) ? 'hsla(168, 83.8%, 38.6%, 0.4)' : 'hsla(38, 92.7%, 50.2%, 0.4)'}`,
-                                background: itemsWithPackaging.has(item.id)
-                                  ? 'hsla(168, 83.8%, 38.6%, 0.1)'
-                                  : 'hsla(38, 92.7%, 50.2%, 0.08)',
-                                cursor: 'pointer',
-                                width: '100%',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              <span style={{
-                                fontSize: '0.62rem',
-                                fontWeight: 700,
-                                color: itemsWithPackaging.has(item.id) ? 'hsl(168, 83.8%, 35%)' : 'hsl(38, 92.7%, 45%)'
-                              }}>
-                                {itemsWithPackaging.has(item.id) ? 'Embalagem Registrada' : 'Registrar Embalagem'}
-                              </span>
-                            </button>
-                          )}
 
-                          {(() => {
-                            const productionItems = orderItems.filter(i => i.order_id === item.order_id && !isItemBoundToFirstItem(i));
-                            const firstProductionItem = [...productionItems].sort((a, b) => (a.item_index || 0) - (b.item_index || 0))[0];
-                            const isFirstProductionItem = firstProductionItem && firstProductionItem.id === item.id;
-                            const boundItems = orderItems.filter(i => i.order_id === item.order_id && isItemBoundToFirstItem(i));
+                              {/* Setor, Tipo e Localização */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem', gap: '2px' }}>
 
-                            const siblingProductionItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && !isItemBoundToFirstItem(i));
+                                <span
+                                  style={{
+                                    color: 'var(--text-muted)',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    maxWidth: '55px'
+                                  }}
+                                  title={item.physical_location || 'Salão'}
+                                >
+                                  {item.physical_location || 'Salão'}
+                                </span>
+                              </div>
 
-                            const anySiblingInExpedition = siblingProductionItems.some(i => {
-                              const s = stages.find(st => st.id === i.stage_id);
-                              return s?.name === 'Expedição';
-                            });
+                              {/* Destaque / Badge do Tipo de Frete e Liberação */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1px', flexWrap: 'wrap', gap: '2px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.6rem',
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    backgroundColor: freightStyle.backgroundColor,
+                                    color: freightStyle.color,
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  {freightStyle.label}
+                                </span>
 
-                            return (
-                              <>
-                                {isFirstProductionItem && boundItems.length > 0 && (
-                                  <div style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '2px',
-                                    padding: '6px 8px',
-                                    borderRadius: 'var(--radius-sm, 4px)',
-                                    backgroundColor: 'hsla(168, 83.8%, 35%, 0.08)',
-                                    border: '1px solid hsla(168, 83.8%, 35%, 0.3)',
-                                    fontSize: '0.625rem',
-                                    marginTop: '4px',
-                                    boxSizing: 'border-box'
-                                  }}>
-                                    <div style={{ fontWeight: 700, color: 'hsl(168, 83.8%, 30%)', display: 'flex', alignItems: 'center', gap: '3px', marginBottom: '2px' }}>
-                                      <Truck size={10} />
-                                      <span>Itens Vinculados (Sem Produção)</span>
-                                    </div>
-                                    {boundItems.map((sib: any) => (
-                                      <div key={sib.id} style={{ fontSize: '0.58rem', color: 'var(--text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '120px' }} title={sib.name}>
-                                          {sib.name}
-                                        </span>
-                                        <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
-                                          {sib.print_run?.toLocaleString('pt-BR') || 0} un
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
+                                {isReleased ? (
+                                  <span className="badge badge-success" style={{ display: 'inline-flex', gap: '0.15rem', fontSize: '0.6rem', padding: '1px 4px' }}>
+                                    <CheckCircle2 size={8} />
+                                    Lib.
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-danger" style={{ display: 'inline-flex', gap: '0.15rem', fontSize: '0.6rem', padding: '1px 4px' }}>
+                                    <AlertCircle size={8} />
+                                    Bloq.
+                                  </span>
                                 )}
 
-                                {siblingProductionItems.length > 0 && (
-                                  <div style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '2px',
-                                    padding: '4px',
-                                    borderRadius: 'var(--radius-sm, 4px)',
-                                    backgroundColor: anySiblingInExpedition ? 'hsla(38, 92.7%, 50.2%, 0.08)' : 'var(--background)',
-                                    border: `1px solid ${anySiblingInExpedition ? 'hsl(38, 92.7%, 50.2%)' : 'var(--border)'}`,
-                                    fontSize: '0.625rem',
-                                    marginTop: '4px',
-                                    boxSizing: 'border-box'
-                                  }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 700, color: anySiblingInExpedition ? 'hsl(38, 92.7%, 45%)' : 'var(--text-muted)' }}>
-                                      <span>Pedido Conjunto ({siblingProductionItems.length + 1} itens)</span>
-                                    </div>
-                                    {siblingProductionItems.map((sib: any) => {
-                                      const sibStage = stages.find(s => s.id === sib.stage_id);
-                                      return (
-                                        <div key={sib.id} style={{ fontSize: '0.58rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                          <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '85px' }} title={sib.name}>
-                                            {sib.name}
-                                          </span>
-                                          <span style={{ fontWeight: 600, color: sibStage?.color || 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                                            {sibStage?.name || 'A produzir'}
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
+                                {adjustments.some(adj => adj.order_item_id === item.id) && (
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.15rem',
+                                      fontSize: '0.6rem',
+                                      padding: '1px 4px',
+                                      backgroundColor: 'hsla(168, 83.8%, 38.6%, 0.15)',
+                                      color: 'hsl(168, 83.8%, 38.6%)',
+                                      fontWeight: 600
+                                    }}
+                                    title={`Conferência realizada: ${(adjustments.find(adj => adj.order_item_id === item.id)?.difference_quantity || 0) > 0 ? 'Sobra' : 'Falta'
+                                      } de ${Math.abs(adjustments.find(adj => adj.order_item_id === item.id)?.difference_quantity || 0)} unidades.`}
+                                  >
+                                    <Scale size={8} />
+                                    Conf.
+                                  </span>
                                 )}
-                              </>
-                            );
-                          })()}
 
-                          {/* Ações (Setas de Navegação Manual + Editar) */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1px', paddingTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
-                            {(() => {
-                              const realStageIdx = item.stage_id ? stages.findIndex(s => s.id === item.stage_id) : 0;
-                              return (
-                                <div style={{ display: 'flex', gap: '1px' }}>
-                                  <button
-                                    disabled={realStageIdx <= 0}
-                                    onClick={() => moveOrderItemToStage(item, stages[realStageIdx - 1].id)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: '1px 3px', display: 'flex', alignItems: 'center' }}
-                                    title="Voltar"
+                                {parentOrder.conta_azul_status === 'Em andamento' ? (
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.15rem',
+                                      fontSize: '0.6rem',
+                                      padding: '1px 4.5px',
+                                      backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                                      color: '#eab308',
+                                      border: '1px solid rgba(234, 179, 8, 0.3)',
+                                      fontWeight: 700,
+                                      borderRadius: '3px'
+                                    }}
+                                    title="Orçamento em andamento no Conta Azul!"
                                   >
-                                    <ChevronLeft size={10} />
-                                  </button>
-                                  <button
-                                    disabled={realStageIdx === -1 || realStageIdx === stages.length - 1}
-                                    onClick={() => moveOrderItemToStage(item, stages[realStageIdx + 1].id)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: '1px 3px', display: 'flex', alignItems: 'center' }}
-                                    title="Avançar"
+                                    <Clock size={8} />
+                                    Orçamento em andamento
+                                  </span>
+                                ) : checkIsDelayed(item, stages) ? (
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.15rem',
+                                      fontSize: '0.6rem',
+                                      padding: '1px 4.5px',
+                                      backgroundColor: 'var(--danger)',
+                                      color: 'white',
+                                      fontWeight: 700,
+                                      borderRadius: '3px'
+                                    }}
+                                    title="Atrasado pelo cronômetro de produção!"
                                   >
-                                    <ChevronRight size={10} />
-                                  </button>
-                                </div>
-                              );
-                            })()}
+                                    <AlertTriangle size={8} />
+                                    ATRASADO
+                                  </span>
+                                ) : null}
+                              </div>
 
-                            <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-                              {isAdmin && isManualOrder(parentOrder) && (
+
+
+                              {/* Informações adicionais como Prazo e Vendedora + Botão Mover no Mobile */}
+                              <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                                <span>Vend: {parentOrder.seller_name || 'Samppel'}</span>
+
+                                {/* Botão Mover de Etapa (Mobile) */}
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleRequestDeleteManualOrder(parentOrder, item);
+                                    if (canUserMoveItemStage(item)) {
+                                      setItemToMoveStage(item);
+                                      setIsMoveStageModalOpen(true);
+                                    }
                                   }}
-                                  className="btn btn-danger"
-                                  style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
-                                  title="Excluir este pedido manual (Apenas Administrador)"
+                                  disabled={!canUserMoveItemStage(item)}
+                                  className="btn btn-secondary mobile-only-flex"
+                                  style={{
+                                    fontSize: '0.62rem',
+                                    padding: '1px 6px',
+                                    height: '22px',
+                                    alignItems: 'center',
+                                    gap: '0.2rem',
+                                    fontWeight: 600,
+                                    opacity: canUserMoveItemStage(item) ? 1 : 0.45,
+                                    cursor: canUserMoveItemStage(item) ? 'pointer' : 'not-allowed'
+                                  }}
+                                  title={canUserMoveItemStage(item) ? 'Mover este pedido de etapa' : 'Sem permissão para mover de etapa'}
                                 >
-                                  <Trash2 size={10} />
+                                  <ArrowRightLeft size={10} />
+                                  <span>Mover</span>
+                                </button>
+                              </div>
+
+                              {/* Exibição da Máquina Vinculada (Mostra no card apenas se tiver máquina vinculada) */}
+                              {(() => {
+                                const linkedMachine = productionMachines.find(m => m.id === item.machine_id) || item.machine;
+                                if (!linkedMachine) return null;
+                                return (
+                                  <div style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    fontSize: '0.6rem',
+                                    fontWeight: 700,
+                                    color: 'hsl(217, 91%, 38%)',
+                                    backgroundColor: 'hsla(217, 91%, 60%, 0.1)',
+                                    border: '1px solid hsla(217, 91%, 60%, 0.25)',
+                                    padding: '1.5px 6px',
+                                    borderRadius: '4px',
+                                    marginTop: '3px',
+                                    width: 'fit-content'
+                                  }}>
+                                    <Cpu size={9} />
+                                    <span>Máquina: {linkedMachine.name}</span>
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Badge(s) de Equipe(s) de Manuseio com Suporte a Múltiplas Equipes, Códigos e Status Finalizado */}
+                              {(item.production_sector === 'Manuseio' || stage.name === 'Manuseio') && (() => {
+                                const rawAllocations = itemHandlingTeamsMap.get(item.id) || [];
+                                const totalPrintRun = Number(item.print_run || item.quantity || 0);
+
+                                // Fallback seguro se não houver alocações detalhadas mas houver equipe atribuída ao item
+                                let itemAllocations = rawAllocations;
+                                if (itemAllocations.length === 0 && item.handling_team_id) {
+                                  itemAllocations = [{
+                                    id: item.id + '-fallback',
+                                    tenant_id: item.tenant_id,
+                                    order_item_id: item.id,
+                                    handling_team_id: item.handling_team_id,
+                                    quantity: totalPrintRun,
+                                    team: item.handling_team,
+                                    is_completed: item.handling_status === 'CONFERIDO' || item.is_completed || false,
+                                    handling_code: item.handling_code
+                                  }];
+                                }
+
+                                const totalAllocated = itemAllocations.reduce((sum, a) => sum + Number(a.quantity || 0), 0);
+                                const remainingQty = Math.max(0, totalPrintRun - totalAllocated);
+                                const isAllConferido = itemAllocations.length > 0 && totalAllocated >= totalPrintRun && itemAllocations.every(a => a.is_completed);
+                                const rawPv = item.friendly_id || item.order?.pv_number || (item.order_id ? item.order_id.slice(0, 6) : '262/1');
+                                const itemPv = rawPv.replace(/^PV-?/i, '');
+
+                                return (
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '0.2rem',
+                                      marginTop: '3px'
+                                    }}
+                                  >
+                                    {itemAllocations.length > 0 ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem' }}>
+                                        {itemAllocations.map((alloc, idx) => {
+                                          const teamName = alloc.team?.name || handlingTeams.find(t => t.id === alloc.handling_team_id)?.name || 'Equipe';
+                                          const hCode = (alloc.handling_code || `MS${itemPv}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS');
+                                          return (
+                                            <div
+                                              key={alloc.id || idx}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenHandlingTeamModalForItem(item, item.stage_id, alloc.id);
+                                              }}
+                                              style={{
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                gap: "0.2rem",
+                                                padding: "1px 5px",
+                                                borderRadius: "4px",
+                                                backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(271, 91.2%, 65.1%, 0.12)",
+                                                border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(271, 91.2%, 65.1%, 0.3)"}`,
+                                                fontSize: "0.6rem",
+                                                fontWeight: 700,
+                                                color: alloc.is_completed ? "hsl(142, 71%, 35%)" : "hsl(271, 91.2%, 55%)",
+                                                cursor: "pointer"
+                                              }}
+                                              title={`Clique para editar a equipe ${teamName} (${hCode})`}
+                                            >
+                                              <Users size={9} />
+                                              <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
+                                              <span style={{ fontSize: '0.55rem', opacity: 0.85, fontWeight: 600 }}>• {hCode}</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        padding: '2px 5px',
+                                        borderRadius: '4px',
+                                        background: item.handling_team_id
+                                          ? 'hsla(271, 91.2%, 65.1%, 0.12)'
+                                          : 'hsla(0, 84.2%, 60.2%, 0.08)',
+                                        border: `1px solid ${item.handling_team_id ? 'hsla(271, 91.2%, 65.1%, 0.3)' : 'hsla(0, 84.2%, 60.2%, 0.2)'}`
+                                      }}>
+                                        <span style={{
+                                          fontSize: '0.6rem',
+                                          fontWeight: 700,
+                                          color: item.handling_team_id ? 'hsl(271, 91.2%, 55%)' : 'hsl(0, 84.2%, 50%)'
+                                        }}>
+                                          {item.handling_team_id
+                                            ? `${handlingTeams.find(t => t.id === item.handling_team_id)?.name || 'Equipe'} (${totalPrintRun.toLocaleString('pt-BR')} un)`
+                                            : 'Sem equipe vinculada (Clique para definir)'
+                                          }
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {/* Badge de Status: "Manuseio concluído" se finalizado (100% alocado e conferido) ou "Faltam xxx" se pendente */}
+                                    {isAllConferido ? (
+                                      <div style={{
+                                        fontSize: '0.6rem',
+                                        fontWeight: 800,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'hsla(142, 71%, 45%, 0.15)',
+                                        color: 'hsl(142, 71%, 32%)',
+                                        border: '1px solid hsla(142, 71%, 45%, 0.35)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        width: 'fit-content'
+                                      }}>
+                                        <CheckCircle2 size={10} />
+                                        <span>✓ Manuseio concluído</span>
+                                      </div>
+                                    ) : remainingQty > 0 ? (
+                                      <div style={{
+                                        fontSize: '0.58rem',
+                                        fontWeight: 800,
+                                        padding: '1px 5px',
+                                        borderRadius: '3px',
+                                        backgroundColor: 'hsla(38, 92%, 50%, 0.15)',
+                                        color: 'hsl(38, 92%, 35%)',
+                                        border: '1px solid hsla(38, 92%, 50%, 0.4)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.2rem',
+                                        width: 'fit-content'
+                                      }}>
+                                        <AlertTriangle size={9} />
+                                        <span>Faltam {remainingQty.toLocaleString('pt-BR')} un para manuseio</span>
+                                      </div>
+                                    ) : (
+                                      <div style={{
+                                        fontSize: '0.58rem',
+                                        fontWeight: 800,
+                                        padding: '1px 5px',
+                                        borderRadius: '3px',
+                                        backgroundColor: 'hsla(45, 93%, 47%, 0.15)',
+                                        color: 'hsl(45, 93%, 35%)',
+                                        border: '1px solid hsla(45, 93%, 47%, 0.4)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.2rem',
+                                        width: 'fit-content'
+                                      }}>
+                                        <Clock size={9} />
+                                        <span>Manuseio em andamento (Pendente conferência)</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                              {/* Badge de Embalagem — aparece somente em "Em revisão" */}
+                              {stage.name === 'Em revisão' && (
+                                <button
+                                  onClick={() => handleOpenPackagingModal(item)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    marginTop: '4px',
+                                    padding: '3px 6px',
+                                    borderRadius: '4px',
+                                    border: `1px solid ${itemsWithPackaging.has(item.id) ? 'hsla(168, 83.8%, 38.6%, 0.4)' : 'hsla(38, 92.7%, 50.2%, 0.4)'}`,
+                                    background: itemsWithPackaging.has(item.id)
+                                      ? 'hsla(168, 83.8%, 38.6%, 0.1)'
+                                      : 'hsla(38, 92.7%, 50.2%, 0.08)',
+                                    cursor: 'pointer',
+                                    width: '100%',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  <span style={{
+                                    fontSize: '0.62rem',
+                                    fontWeight: 700,
+                                    color: itemsWithPackaging.has(item.id) ? 'hsl(168, 83.8%, 35%)' : 'hsl(38, 92.7%, 45%)'
+                                  }}>
+                                    {itemsWithPackaging.has(item.id) ? 'Embalagem Registrada' : 'Registrar Embalagem'}
+                                  </span>
                                 </button>
                               )}
-                              <button 
-                                onClick={() => handleOpenEdit(item)} 
-                                className="btn btn-primary" 
-                                style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
-                              >
-                                {isReadOnlyForForm('customer') ? <Eye size={10} /> : <Edit3 size={10} />}
-                                <span>{isReadOnlyForForm('customer') ? 'Ver' : 'Edit'}</span>
-                              </button>
+
+                              {(() => {
+                                const productionItems = orderItems.filter(i => i.order_id === item.order_id && !isItemBoundToFirstItem(i));
+                                const firstProductionItem = [...productionItems].sort((a, b) => (a.item_index || 0) - (b.item_index || 0))[0];
+                                const isFirstProductionItem = firstProductionItem && firstProductionItem.id === item.id;
+                                const boundItems = orderItems.filter(i => i.order_id === item.order_id && isItemBoundToFirstItem(i));
+
+                                const siblingProductionItems = orderItems.filter(i => i.order_id === item.order_id && i.id !== item.id && !isItemBoundToFirstItem(i));
+
+                                const anySiblingInExpedition = siblingProductionItems.some(i => {
+                                  const s = stages.find(st => st.id === i.stage_id);
+                                  return s?.name === 'Expedição';
+                                });
+
+                                return (
+                                  <>
+                                    {isFirstProductionItem && boundItems.length > 0 && (
+                                      <div style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '2px',
+                                        padding: '6px 8px',
+                                        borderRadius: 'var(--radius-sm, 4px)',
+                                        backgroundColor: 'hsla(168, 83.8%, 35%, 0.08)',
+                                        border: '1px solid hsla(168, 83.8%, 35%, 0.3)',
+                                        fontSize: '0.625rem',
+                                        marginTop: '4px',
+                                        boxSizing: 'border-box'
+                                      }}>
+                                        <div style={{ fontWeight: 700, color: 'hsl(168, 83.8%, 30%)', display: 'flex', alignItems: 'center', gap: '3px', marginBottom: '2px' }}>
+                                          <Truck size={10} />
+                                          <span>Itens Vinculados (Sem Produção)</span>
+                                        </div>
+                                        {boundItems.map((sib: any) => (
+                                          <div key={sib.id} style={{ fontSize: '0.58rem', color: 'var(--text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '120px' }} title={sib.name}>
+                                              {sib.name}
+                                            </span>
+                                            <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
+                                              {sib.print_run?.toLocaleString('pt-BR') || 0} un
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {siblingProductionItems.length > 0 && (
+                                      <div style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '2px',
+                                        padding: '4px',
+                                        borderRadius: 'var(--radius-sm, 4px)',
+                                        backgroundColor: anySiblingInExpedition ? 'hsla(38, 92.7%, 50.2%, 0.08)' : 'var(--background)',
+                                        border: `1px solid ${anySiblingInExpedition ? 'hsl(38, 92.7%, 50.2%)' : 'var(--border)'}`,
+                                        fontSize: '0.625rem',
+                                        marginTop: '4px',
+                                        boxSizing: 'border-box'
+                                      }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 700, color: anySiblingInExpedition ? 'hsl(38, 92.7%, 45%)' : 'var(--text-muted)' }}>
+                                          <span>Pedido Conjunto ({siblingProductionItems.length + 1} itens)</span>
+                                        </div>
+                                        {siblingProductionItems.map((sib: any) => {
+                                          const sibStage = stages.find(s => s.id === sib.stage_id);
+                                          return (
+                                            <div key={sib.id} style={{ fontSize: '0.58rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                              <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '85px' }} title={sib.name}>
+                                                {sib.name}
+                                              </span>
+                                              <span style={{ fontWeight: 600, color: sibStage?.color || 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                                {sibStage?.name || 'A produzir'}
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+
+                              {/* Ações (Setas de Navegação Manual + Editar) */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1px', paddingTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
+                                {(() => {
+                                  const realStageIdx = item.stage_id ? stages.findIndex(s => s.id === item.stage_id) : 0;
+                                  return (
+                                    <div style={{ display: 'flex', gap: '1px' }}>
+                                      <button
+                                        disabled={realStageIdx <= 0}
+                                        onClick={() => moveOrderItemToStage(item, stages[realStageIdx - 1].id)}
+                                        className="btn btn-secondary"
+                                        style={{ padding: '1px 3px', display: 'flex', alignItems: 'center' }}
+                                        title="Voltar"
+                                      >
+                                        <ChevronLeft size={10} />
+                                      </button>
+                                      <button
+                                        disabled={realStageIdx === -1 || realStageIdx === stages.length - 1}
+                                        onClick={() => moveOrderItemToStage(item, stages[realStageIdx + 1].id)}
+                                        className="btn btn-secondary"
+                                        style={{ padding: '1px 3px', display: 'flex', alignItems: 'center' }}
+                                        title="Avançar"
+                                      >
+                                        <ChevronRight size={10} />
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
+
+                                <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+                                  {isAdmin && isManualOrder(parentOrder) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRequestDeleteManualOrder(parentOrder, item);
+                                      }}
+                                      className="btn btn-danger"
+                                      style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
+                                      title="Excluir este pedido manual (Apenas Administrador)"
+                                    >
+                                      <Trash2 size={10} />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleOpenEdit(item)}
+                                    className="btn btn-primary"
+                                    style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
+                                  >
+                                    {isReadOnlyForForm('customer') ? <Eye size={10} /> : <Edit3 size={10} />}
+                                    <span>{isReadOnlyForForm('customer') ? 'Ver' : 'Edit'}</span>
+                                  </button>
+                                </div>
+                              </div>
+
                             </div>
-                          </div>
+                          </React.Fragment>
+                        );
+                      })
+                    )}
+                  </div>
 
-                        </div>
-                      </React.Fragment>
-                    );
-                  })
-                )}
+                  {/* Rodapé da Coluna (Fixado na base da coluna, fora da rolagem de cards) */}
+                  <div style={{
+                    borderTop: '1px solid var(--border)',
+                    paddingTop: '0.35rem',
+                    paddingBottom: '0.2rem',
+                    paddingLeft: '0.35rem',
+                    paddingRight: '0.35rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '0.65rem',
+                    color: 'var(--text-muted)',
+                    backgroundColor: 'var(--surface-subtle)',
+                    borderRadius: '0 0 var(--radius-md) var(--radius-md)',
+                    flexShrink: 0,
+                    marginTop: 'auto'
+                  }}>
+                    <span style={{ fontWeight: 600 }}>
+                      {stageItems.length} {stageItems.length === 1 ? 'item' : 'itens'}
+                    </span>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: stage.color }} />
+                  </div>
                 </div>
 
-                {/* Rodapé da Coluna (Fixado na base da coluna, fora da rolagem de cards) */}
-                <div style={{
-                  borderTop: '1px solid var(--border)',
-                  paddingTop: '0.35rem',
-                  paddingBottom: '0.2rem',
-                  paddingLeft: '0.35rem',
-                  paddingRight: '0.35rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: '0.65rem',
-                  color: 'var(--text-muted)',
-                  backgroundColor: 'var(--surface-subtle)',
-                  borderRadius: '0 0 var(--radius-md) var(--radius-md)',
-                  flexShrink: 0,
-                  marginTop: 'auto'
-                }}>
-                  <span style={{ fontWeight: 600 }}>
-                    {stageItems.length} {stageItems.length === 1 ? 'item' : 'itens'}
-                  </span>
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: stage.color }} />
-                </div>
-              </div>
-
-            );
-          })
+              );
+            })
           })()}
         </div>
       ) : (
-        
+
         /* 2. VISUALIZAÇÃO EM LISTA (TABELA) */
         <div className="card">
           <div className="table-responsive">
@@ -5955,7 +5954,7 @@ export default function PedidosPage() {
                   filteredOrders.map((order) => {
                     const isReleased = !!order.first_payment_date;
                     const overShort = order.over_short_quantity || 0;
-                    
+
                     return (
                       <tr key={order.id} style={{ backgroundColor: isReleased ? undefined : 'var(--danger-bg)' }}>
                         <td style={{ verticalAlign: 'top' }}>
@@ -6008,10 +6007,10 @@ export default function PedidosPage() {
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 500 }}>{order.print_run?.toLocaleString('pt-BR')} un</div>
                           {overShort !== 0 && (
-                            <div style={{ 
-                              fontSize: '0.75rem', 
-                              fontWeight: 600, 
-                              color: overShort > 0 ? 'var(--success)' : 'var(--danger)' 
+                            <div style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              color: overShort > 0 ? 'var(--success)' : 'var(--danger)'
                             }}>
                               {overShort > 0 ? `+${overShort} (Cortesia)` : `${overShort} (Falta)`}
                             </div>
@@ -6058,8 +6057,8 @@ export default function PedidosPage() {
                           )}
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
-                          <span className="badge" style={{ 
-                            backgroundColor: (order.stage?.color || '#3b82f6') + '15', 
+                          <span className="badge" style={{
+                            backgroundColor: (order.stage?.color || '#3b82f6') + '15',
                             color: order.stage?.color || '#3b82f6',
                             display: 'flex',
                             justifyContent: 'center'
@@ -6074,9 +6073,9 @@ export default function PedidosPage() {
                           </div>
                         </td>
                         <td style={{ verticalAlign: 'middle' }}>
-                          <button 
-                            onClick={() => handleOpenEdit(order)} 
-                            className="btn btn-secondary" 
+                          <button
+                            onClick={() => handleOpenEdit(order)}
+                            className="btn btn-secondary"
                             style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
                           >
                             {isReadOnlyForForm('customer') ? (
@@ -6134,9 +6133,9 @@ export default function PedidosPage() {
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 Alerta: Crédito ou Estoque de Personalizados
               </h3>
-              <button 
-                onClick={() => { setIsSuggestionModalOpen(false); resetAllBypasses(); }} 
-                className="btn btn-secondary" 
+              <button
+                onClick={() => { setIsSuggestionModalOpen(false); resetAllBypasses(); }}
+                className="btn btn-secondary"
                 style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
               >
                 ✕
@@ -6145,7 +6144,7 @@ export default function PedidosPage() {
 
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               <p>O cliente <strong>{suggestionItem.order?.customer?.name}</strong> possui pendências ou estoques ativos na fábrica para o produto <strong>{suggestionItem.name}</strong>.</p>
-              
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
                 {suggestionCredit && (
                   <div style={{ padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-sm)', backgroundColor: 'hsla(346.8, 77.2%, 49.8%, 0.1)', border: '1px solid hsla(346.8, 77.2%, 49.8%, 0.2)', color: 'hsl(346.8, 77.2%, 49.8%)' }}>
@@ -6163,7 +6162,7 @@ export default function PedidosPage() {
             <form onSubmit={handleSuggestionSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="form-group">
                 <label className="form-label" style={{ fontWeight: 600 }}>Decisão do Usuário</label>
-                <select 
+                <select
                   className="form-select"
                   value={suggestionAction}
                   onChange={(e) => {
@@ -6191,12 +6190,12 @@ export default function PedidosPage() {
               {suggestionAction !== 'MANTER_INTEGRO' && (
                 <div className="form-group">
                   <label className="form-label" style={{ fontWeight: 600 }}>Quantidade a Consumir</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="1"
                     max={
-                      suggestionAction === 'CONSUMIR_CREDITO' 
-                        ? suggestionCredit?.remaining_quantity 
+                      suggestionAction === 'CONSUMIR_CREDITO'
+                        ? suggestionCredit?.remaining_quantity
                         : suggestionStock?.quantity
                     }
                     className="form-input"
@@ -6205,8 +6204,8 @@ export default function PedidosPage() {
                   />
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
                     Disponível: {
-                      suggestionAction === 'CONSUMIR_CREDITO' 
-                        ? suggestionCredit?.remaining_quantity?.toLocaleString('pt-BR') 
+                      suggestionAction === 'CONSUMIR_CREDITO'
+                        ? suggestionCredit?.remaining_quantity?.toLocaleString('pt-BR')
                         : suggestionStock?.quantity?.toLocaleString('pt-BR')
                     } unidades
                   </span>
@@ -6214,15 +6213,15 @@ export default function PedidosPage() {
               )}
 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button 
-                  type="button" 
-                  onClick={() => { setIsSuggestionModalOpen(false); resetAllBypasses(); }} 
+                <button
+                  type="button"
+                  onClick={() => { setIsSuggestionModalOpen(false); resetAllBypasses(); }}
                   className="btn btn-secondary"
                 >
                   Cancelar Movimentação
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="btn btn-primary"
                   disabled={loading}
                 >
@@ -6267,7 +6266,7 @@ export default function PedidosPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: expeditionSiblings.length > 0 ? '1fr 1fr' : '1fr', gap: '1.25rem', marginBottom: '1.25rem' }}>
-              
+
               {/* COLUNA 1: CHECKLIST DE AGRUPAMENTO DE ITENS NA MESMA CAIXA/FRETE */}
               {expeditionSiblings.length > 0 && (
                 <div style={{
@@ -6340,7 +6339,7 @@ export default function PedidosPage() {
                           border: `1px solid ${isChecked ? 'var(--border)' : 'transparent'}`
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <input 
+                            <input
                               type="checkbox"
                               checked={isChecked}
                               onChange={(e) => {
@@ -6386,7 +6385,7 @@ export default function PedidosPage() {
                   <h3 style={{ fontSize: '0.88rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Truck size={16} /> Dados Técnicos de Frete Consolidados
                   </h3>
-                  
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Tipo de Frete *</label>
@@ -6406,7 +6405,7 @@ export default function PedidosPage() {
 
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Volumes/Caixas *</label>
-                      <input 
+                      <input
                         type="number"
                         className="form-input"
                         min="1"
@@ -6476,7 +6475,7 @@ export default function PedidosPage() {
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', alignItems: 'center' }}>
                             <div className="form-group" style={{ margin: 0 }}>
                               <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Qtd Produzida Final *</label>
-                              <input 
+                              <input
                                 type="number"
                                 min="0"
                                 required
@@ -6765,7 +6764,7 @@ export default function PedidosPage() {
                 setLoading(false);
               }
             }} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.85rem' }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Número da Nota (NF-e) *</label>
@@ -6834,7 +6833,7 @@ export default function PedidosPage() {
                           border: `1px solid ${isChecked ? 'var(--border)' : 'transparent'}`
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <input 
+                            <input
                               type="checkbox"
                               checked={isChecked}
                               onChange={(e) => {
@@ -6990,7 +6989,7 @@ export default function PedidosPage() {
 
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label" style={{ fontWeight: 600 }}>Peso Total (kg) *</label>
-                <input 
+                <input
                   type="number"
                   step="0.01"
                   min="0.01"
@@ -7006,7 +7005,7 @@ export default function PedidosPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontWeight: 600 }}>Comprimento (cm) *</label>
-                  <input 
+                  <input
                     type="number"
                     step="1"
                     min="1"
@@ -7021,7 +7020,7 @@ export default function PedidosPage() {
 
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontWeight: 600 }}>Largura (cm) *</label>
-                  <input 
+                  <input
                     type="number"
                     step="1"
                     min="1"
@@ -7036,7 +7035,7 @@ export default function PedidosPage() {
 
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontWeight: 600 }}>Altura (cm) *</label>
-                  <input 
+                  <input
                     type="number"
                     step="1"
                     min="1"
@@ -7053,7 +7052,7 @@ export default function PedidosPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontWeight: 600 }}>Quantidade de Caixas *</label>
-                  <input 
+                  <input
                     type="number"
                     step="1"
                     min="1"
@@ -7068,7 +7067,7 @@ export default function PedidosPage() {
 
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontWeight: 600 }}>Qtd dentro da Caixa *</label>
-                  <input 
+                  <input
                     type="number"
                     step="1"
                     min="1"
@@ -7105,21 +7104,21 @@ export default function PedidosPage() {
                         const hasStarted = sibStage && sibStage.name !== 'Pedidos';
                         const isChecked = selectedFreightSiblings.includes(sib.id);
                         return (
-                          <label 
-                            key={sib.id} 
-                            style={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: '0.5rem', 
-                              fontSize: '0.8rem', 
-                              cursor: hasStarted ? 'pointer' : 'not-allowed', 
+                          <label
+                            key={sib.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              fontSize: '0.8rem',
+                              cursor: hasStarted ? 'pointer' : 'not-allowed',
                               color: hasStarted ? 'var(--text)' : 'var(--text-muted)',
                               opacity: hasStarted ? 1 : 0.6,
-                              userSelect: 'none' 
+                              userSelect: 'none'
                             }}
                             title={hasStarted ? '' : 'Este item ainda está na etapa inicial de Pedidos e sua produção não foi iniciada.'}
                           >
-                            <input 
+                            <input
                               type="checkbox"
                               checked={isChecked && hasStarted}
                               disabled={!hasStarted}
@@ -7160,7 +7159,7 @@ export default function PedidosPage() {
               >
                 Cancelar
               </button>
-              
+
               <button
                 type="button"
                 className="btn btn-primary"
@@ -7334,11 +7333,11 @@ export default function PedidosPage() {
                     <br />
                     Como o cliente já pagou por essas unidades no pedido anterior, nós devemos <strong>somar</strong> essa quantidade na tiragem do novo pedido atual dele para entregar a diferença devida.
                   </p>
-                  <div style={{ 
-                    marginTop: '0.75rem', 
-                    paddingTop: '0.75rem', 
-                    borderTop: '1px solid var(--border)', 
-                    fontWeight: 700, 
+                  <div style={{
+                    marginTop: '0.75rem',
+                    paddingTop: '0.75rem',
+                    borderTop: '1px solid var(--border)',
+                    fontWeight: 700,
                     fontSize: '0.9rem',
                     color: 'var(--danger)'
                   }}>
@@ -7359,11 +7358,11 @@ export default function PedidosPage() {
                     <br />
                     Como o cliente já recebeu fisicamente essas unidades anteriormente, nós podemos <strong>subtrair/abater</strong> essa quantidade da tiragem do novo pedido atual para evitar produzir itens duplicados.
                   </p>
-                  <div style={{ 
-                    marginTop: '0.75rem', 
-                    paddingTop: '0.75rem', 
-                    borderTop: '1px solid var(--border)', 
-                    fontWeight: 700, 
+                  <div style={{
+                    marginTop: '0.75rem',
+                    paddingTop: '0.75rem',
+                    borderTop: '1px solid var(--border)',
+                    fontWeight: 700,
                     fontSize: '0.9rem',
                     color: 'var(--success)'
                   }}>
@@ -7410,7 +7409,7 @@ export default function PedidosPage() {
               >
                 Voltar / Cancelar
               </button>
-              
+
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -7530,7 +7529,7 @@ export default function PedidosPage() {
 
             <div className="form-group" style={{ marginBottom: '1.25rem' }}>
               <label className="form-label" style={{ fontWeight: 600 }}>Quantos itens estão sendo enviados fisicamente no lote deste pedido? *</label>
-              <input 
+              <input
                 type="number"
                 className="form-input"
                 min="0"
@@ -7549,7 +7548,7 @@ export default function PedidosPage() {
               marginBottom: '1.5rem'
             }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer', userSelect: 'none' }}>
-                <input 
+                <input
                   type="checkbox"
                   checked={conferencyChecked}
                   onChange={(e) => setConferencyChecked(e.target.checked)}
@@ -7576,7 +7575,7 @@ export default function PedidosPage() {
               >
                 Voltar / Cancelar
               </button>
-              
+
               <button
                 type="button"
                 className="btn btn-primary"
@@ -7591,7 +7590,7 @@ export default function PedidosPage() {
                       status: 'UTILIZADO',
                       remaining_quantity: 0
                     });
-                    
+
                     if (creditError) {
                       console.error('Erro ao zerar saldo acumulado:', creditError.message);
                     }
@@ -7606,7 +7605,7 @@ export default function PedidosPage() {
                     conferencyBypass.current = true;
                     setIsConferencyModalOpen(false);
                     await moveOrderItemToStage(conferencyItem, conferencyTargetStageId);
-                    
+
                     setConferencyData(null);
                     setConferencyItem(null);
                     setConferencyChecked(false);
@@ -7676,7 +7675,7 @@ export default function PedidosPage() {
               </div>
 
               <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                
+
                 {/* Seletor de Itens Irmãos do Pedido (quando houver múltiplos) */}
                 {allSiblingItems.length > 1 && (
                   <div style={{
@@ -7888,32 +7887,32 @@ export default function PedidosPage() {
                         backgroundColor: totalAllocated === totalItemQty
                           ? 'hsla(142, 71%, 45%, 0.12)'
                           : totalAllocated < totalItemQty
-                          ? 'hsla(45, 93%, 47%, 0.15)'
-                          : 'hsla(0, 84%, 60%, 0.2)',
+                            ? 'hsla(45, 93%, 47%, 0.15)'
+                            : 'hsla(0, 84%, 60%, 0.2)',
                         color: totalAllocated === totalItemQty
                           ? 'hsl(142, 71%, 35%)'
                           : totalAllocated < totalItemQty
-                          ? 'hsl(45, 93%, 35%)'
-                          : 'hsl(0, 84%, 40%)',
+                            ? 'hsl(45, 93%, 35%)'
+                            : 'hsl(0, 84%, 40%)',
                         border: `1.5px solid ${totalAllocated === totalItemQty ? 'hsla(142, 71%, 45%, 0.3)' : totalAllocated < totalItemQty ? 'hsla(45, 93%, 47%, 0.3)' : 'hsla(0, 84%, 60%, 0.5)'}`
                       }}>
                         {totalAllocated === totalItemQty
                           ? `Total: ${totalAllocated.toLocaleString('pt-BR')} un (100% Distribuído)`
                           : totalAllocated < totalItemQty
-                          ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (Faltam ${(totalItemQty - totalAllocated).toLocaleString('pt-BR')})`
-                          : `⚠️ Excesso: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (+${(totalAllocated - totalItemQty).toLocaleString('pt-BR')} un a mais)`}
+                            ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (Faltam ${(totalItemQty - totalAllocated).toLocaleString('pt-BR')})`
+                            : `⚠️ Excesso: ${totalAllocated.toLocaleString('pt-BR')} / ${totalItemQty.toLocaleString('pt-BR')} un (+${(totalAllocated - totalItemQty).toLocaleString('pt-BR')} un a mais)`}
                       </span>
                     </div>
 
                     <button
                       type="button"
                       className="btn btn-primary"
-                      style={{ 
-                        padding: '0.45rem 0.85rem', 
-                        fontSize: '0.825rem', 
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        fontSize: '0.825rem',
                         fontWeight: 700,
-                        gap: '0.4rem', 
-                        display: 'inline-flex', 
+                        gap: '0.4rem',
+                        display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         backgroundColor: 'var(--primary)',
@@ -8134,7 +8133,7 @@ export default function PedidosPage() {
 
                       // 1. Salva no banco de dados e obtém dados salvos
                       const saveRes = await saveOrderItemHandlingTeams(handlingTeamModalItem.id, mergedPayload);
-                      
+
                       // 2. Atualiza estado local de alocações imediatamente priorizando a lista completa salva
                       const { data } = await getOrderItemHandlingTeams(handlingTeamModalItem.id);
                       const savedList = Array.isArray(saveRes.data) ? saveRes.data : [];
@@ -8195,7 +8194,7 @@ export default function PedidosPage() {
                 Pedido Conjunto / Múltiplos Itens
               </h2>
             </div>
-            
+
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '1.25rem' }}>
               O item <strong>{linkedItemsWarningData.item.friendly_id}</strong> faz parte do pedido <strong>{linkedItemsWarningData.item.order?.pv_number}</strong>, que contém mais de um item.
             </p>
@@ -8241,21 +8240,21 @@ export default function PedidosPage() {
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button 
-                type="button" 
-                onClick={handleConfirmExpeditionMoveAll} 
+              <button
+                type="button"
+                onClick={handleConfirmExpeditionMoveAll}
                 className="btn btn-primary"
                 style={{ fontSize: '0.85rem', width: '100%', padding: '0.6rem 1rem' }}
               >
                 Movimentar todos
               </button>
-              <button 
-                type="button" 
-                onClick={handleConfirmExpeditionMove} 
+              <button
+                type="button"
+                onClick={handleConfirmExpeditionMove}
                 className="btn btn-outline"
-                style={{ 
-                  fontSize: '0.85rem', 
-                  width: '100%', 
+                style={{
+                  fontSize: '0.85rem',
+                  width: '100%',
                   padding: '0.6rem 1rem',
                   border: '1px solid var(--border)',
                   color: 'var(--text)',
@@ -8264,12 +8263,12 @@ export default function PedidosPage() {
               >
                 Movimentar somente este
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => {
                   setIsLinkedItemsWarningOpen(false);
                   setLinkedItemsWarningData(null);
-                }} 
+                }}
                 className="btn btn-secondary"
                 style={{ fontSize: '0.85rem', width: '100%', padding: '0.6rem 1rem' }}
               >
@@ -8543,7 +8542,7 @@ export default function PedidosPage() {
 
               {/* Rodapé do modal */}
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                 <button type="button" className="btn btn-secondary" onClick={() => { setIsPackagingModalOpen(false); resetAllBypasses(); }}>
+                <button type="button" className="btn btn-secondary" onClick={() => { setIsPackagingModalOpen(false); resetAllBypasses(); }}>
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={savingPackaging}>
@@ -8587,9 +8586,9 @@ export default function PedidosPage() {
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)' }}>
                 Conferência de Sobras & Faltas
               </h3>
-              <button 
-                onClick={() => { setIsAdjustmentModalOpen(false); resetAllBypasses(); }} 
-                className="btn btn-secondary" 
+              <button
+                onClick={() => { setIsAdjustmentModalOpen(false); resetAllBypasses(); }}
+                className="btn btn-secondary"
                 style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
               >
                 ✕
@@ -8605,11 +8604,11 @@ export default function PedidosPage() {
             <form onSubmit={handleAdjustmentSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="form-group">
                 <label className="form-label" style={{ fontWeight: 600 }}>Quantidade Produzida Final *</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   min="0"
                   required
-                  className="form-input" 
+                  className="form-input"
                   value={producedQuantity}
                   onChange={(e) => {
                     const val = Number(e.target.value);
@@ -8626,9 +8625,9 @@ export default function PedidosPage() {
                 />
               </div>
 
-              <div style={{ 
-                padding: '0.75rem', 
-                borderRadius: 'var(--radius-sm)', 
+              <div style={{
+                padding: '0.75rem',
+                borderRadius: 'var(--radius-sm)',
                 backgroundColor: 'var(--background)',
                 border: '1px solid var(--border)',
                 fontSize: '0.8rem'
@@ -8650,7 +8649,7 @@ export default function PedidosPage() {
               {producedQuantity - (adjustmentItem.print_run || 0) !== 0 && (
                 <div className="form-group">
                   <label className="form-label" style={{ fontWeight: 600 }}>Tratamento do Saldo</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={adjustmentAction}
                     onChange={(e) => setAdjustmentAction(e.target.value)}
@@ -8676,8 +8675,8 @@ export default function PedidosPage() {
 
               <div className="form-group">
                 <label className="form-label">Observações e Histórico Livre</label>
-                <textarea 
-                  className="form-input" 
+                <textarea
+                  className="form-input"
                   rows={3}
                   placeholder="Descreva detalhes do saldo..."
                   value={adjustmentNotes}
@@ -8686,15 +8685,15 @@ export default function PedidosPage() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                 <button 
-                  type="button" 
-                  onClick={() => { setIsAdjustmentModalOpen(false); resetAllBypasses(); }} 
+                <button
+                  type="button"
+                  onClick={() => { setIsAdjustmentModalOpen(false); resetAllBypasses(); }}
                   className="btn btn-secondary"
                 >
                   Cancelar
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="btn btn-primary"
                   disabled={loading}
                 >
@@ -8744,21 +8743,21 @@ export default function PedidosPage() {
               backgroundColor: 'var(--surface)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                <Image 
-                  src="/logo.png" 
-                  alt="Samppel Logo" 
-                  width={210} 
-                  height={55} 
+                <Image
+                  src="/logo.png"
+                  alt="Samppel Logo"
+                  width={210}
+                  height={55}
                   style={{ objectFit: 'contain', height: '52px', width: 'auto', maxHeight: '52px', flexShrink: 0 }}
-                  priority 
+                  priority
                 />
                 <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--border)', flexShrink: 0 }} />
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
                   {modalType === 'create' ? 'Cadastrar Novo Pedido' : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
                 </h3>
               </div>
-              <button 
-                onClick={() => setIsModalOpen(false)} 
+              <button
+                onClick={() => setIsModalOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--text-muted)', lineHeight: 1 }}
               >
                 &times;
@@ -8767,7 +8766,7 @@ export default function PedidosPage() {
 
             <form onSubmit={handleSubmit} style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                
+
                 {/* Seleção do Destino Inicial */}
                 {modalType === 'create' && (
                   <div className="form-group" style={{ backgroundColor: 'rgba(37, 99, 235, 0.05)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
@@ -8814,9 +8813,9 @@ export default function PedidosPage() {
                 {/* Número da OP / PV (Obrigatório) */}
                 <div className="form-group">
                   <label className="form-label">OP (Número da OP / PV) *</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
+                  <input
+                    type="text"
+                    className="form-input"
                     required
                     placeholder="Ex: OP-1234 ou PV-1234"
                     value={formPvNumber}
@@ -8828,9 +8827,9 @@ export default function PedidosPage() {
                 {/* Número da OP (Fábrica) */}
                 <div className="form-group">
                   <label className="form-label">Número da OP (Fábrica) - Vazio se for Estoque</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
+                  <input
+                    type="text"
+                    className="form-input"
                     placeholder="Ex: OP-5678"
                     value={formOpNumber}
                     disabled={isReadOnlyForForm('op_number')}
@@ -8875,8 +8874,8 @@ export default function PedidosPage() {
                       setFormArtName(val);
                       const valLower = val.trim().toLowerCase();
                       const getDisplayVal = (p: any) => p.sku ? `[${p.sku}] ${p.name}` : p.name;
-                      const matched = products.find(p => 
-                        p.name.toLowerCase() === valLower || 
+                      const matched = products.find(p =>
+                        p.name.toLowerCase() === valLower ||
                         getDisplayVal(p).toLowerCase() === valLower ||
                         (p.sku && p.sku.toLowerCase() === valLower)
                       );
@@ -8903,9 +8902,9 @@ export default function PedidosPage() {
                     })}
                   </datalist>
                   {formSelectedProductStock !== null && (
-                    <span style={{ 
-                      fontSize: '0.75rem', 
-                      fontWeight: 500, 
+                    <span style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
                       color: formSelectedProductStock < formPrintRun ? 'var(--danger)' : 'var(--success)',
                       display: 'flex',
                       alignItems: 'center',
@@ -8921,7 +8920,7 @@ export default function PedidosPage() {
                 {/* Seleção de Máquina de Produção (Opcional) */}
                 <div className="form-group">
                   <label className="form-label">Máquina de Produção (Opcional)</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={formMachineId}
                     disabled={isReadOnlyForForm('machine_id')}
@@ -8937,9 +8936,9 @@ export default function PedidosPage() {
                 {/* Medidas */}
                 <div className="form-group">
                   <label className="form-label">Medidas Customizadas</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
+                  <input
+                    type="text"
+                    className="form-input"
                     placeholder="Ex: 20x15x8 cm"
                     value={formMeasure}
                     disabled={isReadOnlyForForm('measure')}
@@ -8950,9 +8949,9 @@ export default function PedidosPage() {
                 {/* Tiragem (Opcional) */}
                 <div className="form-group">
                   <label className="form-label">Tiragem Total (Unidades)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
+                  <input
+                    type="number"
+                    className="form-input"
                     placeholder="Ex: 1000"
                     value={formPrintRun || ''}
                     disabled={isReadOnlyForForm('printRun')}
@@ -8965,7 +8964,7 @@ export default function PedidosPage() {
                   <>
                     <div className="form-group">
                       <label className="form-label">Tipo de Frete/Envio</label>
-                      <select 
+                      <select
                         className="form-select"
                         value={formShippingType}
                         disabled={isReadOnlyForForm('shipping_type')}
@@ -8981,10 +8980,10 @@ export default function PedidosPage() {
                     {!hideMonetaryValues && (
                       <div className="form-group">
                         <label className="form-label">Valor do Frete (R$)</label>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           step="0.01"
-                          className="form-input" 
+                          className="form-input"
                           value={formFreight}
                           disabled={isReadOnlyForForm('freight')}
                           onChange={(e) => setFormFreight(Number(e.target.value))}
@@ -8997,9 +8996,9 @@ export default function PedidosPage() {
                 {/* Vendedora (Opcional) */}
                 <div className="form-group">
                   <label className="form-label">Vendedora Responsável</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
+                  <input
+                    type="text"
+                    className="form-input"
                     placeholder="Ex: Vendas Samppel"
                     value={formSeller}
                     disabled={isReadOnlyForForm('seller')}
@@ -9025,7 +9024,7 @@ export default function PedidosPage() {
                       {formPhysicalLocation && !factoryLocations.some(l => l.name === formPhysicalLocation) && (
                         <option value={formPhysicalLocation}>{formPhysicalLocation} (Personalizado)</option>
                       )}
-                      
+
                       {factoryLocations
                         .filter(l => l.status === 'ATIVO' || l.name === formPhysicalLocation)
                         .map(loc => (
@@ -9073,9 +9072,9 @@ export default function PedidosPage() {
                 {/* Cortesia ou Falta */}
                 <div className="form-group">
                   <label className="form-label">Diferença de Tiragem (Cortesia "+" / Falta "-")</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
+                  <input
+                    type="number"
+                    className="form-input"
                     placeholder="Ex: +100 ou -50"
                     value={formOverShortQuantity}
                     disabled={isReadOnlyForForm('overShortQuantity')}
@@ -9089,9 +9088,9 @@ export default function PedidosPage() {
                   <div className="grid-responsive-3" style={{ gap: '0.65rem', marginTop: '0.35rem' }}>
                     <div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Embalagem (Especificação)</span>
-                      <input 
-                        type="text" 
-                        className="form-input" 
+                      <input
+                        type="text"
+                        className="form-input"
                         placeholder="Ex: 10 pacotes / 10 caixas"
                         value={formEmbalagem}
                         onChange={(e) => setFormEmbalagem(e.target.value)}
@@ -9099,9 +9098,9 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Prazo de Entrega</span>
-                      <input 
-                        type="text" 
-                        className="form-input" 
+                      <input
+                        type="text"
+                        className="form-input"
                         placeholder="Ex: 15 dias"
                         value={formPrazo}
                         onChange={(e) => setFormPrazo(e.target.value)}
@@ -9109,9 +9108,9 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Frete / Envio (Obs)</span>
-                      <input 
-                        type="text" 
-                        className="form-input" 
+                      <input
+                        type="text"
+                        className="form-input"
                         placeholder="Ex: Transportadora / Correio / Retira"
                         value={formFreteInfo}
                         onChange={(e) => setFormFreteInfo(e.target.value)}
@@ -9119,9 +9118,9 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Meio de Pagamento</span>
-                      <input 
-                        type="text" 
-                        className="form-input" 
+                      <input
+                        type="text"
+                        className="form-input"
                         placeholder="Ex: Boleto / PIX / Cartão"
                         value={formMeioPag}
                         onChange={(e) => setFormMeioPag(e.target.value)}
@@ -9129,9 +9128,9 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Forma de Pagamento</span>
-                      <input 
-                        type="text" 
-                        className="form-input" 
+                      <input
+                        type="text"
+                        className="form-input"
                         placeholder="Ex: Faturado / Parcelado / À vista"
                         value={formFormaPag}
                         onChange={(e) => setFormFormaPag(e.target.value)}
@@ -9147,12 +9146,12 @@ export default function PedidosPage() {
                 <div style={{ marginTop: '1.25rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'rgba(var(--primary-rgb), 0.02)' }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)', marginBottom: '0.75rem' }}>Controle Financeiro & Liberação da Fábrica</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                    
+
                     <div className="form-group">
                       <label className="form-label">Data do Primeiro Pagamento (Libera Produção)</label>
-                      <input 
-                        type="date" 
-                        className="form-input" 
+                      <input
+                        type="date"
+                        className="form-input"
                         value={formFirstPaymentDate}
                         disabled={isReadOnlyForForm('firstPaymentDate')}
                         onChange={(e) => setFormFirstPaymentDate(e.target.value)}
@@ -9161,9 +9160,9 @@ export default function PedidosPage() {
 
                     <div className="form-group">
                       <label className="form-label">Data Real de Início da Produção</label>
-                      <input 
-                        type="date" 
-                        className="form-input" 
+                      <input
+                        type="date"
+                        className="form-input"
                         value={formProductionStartDate}
                         disabled={isReadOnlyForForm('productionStartDate')}
                         onChange={(e) => setFormProductionStartDate(e.target.value)}
@@ -9174,10 +9173,10 @@ export default function PedidosPage() {
                       <>
                         <div className="form-group">
                           <label className="form-label">Total de Parcelas</label>
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             min="1"
-                            className="form-input" 
+                            className="form-input"
                             value={formInstallmentsTotal}
                             disabled={isReadOnlyForForm('installmentsTotal')}
                             onChange={(e) => setFormInstallmentsTotal(Number(e.target.value))}
@@ -9186,10 +9185,10 @@ export default function PedidosPage() {
 
                         <div className="form-group">
                           <label className="form-label">Parcelas Pagas</label>
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             min="0"
-                            className="form-input" 
+                            className="form-input"
                             value={formInstallmentsPaid}
                             disabled={isReadOnlyForForm('installmentsPaid')}
                             onChange={(e) => setFormInstallmentsPaid(Number(e.target.value))}
@@ -9203,10 +9202,10 @@ export default function PedidosPage() {
 
               {/* ETAPA DO KANBAN E SETOR (DINÂMICO) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}>
-                
+
                 <div className="form-group">
                   <label className="form-label" style={{ fontWeight: 600 }}>Etapa / Status de Produção</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={formStageId}
                     disabled={isReadOnlyForForm('status')}
@@ -9247,7 +9246,7 @@ export default function PedidosPage() {
                       </button>
                     )}
                   </div>
-                  <select 
+                  <select
                     className="form-select"
                     value={formSector}
                     disabled={isReadOnlyForForm('sector')}
@@ -9288,7 +9287,7 @@ export default function PedidosPage() {
                       </button>
                     )}
                   </div>
-                  <select 
+                  <select
                     className="form-select"
                     value={formMachineId}
                     disabled={isReadOnlyForForm('machine_id')}
@@ -9310,7 +9309,7 @@ export default function PedidosPage() {
                 {(formSector === 'Manuseio' || stages.find(s => s.id === formStageId)?.name === 'Manuseio') && (() => {
                   const targetPrintRun = Number(formPrintRun) || 0;
                   const totalAllocated = formHandlingAllocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
-                  
+
                   return (
                     <div className="form-group" style={{
                       gridColumn: '1 / -1',
@@ -9336,20 +9335,20 @@ export default function PedidosPage() {
                             backgroundColor: totalAllocated === targetPrintRun
                               ? 'hsla(142, 71%, 45%, 0.12)'
                               : totalAllocated < targetPrintRun
-                              ? 'hsla(45, 93%, 47%, 0.15)'
-                              : 'hsla(0, 84%, 60%, 0.15)',
+                                ? 'hsla(45, 93%, 47%, 0.15)'
+                                : 'hsla(0, 84%, 60%, 0.15)',
                             color: totalAllocated === targetPrintRun
                               ? 'hsl(142, 71%, 35%)'
                               : totalAllocated < targetPrintRun
-                              ? 'hsl(45, 93%, 35%)'
-                              : 'hsl(0, 84%, 45%)',
+                                ? 'hsl(45, 93%, 35%)'
+                                : 'hsl(0, 84%, 45%)',
                             border: `1px solid ${totalAllocated === targetPrintRun ? 'hsla(142, 71%, 45%, 0.3)' : totalAllocated < targetPrintRun ? 'hsla(45, 93%, 47%, 0.3)' : 'hsla(0, 84%, 60%, 0.3)'}`
                           }}>
                             {totalAllocated === targetPrintRun
                               ? `Total: ${totalAllocated.toLocaleString('pt-BR')} un (100% Distribuído)`
                               : totalAllocated < targetPrintRun
-                              ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${targetPrintRun.toLocaleString('pt-BR')} un (Faltam ${(targetPrintRun - totalAllocated).toLocaleString('pt-BR')})`
-                              : `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${targetPrintRun.toLocaleString('pt-BR')} un (Excesso de ${(totalAllocated - targetPrintRun).toLocaleString('pt-BR')})`}
+                                ? `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${targetPrintRun.toLocaleString('pt-BR')} un (Faltam ${(targetPrintRun - totalAllocated).toLocaleString('pt-BR')})`
+                                : `Alocado: ${totalAllocated.toLocaleString('pt-BR')} / ${targetPrintRun.toLocaleString('pt-BR')} un (Excesso de ${(totalAllocated - targetPrintRun).toLocaleString('pt-BR')})`}
                           </span>
                         </div>
 
@@ -9478,7 +9477,7 @@ export default function PedidosPage() {
                       placeholder="Observações adicionadas pela equipe..."
                     />
                   </div>
-                  
+
                   <div className="form-group">
                     <label className="form-label">Anotações Internas (Uso Interno)</label>
                     <textarea
@@ -9504,8 +9503,8 @@ export default function PedidosPage() {
               }}>
                 <div>
                   {modalType === 'edit' && isAdmin && selectedOrder && isManualOrder(selectedOrder) && (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => handleRequestDeleteManualOrder(selectedOrder, selectedItem)}
                       className="btn btn-danger"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}
@@ -9540,7 +9539,7 @@ export default function PedidosPage() {
         const item = pendingRevertItem;
         const order = item.order || {};
         const fromStage = stages.find(s => s.id === item.stage_id);
-        const toStage  = stages.find(s => s.id === pendingRevertTargetStageId);
+        const toStage = stages.find(s => s.id === pendingRevertTargetStageId);
 
         // Calcular tempo desde o último move
         let movedAgoText = '';
@@ -9553,7 +9552,7 @@ export default function PedidosPage() {
               ? `${diffMin} minuto${diffMin !== 1 ? 's' : ''} atrás`
               : `${Math.floor(diffMin / 60)}h ${diffMin % 60}min atrás`;
           }
-        } catch {}
+        } catch { }
 
         return (
           <div
@@ -9784,8 +9783,8 @@ export default function PedidosPage() {
               <h2 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
                 Cadastrar Tipos de Frete
               </h2>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => {
                   setIsShippingCrudModalOpen(false);
                   setNewShippingTypeName('');
@@ -9798,7 +9797,7 @@ export default function PedidosPage() {
 
             {/* Form de Adicionar Novo */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              <input 
+              <input
                 type="text"
                 className="form-input"
                 placeholder="Ex: Lalamove, Motoboy..."
@@ -9823,7 +9822,7 @@ export default function PedidosPage() {
                     if (error) {
                       alert('Erro ao cadastrar tipo de frete: ' + error.message);
                     } else if (data) {
-                      setShippingTypes(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
+                      setShippingTypes(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
                       setNewShippingTypeName('');
                     }
                   } catch (err) {
@@ -9853,8 +9852,8 @@ export default function PedidosPage() {
                 </div>
               ) : (
                 shippingTypes.map((type) => (
-                  <div 
-                    key={type.id} 
+                  <div
+                    key={type.id}
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -9970,13 +9969,13 @@ export default function PedidosPage() {
                 borderLeft: `4px solid ${currentStage?.color || 'var(--primary)'}`
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 280px', minWidth: 0 }}>
-                  <Image 
-                    src="/logo.png" 
-                    alt="Samppel Logo" 
-                    width={210} 
-                    height={55} 
+                  <Image
+                    src="/logo.png"
+                    alt="Samppel Logo"
+                    width={210}
+                    height={55}
                     style={{ objectFit: 'contain', height: '52px', width: 'auto', maxHeight: '52px', flexShrink: 0 }}
-                    priority 
+                    priority
                   />
                   <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--border)', flexShrink: 0 }} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
@@ -10067,10 +10066,12 @@ export default function PedidosPage() {
                       { label: 'Produto/Serviço', value: detailItem.name || '—' },
                       { label: 'Vendedor(a)', value: order.seller_name || 'Samppel' },
                       { label: 'Data do Pedido', value: order.order_date ? new Date(order.order_date).toLocaleDateString('pt-BR') : '—' },
-                      { label: 'Data de expedição', value: (() => {
-                        const expRes = calculateExpeditionDate(detailItem, order, { isBusinessDays, chosenDays: orderRangeChoiceMap.get(order.id) });
-                        return expRes.expeditionDate ? expRes.expeditionDate.toLocaleDateString('pt-BR') : '—';
-                      })() },
+                      {
+                        label: 'Data de expedição', value: (() => {
+                          const expRes = calculateExpeditionDate(detailItem, order, { isBusinessDays, chosenDays: orderRangeChoiceMap.get(order.id) });
+                          return expRes.expeditionDate ? expRes.expeditionDate.toLocaleDateString('pt-BR') : '—';
+                        })()
+                      },
                       { label: 'Início Produção', value: order.production_start_date ? new Date(order.production_start_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
                       { label: 'Nota Fiscal (NF-e)', value: order.invoice_number || '—' },
                       { label: 'Número da Coleta', value: order.pickup_number || '—' },
@@ -10222,7 +10223,7 @@ export default function PedidosPage() {
                   {(() => {
                     const orderTransactions = financialTransactions.filter(t => t.order_id === order.id);
                     const totalOrderValue = Number(order.total_amount || 0) || orderItems.filter(i => i.order_id === order.id).reduce((acc, i) => acc + Number(i.total_price || 0), 0);
-                    
+
                     let installmentsList: any[] = [];
 
                     if (orderTransactions.length > 0) {
@@ -10401,7 +10402,7 @@ export default function PedidosPage() {
                               gap: '0.5rem'
                             }}>
                               <span style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text)' }}>Em aberto</span>
-                              
+
                               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                                   <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 600 }}>Total a receber (R$)</span>
@@ -10482,7 +10483,7 @@ export default function PedidosPage() {
                     {orderItems.filter(i => i.order_id === order.id).map((i: any) => {
                       const itemStage = stages.find(s => s.id === i.stage_id);
                       const isCurrent = i.id === detailItem.id;
-                      
+
                       // Resgata alocações do Map ou fallback para equipe vinculada ao item
                       let handlingAllocations = itemHandlingTeamsMap.get(i.id) || [];
                       if (handlingAllocations.length === 0 && i.handling_team_id) {
@@ -10506,8 +10507,8 @@ export default function PedidosPage() {
                       const isAllConferido = handlingAllocations.length > 0 && totalSaida >= totalItemQty && totalRetorno >= totalItemQty && handlingAllocations.every(a => a.is_completed);
 
                       return (
-                        <div 
-                          key={i.id} 
+                        <div
+                          key={i.id}
                           style={{
                             border: `1px solid ${isCurrent ? 'var(--primary)' : 'var(--border)'}`,
                             borderRadius: 'var(--radius-sm)',
@@ -10521,7 +10522,7 @@ export default function PedidosPage() {
                           {/* Cabeçalho do Item com Botão Fixado Abaixo do Número do Pedido/Item */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
                             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flex: '1 1 300px', minWidth: 0 }}>
-                              
+
                               {/* Coluna Esquerda Fixa: Número do Item + Botão de Atualizar Manuseio Embaixo */}
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '115px', flexShrink: 0 }}>
                                 <span style={{
@@ -10581,7 +10582,7 @@ export default function PedidosPage() {
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.75rem' }}>
                                 <span>Tiragem: <strong>{totalItemQty.toLocaleString('pt-BR')} un</strong></span>
-                                <span style={{ 
+                                <span style={{
                                   color: itemStage?.color || 'var(--text-muted)',
                                   fontWeight: 700,
                                   fontSize: '0.72rem',
@@ -10705,46 +10706,46 @@ export default function PedidosPage() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 700, color: isAllConferido ? 'hsl(142, 71%, 35%)' : isRetornoConferido ? 'hsl(38, 92%, 35%)' : 'hsl(45, 93%, 35%)' }}>
                                 <CheckCircle2 size={14} />
                                 <span>
-                                  {isAllConferido 
-                                    ? '✓ MANUSEIO TOTALMENTE CONFERIDO E FINALIZADO' 
-                                    : isRetornoConferido 
-                                    ? `✓ RETORNO CONFERIDO (FALTAM ALOCAR ${faltamAlocar.toLocaleString('pt-BR')} UN DA TIRAGEM)` 
-                                    : '⌛ MANUSEIO EM ANDAMENTO'}
+                                  {isAllConferido
+                                    ? '✓ MANUSEIO TOTALMENTE CONFERIDO E FINALIZADO'
+                                    : isRetornoConferido
+                                      ? `✓ RETORNO CONFERIDO (FALTAM ALOCAR ${faltamAlocar.toLocaleString('pt-BR')} UN DA TIRAGEM)`
+                                      : '⌛ MANUSEIO EM ANDAMENTO'}
                                 </span>
                               </div>
                               <div style={{ display: 'flex', gap: '0.85rem', fontSize: '0.73rem', color: 'var(--text-muted)', alignItems: 'center' }}>
                                 <span>Total Saída: <strong style={{ color: 'var(--text)' }}>{totalSaida.toLocaleString('pt-BR')} un</strong></span>
                                 <span>Total Retorno: <strong style={{ color: isRetornoConferido ? 'hsl(142, 71%, 35%)' : 'var(--text)' }}>{totalRetorno.toLocaleString('pt-BR')} un</strong></span>
                                 {faltamRetornar > 0 ? (
-                                  <span style={{ 
-                                    color: 'hsl(0, 84.2%, 45%)', 
-                                    fontWeight: 800, 
-                                    backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)', 
-                                    padding: '2px 8px', 
+                                  <span style={{
+                                    color: 'hsl(0, 84.2%, 45%)',
+                                    fontWeight: 800,
+                                    backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)',
+                                    padding: '2px 8px',
                                     borderRadius: '4px',
-                                    border: '1px solid hsla(0, 84.2%, 60.2%, 0.25)' 
+                                    border: '1px solid hsla(0, 84.2%, 60.2%, 0.25)'
                                   }}>
                                     Faltam {faltamRetornar.toLocaleString('pt-BR')} un retornar
                                   </span>
                                 ) : faltamAlocar > 0 ? (
-                                  <span style={{ 
-                                    color: 'hsl(38, 92%, 35%)', 
-                                    fontWeight: 800, 
-                                    backgroundColor: 'hsla(45, 93%, 47%, 0.15)', 
-                                    padding: '2px 8px', 
+                                  <span style={{
+                                    color: 'hsl(38, 92%, 35%)',
+                                    fontWeight: 800,
+                                    backgroundColor: 'hsla(45, 93%, 47%, 0.15)',
+                                    padding: '2px 8px',
                                     borderRadius: '4px',
-                                    border: '1px solid hsla(45, 93%, 47%, 0.3)' 
+                                    border: '1px solid hsla(45, 93%, 47%, 0.3)'
                                   }}>
                                     ⚠️ Faltam alocar {faltamAlocar.toLocaleString('pt-BR')} un
                                   </span>
                                 ) : isAllConferido ? (
-                                  <span style={{ 
-                                    color: 'hsl(142, 71%, 35%)', 
-                                    fontWeight: 800, 
-                                    backgroundColor: 'hsla(142, 71%, 45%, 0.12)', 
-                                    padding: '2px 8px', 
+                                  <span style={{
+                                    color: 'hsl(142, 71%, 35%)',
+                                    fontWeight: 800,
+                                    backgroundColor: 'hsla(142, 71%, 45%, 0.12)',
+                                    padding: '2px 8px',
                                     borderRadius: '4px',
-                                    border: '1px solid hsla(142, 71%, 45%, 0.3)' 
+                                    border: '1px solid hsla(142, 71%, 45%, 0.3)'
                                   }}>
                                     ✓ 100% Retornado
                                   </span>
@@ -10778,46 +10779,46 @@ export default function PedidosPage() {
                                           <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: '0.7rem', marginRight: '5px', whiteSpace: 'nowrap' }}>[{hCode}]</span>
                                           <span style={{ color: 'var(--primary)', whiteSpace: 'nowrap' }}>{teamName}</span>
                                         </td>
-                                         <td style={{ padding: '0.35rem 0.6rem', color: alloc.departure_date ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                                        <td style={{ padding: '0.35rem 0.6rem', color: alloc.departure_date ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
                                           {alloc.departure_date ? new Date(alloc.departure_date + 'T00:00:00').toLocaleDateString('pt-BR') : 'Pendente'}
                                         </td>
-                                         <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                           {Number(alloc.quantity || 0).toLocaleString('pt-BR')}
+                                        <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                          {Number(alloc.quantity || 0).toLocaleString('pt-BR')}
                                         </td>
-                                         <td style={{ padding: '0.35rem 0.6rem', color: (alloc.return_date || alloc.completed_at) ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                                        <td style={{ padding: '0.35rem 0.6rem', color: (alloc.return_date || alloc.completed_at) ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
                                           {(alloc.return_date || alloc.completed_at) ? new Date((alloc.return_date || alloc.completed_at) + 'T00:00:00').toLocaleDateString('pt-BR') : 'Pendente'}
                                         </td>
-                                         <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                           {Number(alloc.return_quantity || 0).toLocaleString('pt-BR')}
+                                        <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                          {Number(alloc.return_quantity || 0).toLocaleString('pt-BR')}
                                         </td>
-                                         <td style={{ padding: "0.35rem 0.6rem", textAlign: "center" }}>
-                                           <span style={{
-                                             fontSize: "0.68rem",
-                                             fontWeight: 700,
-                                             padding: "3px 8px",
-                                             borderRadius: "99px",
-                                             display: "inline-flex",
-                                             alignItems: "center",
-                                             justifyContent: "center",
-                                             gap: "0.3rem",
-                                             backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(45, 93%, 47%, 0.12)",
-                                             color: alloc.is_completed ? "hsl(142, 71%, 32%)" : "hsl(45, 93%, 32%)",
-                                             border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(45, 93%, 47%, 0.3)"}`,
-                                             whiteSpace: "nowrap"
-                                           }}>
-                                             {alloc.is_completed ? (
-                                               <>
-                                                 <CheckCircle2 size={12} />
-                                                 <span>Conferido</span>
-                                               </>
-                                             ) : (
-                                               <>
-                                                 <Clock size={12} />
-                                                 <span>Pendente</span>
-                                               </>
-                                             )}
-                                           </span>
-                                         </td>
+                                        <td style={{ padding: "0.35rem 0.6rem", textAlign: "center" }}>
+                                          <span style={{
+                                            fontSize: "0.68rem",
+                                            fontWeight: 700,
+                                            padding: "3px 8px",
+                                            borderRadius: "99px",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            gap: "0.3rem",
+                                            backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(45, 93%, 47%, 0.12)",
+                                            color: alloc.is_completed ? "hsl(142, 71%, 32%)" : "hsl(45, 93%, 32%)",
+                                            border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(45, 93%, 47%, 0.3)"}`,
+                                            whiteSpace: "nowrap"
+                                          }}>
+                                            {alloc.is_completed ? (
+                                              <>
+                                                <CheckCircle2 size={12} />
+                                                <span>Conferido</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Clock size={12} />
+                                                <span>Pendente</span>
+                                              </>
+                                            )}
+                                          </span>
+                                        </td>
                                         <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>
                                           <button
                                             type="button"
@@ -11014,7 +11015,7 @@ export default function PedidosPage() {
 
             {/* Corpo */}
             <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              
+
               {/* Form */}
               <form onSubmit={handleSaveSector} style={{
                 backgroundColor: 'rgba(var(--primary-rgb), 0.02)',
@@ -11028,7 +11029,7 @@ export default function PedidosPage() {
                 <div style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--primary)', textTransform: 'uppercase' }}>
                   {editingSector ? 'Editar Setor' : 'Adicionar Novo Setor'}
                 </div>
-                
+
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Nome do Setor</label>
                   <input
@@ -11203,7 +11204,7 @@ export default function PedidosPage() {
 
             {/* Corpo */}
             <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              
+
               {/* Form */}
               <form onSubmit={handleSaveMachineForm} style={{
                 backgroundColor: 'rgba(var(--primary-rgb), 0.02)',
@@ -11217,7 +11218,7 @@ export default function PedidosPage() {
                 <div style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--primary)', textTransform: 'uppercase' }}>
                   {editingMachineState ? 'Editar Máquina' : 'Adicionar Nova Máquina'}
                 </div>
-                
+
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Nome da Máquina</label>
                   <input
@@ -11402,7 +11403,7 @@ export default function PedidosPage() {
               <p style={{ margin: '0 0 1rem 0' }}>
                 O pedido <strong>PV-{inProgressItem.order?.pv_number || inProgressItem.order_id}</strong> ainda consta com o status <strong>"Em andamento"</strong> (Aguardando Aprovação/Faturamento) no Conta Azul.
               </p>
-              
+
               <div style={{
                 backgroundColor: 'rgba(245, 158, 11, 0.08)',
                 border: '1px dashed rgba(245, 158, 11, 0.3)',
@@ -11421,7 +11422,7 @@ export default function PedidosPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <button 
+              <button
                 onClick={handleSyncInProgressOrder}
                 disabled={inProgressSyncing}
                 className="btn btn-primary"
@@ -11432,7 +11433,7 @@ export default function PedidosPage() {
               </button>
 
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button 
+                <button
                   onClick={handleForceStartInProgressOrder}
                   disabled={inProgressSyncing}
                   className="btn btn-secondary"
@@ -11440,7 +11441,7 @@ export default function PedidosPage() {
                 >
                   Iniciar Mesmo Assim
                 </button>
-                <button 
+                <button
                   onClick={handleCancelInProgressOrder}
                   disabled={inProgressSyncing}
                   className="btn btn-secondary"
@@ -11489,12 +11490,12 @@ export default function PedidosPage() {
                 </p>
               </div>
             </div>
-            
+
             <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
               <p style={{ fontSize: '0.9rem', lineHeight: 1.5, margin: 0 }}>
                 Os itens abaixo não possuem estoque suficiente. <strong>Selecione os que você deseja forçar o avanço</strong> (o estoque ficará negativo). Os que não forem selecionados <strong>permanecerão em Pedidos</strong>.
               </p>
-              
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {insufficientStockData.insufficientItems.map((stk: any) => {
                   const isSelected = selectedInsufficientItemIds.includes(stk.item.id);
@@ -11506,8 +11507,8 @@ export default function PedidosPage() {
                       backgroundColor: isSelected ? 'rgba(var(--primary-rgb), 0.05)' : 'var(--bg-body)',
                       transition: 'all 0.2s'
                     }}>
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={isSelected}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -11543,7 +11544,7 @@ export default function PedidosPage() {
             </div>
 
             <div style={{ padding: '1.25rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '0.75rem', backgroundColor: 'var(--bg-body)' }}>
-              <button 
+              <button
                 onClick={() => {
                   const selectedItems = insufficientStockData.insufficientItems
                     .filter((stk: any) => selectedInsufficientItemIds.includes(stk.item.id))
@@ -11555,7 +11556,7 @@ export default function PedidosPage() {
               >
                 Confirmar Avanço
               </button>
-              <button 
+              <button
                 onClick={handleCancelInsufficientStockMove}
                 className="btn btn-secondary"
                 style={{ flex: 1, height: '38px', fontSize: '0.85rem', fontWeight: 600, border: '1px solid var(--border)', backgroundColor: 'transparent' }}
@@ -11617,7 +11618,7 @@ export default function PedidosPage() {
 
               {/* Body */}
               <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-                
+
                 {/* Resumo do Pedido */}
                 <div style={{
                   backgroundColor: 'var(--background)',
@@ -11771,7 +11772,7 @@ export default function PedidosPage() {
                 </p>
               </div>
             </div>
-            
+
             <div style={{ padding: '1.5rem' }}>
               <p style={{ fontSize: '0.9rem', marginBottom: '1rem', lineHeight: '1.5' }}>
                 O pedido <strong>{faturadoAlertItem.order?.pv_number || faturadoAlertItem.order_id}</strong> possui a forma de pagamento definida como <strong>FATURADO</strong>.
@@ -11780,17 +11781,17 @@ export default function PedidosPage() {
                 Certifique-se de que a nota fiscal e as condições de pagamento estão corretas antes de prosseguir com a Expedição. Deseja continuar a movimentação?
               </p>
             </div>
-            
+
             <div style={{ padding: '1.25rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '0.75rem', backgroundColor: 'var(--bg-body)', justifyContent: 'flex-end' }}>
-              <button 
-                className="btn" 
+              <button
+                className="btn"
                 onClick={handleCancelFaturadoAlertMove}
                 style={{ height: '38px', fontSize: '0.85rem', fontWeight: 600, border: '1px solid var(--border)', backgroundColor: 'transparent' }}
               >
                 Cancelar
               </button>
-              <button 
-                className="btn" 
+              <button
+                className="btn"
                 onClick={handleConfirmFaturadoAlertMove}
                 style={{ height: '38px', fontSize: '0.85rem', fontWeight: 600, color: '#fff', backgroundColor: '#3b82f6', border: 'none' }}
               >
@@ -11848,8 +11849,8 @@ export default function PedidosPage() {
                     {!isParentPaid && isOverdue
                       ? 'Aguardando Pagamento / Sinal Financeiro E Possui Pendência de Atraso'
                       : !isParentPaid
-                      ? 'Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal)'
-                      : 'Pedido com Parcelas ou Prazo em Atraso Financeiro'
+                        ? 'Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal)'
+                        : 'Pedido com Parcelas ou Prazo em Atraso Financeiro'
                     }
                   </p>
                 </div>
@@ -11857,7 +11858,7 @@ export default function PedidosPage() {
 
               {/* Conteúdo Explicativo Didático */}
               <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-                
+
                 {/* Informações Resumidas do Card */}
                 <div style={{
                   backgroundColor: 'var(--background)',
@@ -11894,8 +11895,8 @@ export default function PedidosPage() {
                   {!isParentPaid && isOverdue
                     ? 'Este pedido consta como BLOQUEADO (Aguardando Pagamento/Sinal) E também possui parcelas em atraso no Conta Azul ou prazo de fabricação estourado.'
                     : !isParentPaid
-                    ? 'Este pedido está registrado como BLOQUEADO (Aguardando Pagamento/Sinal). A confirmação do primeiro pagamento ou sinal financeiro ainda NÃO foi lançada no Conta Azul. Movimentar este pedido sem a devida liberação do financeiro pode acarretar custos operacionais e de matéria-prima sem garantia de pagamento.'
-                    : 'Este pedido possui parcelas em atraso financeiro no Conta Azul ou ultrapassou o prazo limite estimado para produção.'
+                      ? 'Este pedido está registrado como BLOQUEADO (Aguardando Pagamento/Sinal). A confirmação do primeiro pagamento ou sinal financeiro ainda NÃO foi lançada no Conta Azul. Movimentar este pedido sem a devida liberação do financeiro pode acarretar custos operacionais e de matéria-prima sem garantia de pagamento.'
+                      : 'Este pedido possui parcelas em atraso financeiro no Conta Azul ou ultrapassou o prazo limite estimado para produção.'
                   }
                 </div>
 
@@ -12159,8 +12160,8 @@ export default function PedidosPage() {
                   Gerenciar Localizações Físicas na Fábrica
                 </h3>
               </div>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setIsLocationCrudModalOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}
               >
@@ -12176,9 +12177,9 @@ export default function PedidosPage() {
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <div className="form-group" style={{ flex: 2, minWidth: '180px' }}>
                   <label className="form-label">Nome do Local / Setor / Prateleira *</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
+                  <input
+                    type="text"
+                    className="form-input"
                     placeholder="Ex: Prateleira B2, Setor de Tintas, Salão..."
                     required
                     value={locationName}
@@ -12187,8 +12188,8 @@ export default function PedidosPage() {
                 </div>
                 <div className="form-group" style={{ flex: 1, minWidth: '120px' }}>
                   <label className="form-label">Status</label>
-                  <select 
-                    className="form-input" 
+                  <select
+                    className="form-input"
                     value={locationStatus}
                     onChange={(e) => setLocationStatus(e.target.value as any)}
                   >
@@ -12200,16 +12201,16 @@ export default function PedidosPage() {
 
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                 {editingLocation && (
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className="btn btn-secondary"
                     onClick={() => { setEditingLocation(null); setLocationName(''); setLocationStatus('ATIVO'); }}
                   >
                     Cancelar Edição
                   </button>
                 )}
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="btn btn-primary"
                   disabled={submittingLocation}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
@@ -12227,8 +12228,8 @@ export default function PedidosPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {factoryLocations.map((loc) => (
-                  <div 
-                    key={loc.id} 
+                  <div
+                    key={loc.id}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '0.65rem 0.85rem', borderRadius: '8px',
@@ -12243,18 +12244,18 @@ export default function PedidosPage() {
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button 
-                        type="button" 
-                        className="btn btn-secondary" 
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
                         onClick={() => handleEditLocationClick(loc)}
                         style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
                         title="Editar localização"
                       >
                         <Edit3 size={14} />
                       </button>
-                      <button 
-                        type="button" 
-                        className="btn btn-danger" 
+                      <button
+                        type="button"
+                        className="btn btn-danger"
                         onClick={() => handleDeleteLocationClick(loc.id, loc.name)}
                         style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
                         title="Excluir localização"
@@ -12275,8 +12276,8 @@ export default function PedidosPage() {
 
             {/* Rodapé */}
             <div style={{ padding: '1rem 1.5rem', backgroundColor: 'var(--surface-subtle)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="btn btn-primary"
                 onClick={() => setIsLocationCrudModalOpen(false)}
               >
@@ -12308,8 +12309,8 @@ export default function PedidosPage() {
                 <AlertTriangle size={20} />
                 <span>Registrar Falta / Avaria de Produto</span>
               </div>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setIsShortageModalOpen(false)}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
               >
@@ -12393,7 +12394,7 @@ export default function PedidosPage() {
                       notes: shortageNotes,
                       reported_by_name: currentOperator.current?.name || 'Operador'
                     });
-                    
+
                     if (res.data) {
                       showToast(`Falta de ${shortageQty.toLocaleString('pt-BR')} un registrada! Aguardando conferência na Expedição.`);
                       await fetchShortagesForItem(shortageItem.id);
@@ -12434,8 +12435,8 @@ export default function PedidosPage() {
                 <Scale size={20} />
                 <span>Conferência & Liquidação de Falta (Expedição)</span>
               </div>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setIsExpeditionModalOpen(false)}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
               >
@@ -12464,7 +12465,7 @@ export default function PedidosPage() {
               <div>
                 <label className="form-label" style={{ fontWeight: 800, fontSize: '0.85rem' }}>Escolha a Forma de Acerto / Liquidação com o Cliente *</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.4rem' }}>
-                  
+
                   <label style={{
                     display: 'flex', alignItems: 'flex-start', gap: '0.6rem', padding: '0.65rem 0.85rem',
                     borderRadius: '8px', border: `1.5px solid ${expeditionResolutionType === 'DESCONTO_FATURA' ? 'var(--primary)' : 'var(--border)'}`,
@@ -12585,22 +12586,22 @@ export default function PedidosPage() {
           ======================================== */}
       {isDeleteConfirmModalOpen && orderToDelete && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div 
-            className="modal-content" 
-            style={{ 
-              maxWidth: '520px', 
-              width: '90%', 
-              backgroundColor: 'var(--surface)', 
-              borderRadius: 'var(--radius-lg, 12px)', 
-              boxShadow: '0 20px 40px rgba(0,0,0,0.4)', 
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '520px',
+              width: '90%',
+              backgroundColor: 'var(--surface)',
+              borderRadius: 'var(--radius-lg, 12px)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
               border: '2px solid var(--danger)',
               overflow: 'hidden'
             }}
           >
             {/* Header com Alerta */}
-            <div style={{ 
-              backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)', 
-              borderBottom: '1px solid hsla(0, 84.2%, 60.2%, 0.25)', 
+            <div style={{
+              backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.12)',
+              borderBottom: '1px solid hsla(0, 84.2%, 60.2%, 0.25)',
               padding: '1.25rem 1.5rem',
               display: 'flex',
               alignItems: 'center',
@@ -12721,7 +12722,7 @@ export default function PedidosPage() {
         </div>
       )}
 
-      <OperatorAuthModal 
+      <OperatorAuthModal
         isOpen={isOpAuthOpen}
         tenantId={user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'}
         onSuccess={handleOpAuthSuccess}

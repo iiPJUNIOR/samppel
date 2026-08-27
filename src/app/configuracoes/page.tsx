@@ -2440,55 +2440,106 @@ export default function ConfiguracoesPage() {
               <div style={{ backgroundColor: 'rgba(var(--primary-rgb), 0.05)', color: 'var(--primary)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.85rem', fontWeight: 500 }}>
                 💡 Administradores têm permissão irrestrita de leitura e escrita em todas as etapas da fábrica por padrão.
               </div>
-            ) : activeOp!.role === 'Vendedor' && !activeOp!.is_factory_account ? (
-              <div style={{ backgroundColor: 'rgba(var(--primary-rgb), 0.05)', color: 'var(--primary)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.85rem', fontWeight: 500 }}>
-                💡 Vendedores possuem acesso completo de consulta e leitura (Kanban, Clientes e Produtos), sem permissão de escrita ou movimentação de cartões.
-              </div>
             ) : (
-              <div className="table-responsive" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-                <table className="table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr style={{ backgroundColor: 'var(--background)' }}>
-                      <th style={{ padding: '0.75rem 1rem' }}>Etapa do Processo</th>
-                      <th style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>Entrada (Colocar)</th>
-                      <th style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>Saída (Tirar)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stages.map(stage => {
-                      const opPermissions = activeOp!.profile_stage_permissions || [];
-                      const stagePerm = opPermissions.find((p: any) => p.stage_id === stage.id);
-                      const canEnter = stagePerm ? stagePerm.can_enter : false;
-                      const canExit = stagePerm ? stagePerm.can_exit : false;
+              <div style={{ marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>
+                    <h4 style={{ fontSize: '0.875rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
+                      Etapas Autorizadas no Kanban (Entrada e Saída)
+                    </h4>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Marque para quais colunas do processo este {activeOp!.role === 'Vendedor' ? 'vendedor' : 'operador'} pode colocar (Entrada) ou retirar (Saída) pedidos.
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.35rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                      disabled={savingPermission === activeOp!.id}
+                      onClick={async () => {
+                        const opId = activeOp!.id;
+                        setSavingPermission(opId);
+                        const allPerms = stages.map(s => ({ stage_id: s.id, can_enter: true, can_exit: true }));
+                        setSelectedOperatorForPermissions({ ...selectedOperatorForPermissions, profile_stage_permissions: allPerms });
+                        setProfilesList(prev => prev.map(p => p.id === opId ? { ...p, profile_stage_permissions: allPerms } : p));
+                        for (const s of stages) {
+                          await saveProfileStagePermission(opId, s.id, true, true);
+                        }
+                        setSavingPermission(null);
+                      }}
+                    >
+                      Liberar Todas
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                      disabled={savingPermission === activeOp!.id}
+                      onClick={async () => {
+                        const opId = activeOp!.id;
+                        setSavingPermission(opId);
+                        setSelectedOperatorForPermissions({ ...selectedOperatorForPermissions, profile_stage_permissions: [] });
+                        setProfilesList(prev => prev.map(p => p.id === opId ? { ...p, profile_stage_permissions: [] } : p));
+                        for (const s of stages) {
+                          await saveProfileStagePermission(opId, s.id, false, false);
+                        }
+                        setSavingPermission(null);
+                      }}
+                    >
+                      Bloquear Todas
+                    </button>
+                  </div>
+                </div>
 
-                      return (
-                        <tr key={stage.id}>
-                          <td style={{ fontWeight: 600, padding: '0.75rem 1rem' }}>{stage.name}</td>
-                          <td style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>
-                            <input 
-                              type="checkbox"
-                              checked={canEnter}
-                              disabled={savingPermission === activeOp!.id}
-                              onChange={() => handleToggleOperatorStagePermission(activeOp!.id, stage.id, 'enter', opPermissions)}
-                              style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
-                            />
-                          </td>
-                          <td style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>
-                            <input 
-                              type="checkbox"
-                              checked={canExit}
-                              disabled={savingPermission === activeOp!.id}
-                              onChange={() => handleToggleOperatorStagePermission(activeOp!.id, stage.id, 'exit', opPermissions)}
-                              style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="table-responsive" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                  <table className="table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr style={{ backgroundColor: 'var(--background)' }}>
+                        <th style={{ padding: '0.75rem 1rem' }}>Etapa do Processo</th>
+                        <th style={{ textAlign: 'center', padding: '0.75rem 1rem', width: '130px' }}>Entrada (Colocar)</th>
+                        <th style={{ textAlign: 'center', padding: '0.75rem 1rem', width: '130px' }}>Saída (Tirar)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stages.map(stage => {
+                        const opPermissions = activeOp!.profile_stage_permissions || [];
+                        const stagePerm = opPermissions.find((p: any) => p.stage_id === stage.id);
+                        const canEnter = stagePerm ? stagePerm.can_enter : false;
+                        const canExit = stagePerm ? stagePerm.can_exit : false;
+
+                        return (
+                          <tr key={stage.id}>
+                            <td style={{ fontWeight: 600, padding: '0.75rem 1rem' }}>
+                              <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: stage.color || '#3b82f6', marginRight: '0.5rem' }} />
+                              {stage.name}
+                            </td>
+                            <td style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>
+                              <input 
+                                type="checkbox"
+                                checked={canEnter}
+                                disabled={savingPermission === activeOp!.id}
+                                onChange={() => handleToggleOperatorStagePermission(activeOp!.id, stage.id, 'enter', opPermissions)}
+                                style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                              />
+                            </td>
+                            <td style={{ textAlign: 'center', padding: '0.75rem 1rem' }}>
+                              <input 
+                                type="checkbox"
+                                checked={canExit}
+                                disabled={savingPermission === activeOp!.id}
+                                onChange={() => handleToggleOperatorStagePermission(activeOp!.id, stage.id, 'exit', opPermissions)}
+                                style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            ) }
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
               {activeOp && activeOp.id !== user?.id ? (
