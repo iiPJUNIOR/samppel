@@ -264,6 +264,8 @@ export default function ConfiguracoesPage() {
   const [sync24hStatus, setSync24hStatus] = useState<string | null>(null);
   const [wiping, setWiping] = useState(false);
   const [wipingSuccess, setWipingSuccess] = useState(false);
+  const [wipingStock, setWipingStock] = useState(false);
+  const [wipingStockSuccess, setWipingStockSuccess] = useState(false);
 
   const handleSync24h = async () => {
     setSyncing24h(true);
@@ -468,6 +470,33 @@ export default function ConfiguracoesPage() {
       alert('Erro ao zerar o portal: ' + err.message);
     } finally {
       setWiping(false);
+    }
+  };
+
+  const handleWipeStock = async () => {
+    const confirmWipe = confirm(
+      "ATENÇÃO: Deseja realmente zerar todo o catálogo de produtos e estoques locais?\n\n- Seus pedidos, clientes e histórico de produção serão MANTIDOS intactos.\n- Seus dados reais no Conta Azul NÃO serão afetados.\n\nDeseja continuar?"
+    );
+    if (!confirmWipe) return;
+
+    setWipingStock(true);
+    setWipingStockSuccess(false);
+    try {
+      const res = await fetch('/api/config/wipe-stock', {
+        method: 'POST'
+      });
+      
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || 'Falha ao redefinir produtos e estoque.');
+      }
+
+      setWipingStockSuccess(true);
+      alert('Catálogo de produtos e estoques zerados com sucesso! Você pode ir na tela de Produtos e clicar em "Atualizar Catálogo (Conta Azul)" para importar os produtos limpos.');
+    } catch (err: any) {
+      alert('Erro ao zerar produtos e estoque: ' + err.message);
+    } finally {
+      setWipingStock(false);
     }
   };
 
@@ -2661,42 +2690,90 @@ export default function ConfiguracoesPage() {
           <div className="card" style={{ border: '1px solid var(--danger)', backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.02)' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--danger)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <ShieldAlert size={18} style={{ color: 'var(--danger)' }} />
-              Zona de Perigo: Redefinir Portal
+              Zona de Perigo: Redefinição de Dados
             </h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: '1.5' }}>
-              Esta ação **exclui permanentemente** todos os pedidos locais, itens do Kanban, histórico de setores, lançamentos financeiros locais, clientes e produtos importados. 
-              <strong style={{ color: 'var(--text)', display: 'block', marginTop: '0.5rem' }}>
-                ⚠️ Seus dados reais no Conta Azul NÃO serão tocados ou alterados de forma alguma. A limpeza afeta exclusivamente este portal para permitir um novo sync limpo.
-              </strong>
-            </p>
+            
+            {/* OPÇÃO 1: ZERAR SOMENTE ESTOQUE E PRODUTOS */}
+            <div style={{ paddingBottom: '1.25rem', marginBottom: '1.25rem', borderBottom: '1px dashed var(--border)' }}>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)', marginBottom: '0.35rem' }}>
+                1. Zerar Apenas Catálogo de Produtos &amp; Estoque
+              </h4>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem', lineHeight: '1.5' }}>
+                Exclui todos os produtos importados, movimentações e saldos de estoque do portal para permitir uma reimportação limpa e sem duplicidades. 
+                <strong style={{ color: 'var(--success)', display: 'block', marginTop: '0.25rem' }}>
+                  ✓ Seus pedidos existentes, clientes, histórico de produção e financeiro serão MANTIDOS intactos.
+                </strong>
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <button
+                  onClick={handleWipeStock}
+                  disabled={wipingStock}
+                  className="btn"
+                  style={{
+                    backgroundColor: wipingStock ? 'var(--border)' : 'var(--warning, #f59e0b)',
+                    color: '#000',
+                    border: 'none',
+                    padding: '0.5rem 1.25rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: wipingStock ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>{wipingStock ? 'Limpando produtos e estoques...' : 'Zerar Apenas Produtos & Estoque'}</span>
+                </button>
+                {wipingStockSuccess && (
+                  <span style={{ color: 'var(--success)', fontSize: '0.82rem', fontWeight: 600 }}>
+                    ✓ Produtos e estoques zerados com sucesso!
+                  </span>
+                )}
+              </div>
+            </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <button
-                onClick={handleWipeData}
-                disabled={wiping}
-                className="btn"
-                style={{
-                  backgroundColor: wiping ? 'var(--border)' : 'var(--danger)',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '0.5rem 1.25rem',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  cursor: wiping ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <Trash2 size={16} />
-                <span>{wiping ? 'Limpando o banco local...' : 'Zerar Banco de Dados Local (Manter Chaves)'}</span>
-              </button>
-              {wipingSuccess && (
-                <span style={{ color: 'var(--success)', fontSize: '0.82rem', fontWeight: 600 }}>
-                  ✓ Redefinição concluída!
-                </span>
-              )}
+            {/* OPÇÃO 2: ZERAR TODO O PORTAL */}
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--danger)', marginBottom: '0.35rem' }}>
+                2. Zerar Todo o Banco de Dados Local
+              </h4>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem', lineHeight: '1.5' }}>
+                Esta ação **exclui permanentemente** todos os pedidos locais, itens do Kanban, histórico de setores, lançamentos financeiros locais, clientes e produtos importados. 
+                <strong style={{ color: 'var(--text)', display: 'block', marginTop: '0.25rem' }}>
+                  ⚠️ Seus dados reais no Conta Azul NÃO serão tocados ou alterados de forma alguma.
+                </strong>
+              </p>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <button
+                  onClick={handleWipeData}
+                  disabled={wiping}
+                  className="btn"
+                  style={{
+                    backgroundColor: wiping ? 'var(--border)' : 'var(--danger)',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '0.5rem 1.25rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: wiping ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>{wiping ? 'Limpando todo o banco local...' : 'Zerar Todo o Banco Local (Manter Chaves)'}</span>
+                </button>
+                {wipingSuccess && (
+                  <span style={{ color: 'var(--success)', fontSize: '0.82rem', fontWeight: 600 }}>
+                    ✓ Redefinição total concluída!
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </>

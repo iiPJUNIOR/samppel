@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getProducts, createProduct, updateProduct, adjustStock, getStockTransactions, getCustomerProductStock } from '@/services/supabase';
+import { getProducts, createProduct, updateProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock } from 'lucide-react';
@@ -68,7 +68,7 @@ export default function ProdutosPage() {
   const [search, setSearch] = useState('');
   
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'lisas' | 'custom_stocks' | 'all'>('all');
+  const [activeTab, setActiveTab] = useState<'lisas' | 'custom_stocks' | 'all'>('lisas');
   const [customStocks, setCustomStocks] = useState<any[]>([]);
 
   // Modals State
@@ -105,6 +105,9 @@ export default function ProdutosPage() {
   const [formBindToFirstItem, setFormBindToFirstItem] = useState(false);
   const [formBindRequiresHandling, setFormBindRequiresHandling] = useState(false);
   const [formCategory, setFormCategory] = useState<'LISAS' | 'PERSONALIZADA'>('LISAS');
+  const [formMeasure, setFormMeasure] = useState('');
+  const [formCustomer, setFormCustomer] = useState('');
+  const [customers, setCustomers] = useState<any[]>([]);
 
   // Stock Adjustment Fields
   const [stockQtyChange, setStockQtyChange] = useState(100);
@@ -182,12 +185,14 @@ export default function ProdutosPage() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const [productsRes, customStocksRes] = await Promise.all([
+      const [productsRes, customStocksRes, customersRes] = await Promise.all([
         getProducts(user?.tenant_id),
-        getCustomerProductStock(user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0')
+        getCustomerProductStock(undefined, undefined, user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'),
+        getCustomers(user?.tenant_id)
       ]);
       setProducts(productsRes.data || []);
       setCustomStocks(customStocksRes.data || []);
+      setCustomers(customersRes.data || []);
     } catch (e) {
       console.error('Error fetching products:', e);
     } finally {
@@ -227,6 +232,8 @@ export default function ProdutosPage() {
     setFormBindToFirstItem(false);
     setFormBindRequiresHandling(false);
     setFormCategory('LISAS');
+    setFormMeasure('');
+    setFormCustomer('');
     setIsFormModalOpen(true);
   };
 
@@ -240,6 +247,8 @@ export default function ProdutosPage() {
     setFormBindToFirstItem(!!product.bind_to_first_item);
     setFormBindRequiresHandling(!!product.bind_requires_handling);
     setFormCategory(product.category || 'LISAS');
+    setFormMeasure(product.measure || '');
+    setFormCustomer(product.customer_id || '');
     setIsFormModalOpen(true);
   };
 
@@ -262,6 +271,8 @@ export default function ProdutosPage() {
       bind_to_first_item: formBindToFirstItem,
       bind_requires_handling: formBindToFirstItem ? formBindRequiresHandling : false,
       category: formCategory,
+      measure: formMeasure || null,
+      customer_id: formCustomer || null,
       stock_quantity: modalType === 'create' ? Number(formStock) : undefined
     };
 
@@ -388,13 +399,16 @@ export default function ProdutosPage() {
   const isVendedor = user?.role === 'Vendedor';
   const numCols = 6 + (isAdmin ? 1 : 0) - (isVendedor ? 1 : 0);
 
+  const lisasCount = products.filter(p => p.category === 'LISAS').length;
+  const customStocksCount = customStocks.length;
+
   return (
     <div className="page-container">
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Produtos &amp; Estoque</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Lista geral de produtos cadastrados e nível de estoque atual.
+            Catálogo de produtos integrado ao Conta Azul com controle soberano de estoque e saldo físico no Portal.
           </p>
         </div>
 
@@ -405,10 +419,10 @@ export default function ProdutosPage() {
               disabled={isSyncingProducts}
               className="btn btn-secondary"
               style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
-              title="Sincronizar produtos novos, atualizações e saldos de estoque do Conta Azul"
+              title="Sincronizar novos produtos e atualizações cadastrais do Conta Azul (preserva saldos de estoque locais)"
             >
               <RefreshCw size={14} className={isSyncingProducts ? 'spinner' : ''} />
-              <span>{isSyncingProducts ? 'Sincronizando...' : 'Atualizar Estoque/Produtos'}</span>
+              <span>{isSyncingProducts ? 'Sincronizando...' : 'Atualizar Catálogo (Conta Azul)'}</span>
             </button>
           )}
 
@@ -424,30 +438,30 @@ export default function ProdutosPage() {
       {/* TABS DE ALTERNÂNCIA */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', flexWrap: 'wrap' }}>
         <button 
-          onClick={() => setActiveTab('all')}
-          className={`btn ${activeTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-        >
-          <Warehouse size={16} />
-          <span>Todos ({products.length})</span>
-        </button>
-
-        <button 
           onClick={() => setActiveTab('lisas')}
           className={`btn ${activeTab === 'lisas' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Package size={16} />
-          <span>Lisas/Genéricas ({products.filter(p => p.category === 'LISAS').length})</span>
+          <span>Lisas / Genéricas ({lisasCount})</span>
         </button>
-        
+
         <button 
           onClick={() => setActiveTab('custom_stocks')}
           className={`btn ${activeTab === 'custom_stocks' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Package size={16} />
-          <span>Estoque de Clientes ({customStocks.length})</span>
+          <span>Estoque de Clientes ({customStocksCount})</span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('all')}
+          className={`btn ${activeTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+        >
+          <Warehouse size={16} />
+          <span>Todos ({products.length})</span>
         </button>
       </div>
 
@@ -474,7 +488,7 @@ export default function ProdutosPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>SKU / Código</th>
+                <th>SKU / Código / Lote</th>
                 <th>Nome do Produto</th>
                 <th>Descrição</th>
                 {isAdmin && <th>Preço Unitário</th>}
@@ -703,7 +717,7 @@ export default function ProdutosPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">SKU / Código do Produto *</label>
+                <label className="form-label">SKU / Código / Lote *</label>
                 <input 
                   type="text" 
                   className="form-input" 
@@ -712,6 +726,31 @@ export default function ProdutosPage() {
                   value={formSku}
                   onChange={(e) => setFormSku(e.target.value)}
                 />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Medidas (Opcional)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="Ex: 32x24x11,5 cm"
+                  value={formMeasure}
+                  onChange={(e) => setFormMeasure(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Cliente Vinculado (Opcional)</label>
+                <select 
+                  className="form-select"
+                  value={formCustomer}
+                  onChange={(e) => setFormCustomer(e.target.value)}
+                >
+                  <option value="">— Nenhum —</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="form-group">

@@ -210,10 +210,38 @@ function parseProductCategory(p: any): string {
   return 'PERSONALIZADA';
 }
 
-function encodeProductDescription(desc: string | null | undefined, category: string | undefined): string {
-  let cleanDesc = (desc || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim();
+function parseProductMeasure(p: any): string | null {
+  if (p.measure) return p.measure;
+  if (p.description && typeof p.description === 'string') {
+    const match = p.description.match(/\[MEDIDA:\s*([^\]]+)\]/i);
+    if (match && match[1]) return match[1].trim();
+  }
+  return null;
+}
+
+function parseProductCustomer(p: any): string | null {
+  if (p.customer_id) return p.customer_id;
+  if (p.description && typeof p.description === 'string') {
+    const match = p.description.match(/\[CLIENTE:\s*([^\]]+)\]/i);
+    if (match && match[1]) return match[1].trim();
+  }
+  return null;
+}
+
+function encodeProductDescription(desc: string | null | undefined, category: string | undefined, measure: string | undefined, customerId: string | undefined): string {
+  let cleanDesc = (desc || '')
+    .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
+    .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
+    .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+    .trim();
   if (category) {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[CATEGORIA:${category}]` : `[CATEGORIA:${category}]`;
+  }
+  if (measure) {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[MEDIDA:${measure}]` : `[MEDIDA:${measure}]`;
+  }
+  if (customerId) {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[CLIENTE:${customerId}]` : `[CLIENTE:${customerId}]`;
   }
   return cleanDesc;
 }
@@ -225,7 +253,13 @@ export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99
     const mapped = data.map((p: any) => ({
       ...p,
       category: parseProductCategory(p),
-      description: (p.description || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim()
+      measure: parseProductMeasure(p),
+      customer_id: parseProductCustomer(p),
+      description: (p.description || '')
+        .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
+        .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
+        .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+        .trim()
     }));
     return { data: mapped, error: null };
   }
@@ -234,12 +268,17 @@ export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99
 
 export async function createProduct(product: any) {
   const category = product.category || 'LISAS';
-  const description = encodeProductDescription(product.description, category);
+  const description = encodeProductDescription(product.description, category, product.measure, product.customer_id);
   const payload = {
     ...product,
     description,
     category
   };
+  
+  delete payload.measure;
+  delete payload.customer_id;
+  delete payload.bind_requires_handling;
+  delete payload.bind_to_first_item;
 
   const newProd = {
     id: product.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
@@ -253,9 +292,9 @@ export async function createProduct(product: any) {
     await enqueueSync(newProd.tenant_id, 'PRODUCT', newProd.id, 'CREATE');
     return { data: newProd, error: null };
   }
-  let { data, error } = await getDbClient().from('products').insert([payload]).select().single();
+  let { data, error } = await getDbClient().from('products').insert([newProd]).select().single();
   if (error && error.message?.includes('category')) {
-    const { category: _, ...restProd } = payload;
+    const { category: _, ...restProd } = newProd;
     const retryRes = await getDbClient().from('products').insert([restProd]).select().single();
     data = retryRes.data;
     error = retryRes.error;
@@ -265,7 +304,13 @@ export async function createProduct(product: any) {
     data = {
       ...data,
       category: parseProductCategory(data),
-      description: (data.description || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim()
+      measure: parseProductMeasure(data),
+      customer_id: parseProductCustomer(data),
+      description: (data.description || '')
+        .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
+        .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
+        .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+        .trim()
     };
   }
   return { data, error };
@@ -282,9 +327,14 @@ export async function updateProduct(id: string, updates: any) {
   }
 
   const payload = { ...updates };
-  if (payload.category !== undefined) {
-    payload.description = encodeProductDescription(payload.description, payload.category);
+  if (payload.category !== undefined || payload.measure !== undefined || payload.customer_id !== undefined || payload.description !== undefined) {
+    payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id);
   }
+  
+  delete payload.measure;
+  delete payload.customer_id;
+  delete payload.bind_requires_handling;
+  delete payload.bind_to_first_item;
 
   let { data, error } = await getDbClient().from('products').update(payload).eq('id', id).select().single();
   if (error && error.message?.includes('category')) {
@@ -298,7 +348,13 @@ export async function updateProduct(id: string, updates: any) {
     data = {
       ...data,
       category: parseProductCategory(data),
-      description: (data.description || '').replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '').trim()
+      measure: parseProductMeasure(data),
+      customer_id: parseProductCustomer(data),
+      description: (data.description || '')
+        .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
+        .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
+        .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+        .trim()
     };
   }
   return { data, error };

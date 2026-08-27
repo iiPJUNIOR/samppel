@@ -1226,7 +1226,7 @@ export class ContaAzulService {
           continue;
         }
 
-        let productId = '';
+        let productId: string | null = null;
         if (mainItemCaId) {
           const { data: existingProd } = await dbClient
             .from('products')
@@ -1237,26 +1237,6 @@ export class ContaAzulService {
 
           if (existingProd) {
             productId = existingProd.id;
-          } else {
-            const { data: newProd, error: prodErr } = await dbClient
-              .from('products')
-              .insert([{
-                tenant_id: this.tenantId,
-                name: mainItem.nome || 'Produto Importado',
-                sku: (mainItem.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
-                description: mainItem.descricao || '',
-                price: mainItem.valor || 0,
-                stock_quantity: 0,
-                conta_azul_id: mainItemCaId
-              }])
-              .select('id')
-              .single();
-
-            if (prodErr || !newProd) {
-              console.error('Erro ao criar produto para pedido:', prodErr);
-              continue;
-            }
-            productId = newProd.id;
           }
         }
 
@@ -1517,24 +1497,6 @@ export class ContaAzulService {
 
             if (existingProd) {
               itemProductId = existingProd.id;
-            } else {
-              const { data: newProd, error: prodErr } = await dbClient
-                .from('products')
-                .insert([{
-                  tenant_id: this.tenantId,
-                  name: item.name || item.nome || 'Produto Importado',
-                  sku: (item.name || item.nome || 'PROD').toUpperCase().replace(/\s+/g, '-'),
-                  description: item.description || item.descricao || '',
-                  price: item.value || item.valor || 0,
-                  stock_quantity: 0,
-                  conta_azul_id: itemCaId
-                }])
-                .select('id')
-                .single();
-
-              if (!prodErr && newProd) {
-                itemProductId = newProd.id;
-              }
             }
           }
 
@@ -1972,31 +1934,25 @@ export class ContaAzulService {
     }
 
     // 3. Resolve Product
-    let productId = '';
+    let productId: string | null = null;
     if (mainItemCaId) {
-      const { data: existingProd } = await dbClient
+      let query = dbClient
         .from('products')
         .select('id')
-        .eq('tenant_id', this.tenantId)
-        .eq('sku', mainItem.codigo || '')
-        .maybeSingle();
+        .eq('tenant_id', this.tenantId);
+
+      if (mainItemCaId && mainItem.codigo) {
+        query = query.or(`conta_azul_id.eq.${mainItemCaId},sku.eq.${mainItem.codigo}`);
+      } else if (mainItemCaId) {
+        query = query.eq('conta_azul_id', mainItemCaId);
+      } else if (mainItem.codigo) {
+        query = query.eq('sku', mainItem.codigo);
+      }
+
+      const { data: existingProd } = await query.maybeSingle();
 
       if (existingProd) {
         productId = existingProd.id;
-      } else {
-        const { data: newProd } = await dbClient
-          .from('products')
-          .insert([{
-            tenant_id: this.tenantId,
-            name: mainItem.descricao || mainItem.nome || 'Produto Importado',
-            sku: mainItem.codigo || `SKU-${mainItemCaId.substring(0, 8)}`,
-            description: mainItem.descricao || '',
-            price: mainItem.valor_unitario || 0,
-            stock_quantity: 0
-          }])
-          .select('id')
-          .single();
-        if (newProd) productId = newProd.id;
       }
     }
 

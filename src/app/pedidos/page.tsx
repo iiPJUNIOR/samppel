@@ -8873,7 +8873,13 @@ export default function PedidosPage() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setFormArtName(val);
-                      const matched = products.find(p => p.name.toLowerCase() === val.trim().toLowerCase());
+                      const valLower = val.trim().toLowerCase();
+                      const getDisplayVal = (p: any) => p.sku ? `[${p.sku}] ${p.name}` : p.name;
+                      const matched = products.find(p => 
+                        p.name.toLowerCase() === valLower || 
+                        getDisplayVal(p).toLowerCase() === valLower ||
+                        (p.sku && p.sku.toLowerCase() === valLower)
+                      );
                       if (matched) {
                         setFormProduct(matched.id);
                         setFormSelectedProductStock(matched.stock_quantity);
@@ -8887,11 +8893,14 @@ export default function PedidosPage() {
                     }}
                   />
                   <datalist id="products-list">
-                    {products.map(p => (
-                      <option key={p.id} value={p.name}>
-                        {p.name} (Estoque: {Number(p.stock_quantity || 0).toLocaleString('pt-BR')} un)
-                      </option>
-                    ))}
+                    {products.map(p => {
+                      const displayVal = p.sku ? `[${p.sku}] ${p.name}` : p.name;
+                      return (
+                        <option key={p.id} value={displayVal}>
+                          {displayVal} (Estoque: {Number(p.stock_quantity || 0).toLocaleString('pt-BR')} un)
+                        </option>
+                      );
+                    })}
                   </datalist>
                   {formSelectedProductStock !== null && (
                     <span style={{ 
