@@ -1,4 +1,4 @@
-// @ts-nocheck
+
 import React from 'react';
 import { 
   X, Search, AlertTriangle, Users, Plus, Trash2, ChevronDown, 
@@ -10,6 +10,7 @@ import Image from 'next/image';
 
 export function DetailViewModal(props: any) {
   const {
+    isBusinessDays,
     Copy,
     CopyButton,
     Edit3,
