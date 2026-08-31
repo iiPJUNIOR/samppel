@@ -1,0 +1,26 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { ContaAzulService } from '@/services/conta_azul';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const tenantId = searchParams.get('tenantId') || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
+    const service = new ContaAzulService(tenantId);
+    const result = await service.deduplicateProducts();
+
+    return NextResponse.json({
+      success: true,
+      message: `Deduplicação de produtos concluída com sucesso.`,
+      duplicatesRemoved: result.duplicatesRemoved
+    });
+  } catch (err: any) {
+    console.error('Erro na rota de limpeza de produtos duplicados:', err);
+    return NextResponse.json(
+      { success: false, error: err.message || 'Erro ao deduplicar produtos.' },
+      { status: 500 }
+    );
+  }
+}
