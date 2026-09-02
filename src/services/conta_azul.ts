@@ -1047,6 +1047,90 @@ export class ContaAzulService {
   }
 
   /**
+   * Localiza ou cria automaticamente um produto no banco para vincular ao pedido
+   */
+  private async resolveOrCreateProduct(
+    dbClient: any,
+    mainItem: any,
+    customerId?: string
+  ): Promise<string | null> {
+    if (!mainItem) return null;
+
+    const mainItemCaId = mainItem.id_item || mainItem.id || mainItem.conta_azul_id;
+    const prodName = mainItem.descricao || mainItem.nome || mainItem.name || 'Produto Importado';
+    const prodSku = mainItem.codigo || mainItem.sku || '';
+
+    // 1. Tentar encontrar por conta_azul_id ou sku
+    let query = dbClient
+      .from('products')
+      .select('id')
+      .eq('tenant_id', this.tenantId);
+
+    if (mainItemCaId && prodSku) {
+      query = query.or(`conta_azul_id.eq.${mainItemCaId},sku.eq.${prodSku}`);
+    } else if (mainItemCaId) {
+      query = query.eq('conta_azul_id', mainItemCaId);
+    } else if (prodSku) {
+      query = query.eq('sku', prodSku);
+    } else {
+      query = query.eq('name', prodName);
+    }
+
+    const { data: existingProd } = await query.maybeSingle();
+    if (existingProd?.id) {
+      return existingProd.id;
+    }
+
+    // 2. Fallback por nome
+    if (prodName && prodName !== 'Produto Importado') {
+      const { data: prodByName } = await dbClient
+        .from('products')
+        .select('id')
+        .eq('tenant_id', this.tenantId)
+        .ilike('name', prodName)
+        .maybeSingle();
+
+      if (prodByName?.id) {
+        if (mainItemCaId) {
+          await dbClient.from('products').update({ conta_azul_id: mainItemCaId }).eq('id', prodByName.id);
+        }
+        return prodByName.id;
+      }
+    }
+
+    // 3. Auto-criação do produto no Supabase
+    try {
+      const fallbackSku = prodSku || (prodName.toUpperCase().replace(/[^A-Z0-9]/g, '-').slice(0, 30)) || `PROD-${Date.now()}`;
+      const { data: newProd, error: prodErr } = await dbClient
+        .from('products')
+        .insert([{
+          tenant_id: this.tenantId,
+          name: prodName,
+          sku: fallbackSku,
+          conta_azul_id: mainItemCaId || null,
+          price: mainItem.valor_unitario || mainItem.valor || mainItem.preco || 0,
+          stock_quantity: 0,
+          category: 'PERSONALIZADA',
+          customer_id: customerId || null
+        }])
+        .select('id')
+        .single();
+
+      if (newProd?.id) {
+        console.log(`[resolveOrCreateProduct] Produto "${prodName}" auto-criado com sucesso (ID: ${newProd.id}).`);
+        return newProd.id;
+      }
+      if (prodErr) {
+        console.warn('Aviso ao auto-criar produto:', prodErr);
+      }
+    } catch (e) {
+      console.error('Erro ao auto-criar produto para pedido:', e);
+    }
+
+    return null;
+  }
+
+  /**
    * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
    */
   public async importOrders(startDate?: string, endDate?: string, onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
@@ -1056,6 +1140,9 @@ export class ContaAzulService {
     if (isMock) {
       return { imported: 2, updated: 0 };
     }
+
+    const MIN_SYNC_DATE = '2026-09-01';
+    const effectiveStartDate = (startDate && startDate >= MIN_SYNC_DATE) ? startDate : MIN_SYNC_DATE;
 
     try {
       onProgress?.('Autenticando e verificando tokens...', 5);
@@ -1068,8 +1155,8 @@ export class ContaAzulService {
 
       while (hasMore) {
         let url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=100&pagina=${currentPage}`;
-        if (startDate) {
-          url += `&data_inicio=${startDate}`;
+        if (effectiveStartDate) {
+          url += `&data_inicio=${effectiveStartDate}`;
         }
         if (endDate) {
           url += `&data_fim=${endDate}`;
@@ -1131,6 +1218,27 @@ export class ContaAzulService {
           console.log(`[importOrders] Ignorando PV-${saleSummary.numero} por estar em orçamento ("Em andamento") no Conta Azul.`);
           continue;
         }
+
+        // Filtro estrito: Apenas vendas com Data da Venda a partir de 01/09/2026 na sincronização em lote
+        const rawSaleDate = saleDetail.venda?.data 
+          || saleDetail.data 
+          || saleSummary.data 
+          || saleDetail.venda?.data_venda 
+          || saleSummary.data_venda 
+          || saleDetail.venda?.data_emissao 
+          || saleSummary.data_emissao 
+          || saleDetail.venda?.emissao 
+          || saleSummary.emissao 
+          || saleSummary.criado_em 
+          || new Date().toISOString();
+
+        const saleDateOnly = (rawSaleDate || '').split('T')[0].split(' ')[0];
+        if (saleDateOnly && saleDateOnly < MIN_SYNC_DATE) {
+          console.log(`[importOrders] Ignorando PV-${saleSummary.numero} pois Data da venda (${saleDateOnly}) é anterior a ${MIN_SYNC_DATE}.`);
+          continue;
+        }
+
+        const parsedOrderDate = rawSaleDate.includes('T') ? rawSaleDate : `${rawSaleDate}T12:00:00.000Z`;
 
         onProgress?.(`PV-${saleSummary.numero || currentIdx}: Puxando itens do pedido...`, pct);
         // Endpoint oficial /v1/venda/{id}/itens da API v2 da Conta Azul
@@ -1226,19 +1334,7 @@ export class ContaAzulService {
           continue;
         }
 
-        let productId: string | null = null;
-        if (mainItemCaId) {
-          const { data: existingProd } = await dbClient
-            .from('products')
-            .select('id')
-            .eq('tenant_id', this.tenantId)
-            .eq('conta_azul_id', mainItemCaId)
-            .maybeSingle();
-
-          if (existingProd) {
-            productId = existingProd.id;
-          }
-        }
+        const productId = await this.resolveOrCreateProduct(dbClient, mainItem, customerId);
 
         let localStatus: any = 'A produzir';
         if (statusStr === 'PAGO' || statusStr === 'QUITADO') {
@@ -1311,7 +1407,7 @@ export class ContaAzulService {
           status: localStatus,
           production_sector: 'Impressão',
           notes: notesStr,
-          order_date: saleSummary.criado_em || new Date().toISOString(),
+          order_date: parsedOrderDate,
           conta_azul_status: contaAzulStatus,
           conta_azul_id: saleSummary.id
         };
@@ -1934,27 +2030,7 @@ export class ContaAzulService {
     }
 
     // 3. Resolve Product
-    let productId: string | null = null;
-    if (mainItemCaId) {
-      let query = dbClient
-        .from('products')
-        .select('id')
-        .eq('tenant_id', this.tenantId);
-
-      if (mainItemCaId && mainItem.codigo) {
-        query = query.or(`conta_azul_id.eq.${mainItemCaId},sku.eq.${mainItem.codigo}`);
-      } else if (mainItemCaId) {
-        query = query.eq('conta_azul_id', mainItemCaId);
-      } else if (mainItem.codigo) {
-        query = query.eq('sku', mainItem.codigo);
-      }
-
-      const { data: existingProd } = await query.maybeSingle();
-
-      if (existingProd) {
-        productId = existingProd.id;
-      }
-    }
+    const productId = await this.resolveOrCreateProduct(dbClient, mainItem, customerId);
 
     // 4. Resolve Seller, Installments, Payments
     const sellerName = saleDetail.vendedor?.nome || 'Vendedor Samppel';
@@ -1995,6 +2071,20 @@ export class ContaAzulService {
     const contaAzulStatus = getSituacaoDesc(saleDetail.venda?.situacao || saleSummary.situacao);
     const opNumber = extractOpNumber(notesStr);
 
+    const rawSaleDate = saleDetail.venda?.data 
+      || saleDetail.data 
+      || (saleSummary as any).data 
+      || saleDetail.venda?.data_venda 
+      || (saleSummary as any).data_venda 
+      || saleDetail.venda?.data_emissao 
+      || (saleSummary as any).data_emissao 
+      || saleDetail.venda?.emissao 
+      || (saleSummary as any).emissao 
+      || (saleSummary as any).criado_em 
+      || new Date().toISOString();
+
+    const parsedOrderDate = rawSaleDate.includes('T') ? rawSaleDate : `${rawSaleDate}T12:00:00.000Z`;
+
     const orderPayload: any = {
       tenant_id: this.tenantId,
       customer_id: customerId,
@@ -2015,7 +2105,7 @@ export class ContaAzulService {
       status: localStatus,
       production_sector: 'Impressão',
       notes: notesStr,
-      order_date: saleSummary.criado_em || new Date().toISOString(),
+      order_date: parsedOrderDate,
       conta_azul_status: contaAzulStatus,
       conta_azul_id: saleSummary.id
     };

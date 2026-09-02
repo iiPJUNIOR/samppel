@@ -124,13 +124,13 @@ export default function Sidebar() {
       label: 'Clientes',
       path: '/clientes',
       icon: <Users size={17} />,
-      allowedRoles: ['Administrador', 'Vendedor']
+      allowedRoles: ['Administrador', 'Vendedor', 'Comercial']
     },
     {
       label: 'Produtos / Estoque',
       path: '/produtos',
       icon: <Package size={17} />,
-      allowedRoles: ['Administrador']
+      allowedRoles: ['Administrador', 'Vendedor', 'Comercial']
     },
 
     {

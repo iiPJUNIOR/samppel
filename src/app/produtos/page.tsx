@@ -5,9 +5,9 @@ import { useAuth } from '@/context/AuthContext';
 import { getProducts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2 } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2, Users } from 'lucide-react';
 
-function StockInlineEdit({ product, onSave }: { product: any, onSave: (id: string, newStock: number) => Promise<void> }) {
+function StockInlineEdit({ product, onSave, canEdit = true }: { product: any, onSave: (id: string, newStock: number) => Promise<void>, canEdit?: boolean }) {
   const [val, setVal] = useState(product.stock_quantity?.toString() || '0');
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,6 +27,17 @@ function StockInlineEdit({ product, onSave }: { product: any, onSave: (id: strin
     await onSave(product.id, numVal);
     setLoading(false);
   };
+
+  if (!canEdit) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <Warehouse size={12} style={{ color: product.stock_quantity < 500 ? 'var(--danger)' : 'var(--primary)' }} />
+        <span style={{ color: product.stock_quantity < 500 ? 'var(--danger)' : 'var(--text)' }}>
+          {Number(val).toLocaleString('pt-BR')} un
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -76,6 +87,43 @@ export default function ProdutosPage() {
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'create' | 'edit'>('create');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+
+  // Customer Link Modal
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [customerModalProduct, setCustomerModalProduct] = useState<any>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [savingCustomerLink, setSavingCustomerLink] = useState(false);
+
+  const handleOpenCustomerModal = (itemOrProduct: any) => {
+    const prod = itemOrProduct.product || itemOrProduct;
+    const currentCustId = itemOrProduct.customer?.id || prod.customer_id || '';
+    setCustomerModalProduct(prod);
+    setSelectedCustomerId(currentCustId);
+    setIsCustomerModalOpen(true);
+  };
+
+  const handleSaveCustomerLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customerModalProduct) return;
+    setSavingCustomerLink(true);
+    try {
+      const res = await updateProduct(customerModalProduct.id, {
+        ...customerModalProduct,
+        customer_id: selectedCustomerId || null
+      });
+      if (res.error) {
+        alert('Erro ao atualizar cliente vinculado: ' + res.error.message);
+      } else {
+        setIsCustomerModalOpen(false);
+        await fetchProducts();
+      }
+    } catch (err: any) {
+      console.error('Erro ao vincular cliente:', err);
+      alert('Erro ao salvar cliente: ' + err.message);
+    } finally {
+      setSavingCustomerLink(false);
+    }
+  };
 
   // Stock History Modal
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -201,14 +249,14 @@ export default function ProdutosPage() {
   };
 
   useEffect(() => {
-    const allowedRoles = ['Administrador', 'Comercial', 'Produção'];
+    const allowedRoles = ['Administrador', 'Comercial', 'Vendedor', 'Produção'];
     if (user && allowedRoles.includes(user.role)) {
       fetchProducts();
     }
   }, [user]);
 
   // Security guard check
-  const allowedRoles = ['Administrador', 'Comercial', 'Produção'];
+  const allowedRoles = ['Administrador', 'Comercial', 'Vendedor', 'Produção'];
   if (user && !allowedRoles.includes(user.role)) {
     return (
       <div className="page-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80vh', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
@@ -249,6 +297,14 @@ export default function ProdutosPage() {
   };
 
   const handleOpenEdit = (product: any) => {
+    if (user?.role === 'Vendedor' || user?.role === 'Comercial') {
+      if (product.category === 'LISAS') {
+        alert('Produtos da categoria Lisas / Genéricas são somente leitura para vendedores.');
+        return;
+      }
+      handleOpenCustomerModal(product);
+      return;
+    }
     setModalType('edit');
     setSelectedProduct(product);
     setFormName(product.name);
@@ -416,11 +472,11 @@ export default function ProdutosPage() {
     s.product?.name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial';
-  const canEditDetails = user?.role === 'Administrador' || user?.role === 'Comercial';
   const isAdmin = user?.role === 'Administrador';
-  const isVendedor = user?.role === 'Vendedor';
-  const numCols = 6 + (isAdmin ? 1 : 0) - (isVendedor ? 1 : 0);
+  const isVendedor = user?.role === 'Vendedor' || user?.role === 'Comercial';
+  const canCreate = isAdmin;
+  const canEditDetails = isAdmin;
+  const numCols = 6 + (isAdmin ? 1 : 0) + (activeTab === 'all' ? 2 : 0) - (isVendedor && activeTab === 'lisas' ? 1 : 0);
 
   const lisasCount = products.filter(p => p.category === 'LISAS').length;
   const customStocksCount = allCustomerStocks.length;
@@ -515,9 +571,11 @@ export default function ProdutosPage() {
                 <th>Nome do Produto</th>
                 <th>Descrição</th>
                 {isAdmin && <th>Preço Unitário</th>}
+                {activeTab === 'all' && <th>Categoria</th>}
+                {activeTab === 'all' && <th>Cliente Vinculado</th>}
                 <th>Estoque Físico</th>
                 <th>Sincronização ERP</th>
-                {!isVendedor && <th>Ações</th>}
+                {(!isVendedor || activeTab === 'all') && <th>Ações</th>}
               </tr>
             </thead>
             <tbody>
@@ -532,111 +590,157 @@ export default function ProdutosPage() {
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((product) => (
-                  <tr key={product.id}>
-                    <td><code style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', backgroundColor: 'var(--background)', borderRadius: '4px' }}>{product.sku || '---'}</code></td>
-                    <td style={{ fontWeight: 600 }}>{product.name}</td>
-                    <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', maxWidth: '300px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {product.description || '---'}
-                    </td>
-                    {isAdmin && (
-                      <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price)}
+                filteredProducts.map((product) => {
+                  const linkedCust = customers.find(c => c.id === product.customer_id);
+                  return (
+                    <tr key={product.id}>
+                      <td><code style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', backgroundColor: 'var(--background)', borderRadius: '4px' }}>{product.sku || '---'}</code></td>
+                      <td style={{ fontWeight: 600 }}>{product.name}</td>
+                      <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', maxWidth: '300px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {product.description || '---'}
                       </td>
-                    )}
-                    <td style={{ fontWeight: 600 }}>
-                      <StockInlineEdit product={product} onSave={handleInlineStockSave} />
-                    </td>
-                    <td>
-                      {product.conta_azul_id ? (
-                        <span className="badge badge-success" title={`ID: ${product.conta_azul_id}`}>
-                          <CheckCircle2 size={12} />
-                          Integrado ({product.conta_azul_id.substring(0, 8)})
-                        </span>
-                      ) : (
-                        <span className="badge badge-warning">
-                          <HelpCircle size={12} />
-                          Pendente
-                        </span>
+                      {isAdmin && (
+                        <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price)}
+                        </td>
                       )}
-                    </td>
-                    {!isVendedor && (
-                      <td style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button
-                          onClick={() => handleOpenStock(product)}
-                          title="Ajustar estoque"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                            padding: '0.375rem 0.75rem', background: 'transparent',
-                            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                            fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
-                            cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                        >
-                          <Warehouse size={12} />
-                          <span>Estoque</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleOpenHistory(product)}
-                          title="Histórico de movimentações"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                            padding: '0.375rem 0.75rem', background: 'transparent',
-                            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                            fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
-                            cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                        >
-                          <History size={12} />
-                          <span>Histórico</span>
-                        </button>
-
-                        {canEditDetails && (
-                          <button
-                            onClick={() => handleOpenEdit(product)}
-                            title="Editar produto"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                              padding: '0.375rem 0.75rem', background: 'transparent',
-                              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                              fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
-                              cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                          >
-                            <Edit size={12} />
-                            <span>Editar</span>
-                          </button>
-                        )}
-
-                        {canEditDetails && (
-                          <button
-                            onClick={() => handleDeleteProduct(product)}
-                            title="Apagar produto"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                              padding: '0.375rem 0.75rem', background: 'transparent',
-                              border: '1px solid #ef4444', borderRadius: 'var(--radius-sm)',
-                              fontSize: '0.75rem', fontWeight: 500, color: '#ef4444',
-                              cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                          >
-                            <Trash2 size={12} />
-                            <span>Apagar</span>
-                          </button>
+                      {activeTab === 'all' && (
+                        <td>
+                          <span className={`badge ${product.category === 'LISAS' ? 'badge-secondary' : 'badge-primary'}`}>
+                            {product.category === 'LISAS' ? 'Lisas' : 'Personalizada'}
+                          </span>
+                        </td>
+                      )}
+                      {activeTab === 'all' && (
+                        <td style={{ fontSize: '0.85rem' }}>
+                          {product.category === 'PERSONALIZADA' ? (
+                            linkedCust ? (
+                              <span style={{ fontWeight: 600, color: 'var(--text)' }}>{linkedCust.name}</span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Não vinculado</span>
+                            )
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </td>
+                      )}
+                      <td style={{ fontWeight: 600 }}>
+                        <StockInlineEdit product={product} onSave={handleInlineStockSave} canEdit={isAdmin} />
+                      </td>
+                      <td>
+                        {product.conta_azul_id ? (
+                          <span className="badge badge-success" title={`ID: ${product.conta_azul_id}`}>
+                            <CheckCircle2 size={12} />
+                            Integrado ({product.conta_azul_id.substring(0, 8)})
+                          </span>
+                        ) : (
+                          <span className="badge badge-warning">
+                            <HelpCircle size={12} />
+                            Pendente
+                          </span>
                         )}
                       </td>
-                    )}
-                  </tr>
-                ))
+                      {(!isVendedor || activeTab === 'all') && (
+                        <td style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          {isAdmin ? (
+                            <>
+                              <button
+                                onClick={() => handleOpenStock(product)}
+                                title="Ajustar estoque"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                                  cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                              >
+                                <Warehouse size={12} />
+                                <span>Estoque</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleOpenHistory(product)}
+                                title="Histórico de movimentações"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                                  cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                              >
+                                <History size={12} />
+                                <span>Histórico</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleOpenEdit(product)}
+                                title="Editar produto"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
+                                  cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                              >
+                                <Edit size={12} />
+                                <span>Editar</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteProduct(product)}
+                                title="Apagar produto"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  border: '1px solid #ef4444', borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.75rem', fontWeight: 500, color: '#ef4444',
+                                  cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              >
+                                <Trash2 size={12} />
+                                <span>Apagar</span>
+                              </button>
+                            </>
+                          ) : (
+                            product.category === 'PERSONALIZADA' ? (
+                              <button
+                                onClick={() => handleOpenCustomerModal(product)}
+                                title="Alterar cliente vinculado a este produto"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)',
+                                  cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.backgroundColor = 'var(--surface-hover, rgba(0,0,0,0.04))'; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              >
+                                <Users size={12} />
+                                <span>Alterar Cliente</span>
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                Somente Leitura
+                              </span>
+                            )
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -654,21 +758,22 @@ export default function ProdutosPage() {
                   <th>Tamanho / Medida</th>
                   <th>Quantidade em Estoque na Fábrica</th>
                   <th>Última Movimentação</th>
+                  <th>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={5} />)
+                  Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={6} />)
                 ) : filteredCustomStocks.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
                       Nenhum lote de personalizado armazenado na fábrica.
                     </td>
                   </tr>
                 ) : (
                   filteredCustomStocks.map((s) => (
                     <tr key={s.id}>
-                      <td style={{ fontWeight: 600 }}>{s.customer?.name || 'Cliente'}</td>
+                      <td style={{ fontWeight: 600 }}>{s.customer?.name || 'Cliente Não Vinculado'}</td>
                       <td style={{ fontWeight: 500 }}>{s.product?.name || 'Produto'}</td>
                       <td><code>{s.product?.measure || 'Padrão'}</code></td>
                       <td style={{ fontWeight: 700, color: 'hsl(142.1, 76.2%, 36.3%)' }}>
@@ -679,6 +784,24 @@ export default function ProdutosPage() {
                           <Clock size={12} />
                           {new Date(s.updated_at || s.created_at).toLocaleDateString('pt-BR')}
                         </span>
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => handleOpenCustomerModal(s)}
+                          title="Alterar ou vincular cliente para este produto de estoque"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
+                            padding: '0.375rem 0.75rem', background: 'transparent',
+                            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                            fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)',
+                            cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.backgroundColor = 'var(--surface-hover, rgba(0,0,0,0.04))'; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                        >
+                          <Users size={12} />
+                          <span>{s.customer?.id ? 'Alterar Cliente' : 'Vincular Cliente'}</span>
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -1112,6 +1235,132 @@ export default function ProdutosPage() {
                 </table>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL DE VINCULAÇÃO / ALTERAÇÃO DE CLIENTE (VENDEDORES E ADMIN) */}
+      {isCustomerModalOpen && customerModalProduct && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '1rem',
+          backdropFilter: 'blur(3px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-premium)',
+            width: '100%',
+            maxWidth: '520px',
+            animation: 'fadeIn 0.25s ease'
+          }}>
+            <header style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Users size={18} style={{ color: 'var(--primary)' }} />
+                  Vincular Cliente ao Produto
+                </h3>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Defina qual cliente é o proprietário deste produto em estoque.
+                </p>
+              </div>
+              <button 
+                onClick={() => setIsCustomerModalOpen(false)} 
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)' }}
+              >
+                &times;
+              </button>
+            </header>
+
+            <form onSubmit={handleSaveCustomerLink} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              
+              <div style={{
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.875rem 1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.35rem'
+              }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Produto Selecionado
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>
+                  {customerModalProduct.name}
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <span>SKU: <strong style={{ color: 'var(--text)' }}>{customerModalProduct.sku || '---'}</strong></span>
+                  {customerModalProduct.measure && (
+                    <span>Medida: <strong style={{ color: 'var(--text)' }}>{customerModalProduct.measure}</strong></span>
+                  )}
+                  <span>Estoque: <strong style={{ color: 'var(--primary)' }}>{customerModalProduct.stock_quantity?.toLocaleString('pt-BR')} un</strong></span>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" style={{ fontWeight: 600 }}>
+                  Selecione o Cliente Proprietário *
+                </label>
+                <select 
+                  className="form-select"
+                  value={selectedCustomerId}
+                  onChange={(e) => setSelectedCustomerId(e.target.value)}
+                  style={{ width: '100%', padding: '0.625rem', borderRadius: 'var(--radius-sm)', fontSize: '0.9rem' }}
+                >
+                  <option value="">— Nenhum (Desvincular Cliente) —</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.document ? `(${c.document})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                  Ao salvar, este produto personalizado ficará associado a este cliente na fábrica e nas consultas de saldo.
+                </span>
+              </div>
+
+              <footer style={{
+                paddingTop: '1rem',
+                borderTop: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '0.75rem'
+              }}>
+                <button 
+                  type="button" 
+                  onClick={() => setIsCustomerModalOpen(false)} 
+                  className="btn btn-secondary"
+                  disabled={savingCustomerLink}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={savingCustomerLink}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                >
+                  {savingCustomerLink && <RefreshCw size={14} className="spinner" />}
+                  <span>{savingCustomerLink ? 'Salvando Vínculo...' : 'Salvar Vínculo'}</span>
+                </button>
+              </footer>
+            </form>
           </div>
         </div>
       )}

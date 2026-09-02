@@ -33,7 +33,9 @@ async function handleSync(request: NextRequest) {
   
   const today = new Date();
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000); // Janela de 24 horas
-  const startDateStr = searchParams.get('startDate') || yesterday.toISOString().split('T')[0];
+  const MIN_SYNC_DATE = '2026-09-01';
+  const rawStartDate = searchParams.get('startDate') || yesterday.toISOString().split('T')[0];
+  const startDateStr = rawStartDate < MIN_SYNC_DATE ? MIN_SYNC_DATE : rawStartDate;
   const endDateStr = searchParams.get('endDate') || today.toISOString().split('T')[0];
 
   // Se chamado de forma síncrona explícita (ex: teste ou UI manual que queira aguardar retorno completo)

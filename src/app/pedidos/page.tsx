@@ -1400,16 +1400,14 @@ export default function PedidosPage() {
   const [importStartDate, setImportStartDate] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('importStartDate');
-      if (saved) return saved;
+      if (saved && saved >= '2026-09-01') return saved;
     }
-    const d = new Date();
-    d.setDate(d.getDate() - 15);
-    return d.toISOString().split('T')[0];
+    return '2026-09-01';
   });
   const [importEndDate, setImportEndDate] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('importEndDate');
-      if (saved) return saved;
+      if (saved && saved >= '2026-09-01') return saved;
     }
     return new Date().toISOString().split('T')[0];
   });
@@ -4274,6 +4272,7 @@ export default function PedidosPage() {
                 <input
                   type="date"
                   value={importStartDate}
+                  min="2026-09-01"
                   onChange={(e) => setImportStartDate(e.target.value)}
                   disabled={importing}
                   style={{
@@ -4291,6 +4290,7 @@ export default function PedidosPage() {
                 <input
                   type="date"
                   value={importEndDate}
+                  min="2026-09-01"
                   onChange={(e) => setImportEndDate(e.target.value)}
                   disabled={importing}
                   style={{
@@ -4443,6 +4443,7 @@ export default function PedidosPage() {
                       <input
                         type="date"
                         value={importStartDate}
+                        min="2026-09-01"
                         onChange={(e) => setImportStartDate(e.target.value)}
                         disabled={importing}
                         style={{
