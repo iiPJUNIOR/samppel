@@ -974,15 +974,34 @@ export class ContaAzulService {
         // Serviços são opcionais
       }
 
-      onProgress?.(`Encontrados ${productsList.length} itens no Conta Azul. Processando catálogo...`, 30);
+      // Desmembra produtos simples e variações filhas (Conta Azul v2)
+      const flatItems: any[] = [];
+      for (const prod of productsList) {
+        if (Array.isArray(prod.produtos_variacao) && prod.produtos_variacao.length > 0) {
+          for (const v of prod.produtos_variacao) {
+            flatItems.push({
+              id: v.id,
+              nome: v.nome || prod.nome,
+              codigo: v.codigo || (v.nome ? v.nome.toUpperCase().replace(/\s+/g, '-').slice(0, 50) : prod.codigo),
+              valor_venda: v.valor_venda ?? prod.valor_venda ?? 0,
+              saldo: v.saldo ?? 0,
+              descricao: prod.descricao || ''
+            });
+          }
+        } else {
+          flatItems.push(prod);
+        }
+      }
+
+      onProgress?.(`Encontrados ${flatItems.length} itens ativos no Conta Azul. Processando catálogo...`, 30);
 
       let imported = 0;
       let updated = 0;
       let currentIdx = 0;
 
-      for (const prod of productsList) {
+      for (const prod of flatItems) {
         currentIdx++;
-        const pct = 30 + Math.floor((currentIdx / (productsList.length || 1)) * 65);
+        const pct = 30 + Math.floor((currentIdx / (flatItems.length || 1)) * 65);
         const prodName = prod.nome || prod.name || 'Produto sem nome';
         onProgress?.(`Processando ${prodName}...`, pct);
 
