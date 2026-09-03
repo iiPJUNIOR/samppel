@@ -73,15 +73,15 @@ function StockInlineEdit({ product, onSave, canEdit = true }: { product: any, on
 }
 
 const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
-  sku: 140,
-  name: 360,
+  sku: 130,
+  name: 340,
   description: 180,
   price: 130,
   category: 120,
-  customer: 200,
-  stock: 140,
-  sync: 160,
-  actions: 280,
+  customer: 190,
+  stock: 130,
+  sync: 150,
+  actions: 360,
 };
 
 export default function ProdutosPage() {
@@ -100,7 +100,11 @@ export default function ProdutosPage() {
       const saved = localStorage.getItem('produtos_column_widths');
       if (saved) {
         try {
-          return { ...DEFAULT_COLUMN_WIDTHS, ...JSON.parse(saved) };
+          const parsed = JSON.parse(saved);
+          if (parsed && (!parsed.actions || parsed.actions < 350)) {
+            parsed.actions = 360;
+          }
+          return { ...DEFAULT_COLUMN_WIDTHS, ...parsed };
         } catch (e) {}
       }
     }
@@ -121,7 +125,7 @@ export default function ProdutosPage() {
     const handleMouseMove = (moveEvent: MouseEvent) => {
       if (!resizingRef.current) return;
       const diff = moveEvent.clientX - resizingRef.current.startX;
-      const minW = resizingRef.current.col === 'name' ? 180 : 70;
+      const minW = resizingRef.current.col === 'name' ? 180 : (resizingRef.current.col === 'actions' ? 320 : 70);
       const newWidth = Math.max(minW, resizingRef.current.startWidth + diff);
       setColWidths(prev => ({
         ...prev,
@@ -642,14 +646,14 @@ export default function ProdutosPage() {
             className="table" 
             style={{ 
               width: '100%', 
-              minWidth: `${(colWidths.sku || 140) + (colWidths.name || 360) + (colWidths.description || 180) + (isAdmin ? (colWidths.price || 130) : 0) + (colWidths.category || 120) + (colWidths.customer || 200) + (colWidths.stock || 140) + (colWidths.sync || 160) + (colWidths.actions || 280)}px`,
+              minWidth: `${(colWidths.sku || 130) + (colWidths.name || 340) + (colWidths.description || 180) + (isAdmin ? (colWidths.price || 130) : 0) + (colWidths.category || 120) + (colWidths.customer || 190) + (colWidths.stock || 130) + (colWidths.sync || 150) + (colWidths.actions || 360)}px`,
               borderCollapse: 'collapse',
               tableLayout: 'fixed'
             }}
           >
             <thead>
               <tr>
-                <th style={{ width: `${colWidths.sku || 140}px`, minWidth: `${colWidths.sku || 140}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ width: `${colWidths.sku || 130}px`, minWidth: `${colWidths.sku || 130}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>SKU / Código / Lote</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('sku', e)}
@@ -657,7 +661,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.name || 360}px`, minWidth: `${colWidths.name || 360}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ width: `${colWidths.name || 340}px`, minWidth: `${colWidths.name || 340}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Nome do Produto</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('name', e)}
@@ -691,7 +695,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.customer || 200}px`, minWidth: `${colWidths.customer || 200}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ width: `${colWidths.customer || 190}px`, minWidth: `${colWidths.customer || 190}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Cliente Vinculado</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('customer', e)}
@@ -699,7 +703,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.stock || 140}px`, minWidth: `${colWidths.stock || 140}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ width: `${colWidths.stock || 130}px`, minWidth: `${colWidths.stock || 130}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Estoque Físico</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('stock', e)}
@@ -707,7 +711,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.sync || 160}px`, minWidth: `${colWidths.sync || 160}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ width: `${colWidths.sync || 150}px`, minWidth: `${colWidths.sync || 150}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Sincronização ERP</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('sync', e)}
@@ -715,7 +719,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.actions || 280}px`, minWidth: `${colWidths.actions || 280}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ width: `${colWidths.actions || 360}px`, minWidth: `${colWidths.actions || 360}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Ações</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('actions', e)}
@@ -741,12 +745,12 @@ export default function ProdutosPage() {
                   const linkedCust = customers.find(c => c.id === product.customer_id);
                   return (
                     <tr key={product.id}>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.sku || 140}px`, maxWidth: `${colWidths.sku || 140}px`, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.sku || 130}px`, maxWidth: `${colWidths.sku || 130}px`, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         <code style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', backgroundColor: 'var(--background)', borderRadius: '4px' }}>
                           {product.sku || '---'}
                         </code>
                       </td>
-                      <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', width: `${colWidths.name || 360}px`, maxWidth: `${colWidths.name || 360}px`, overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.name}>
+                      <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', width: `${colWidths.name || 340}px`, maxWidth: `${colWidths.name || 340}px`, overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.name}>
                         {product.name}
                       </td>
                       <td style={{ verticalAlign: 'middle', fontSize: '0.8125rem', color: 'var(--text-muted)', width: `${colWidths.description || 180}px`, maxWidth: `${colWidths.description || 180}px`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.description || ''}>
@@ -762,7 +766,7 @@ export default function ProdutosPage() {
                           {product.category === 'LISAS' ? 'Lisas' : 'Personalizada'}
                         </span>
                       </td>
-                      <td style={{ verticalAlign: 'middle', fontSize: '0.85rem', width: `${colWidths.customer || 200}px`, maxWidth: `${colWidths.customer || 200}px`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={linkedCust ? linkedCust.name : 'Não vinculado'}>
+                      <td style={{ verticalAlign: 'middle', fontSize: '0.85rem', width: `${colWidths.customer || 190}px`, maxWidth: `${colWidths.customer || 190}px`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={linkedCust ? linkedCust.name : 'Não vinculado'}>
                         {product.category === 'PERSONALIZADA' ? (
                           linkedCust ? (
                             <span style={{ fontWeight: 600, color: 'var(--text)' }}>{linkedCust.name}</span>
@@ -773,10 +777,10 @@ export default function ProdutosPage() {
                           <span style={{ color: 'var(--text-muted)' }}>—</span>
                         )}
                       </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600, width: `${colWidths.stock || 140}px`, maxWidth: `${colWidths.stock || 140}px` }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600, width: `${colWidths.stock || 130}px`, maxWidth: `${colWidths.stock || 130}px` }}>
                         <StockInlineEdit product={product} onSave={handleInlineStockSave} canEdit={isAdmin} />
                       </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.sync || 160}px`, maxWidth: `${colWidths.sync || 160}px` }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.sync || 150}px`, maxWidth: `${colWidths.sync || 150}px` }}>
                         {product.conta_azul_id ? (
                           <span className="badge badge-success" title={`ID: ${product.conta_azul_id}`}>
                             <CheckCircle2 size={12} />
@@ -789,16 +793,16 @@ export default function ProdutosPage() {
                           </span>
                         )}
                       </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.actions || 280}px`, minWidth: `${colWidths.actions || 280}px` }}>
-                        <div style={{ display: 'inline-flex', gap: '0.375rem', alignItems: 'center' }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.actions || 360}px`, minWidth: `${colWidths.actions || 360}px` }}>
+                        <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
                           {isAdmin ? (
                             <>
                               <button
                                 onClick={() => handleOpenStock(product)}
                                 title="Ajustar estoque"
                                 style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                  padding: '0.3rem 0.55rem', background: 'transparent',
                                   border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                                   fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
                                   cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
@@ -814,8 +818,8 @@ export default function ProdutosPage() {
                                 onClick={() => handleOpenHistory(product)}
                                 title="Histórico de movimentações"
                                 style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                  padding: '0.3rem 0.55rem', background: 'transparent',
                                   border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                                   fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
                                   cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
@@ -831,8 +835,8 @@ export default function ProdutosPage() {
                                 onClick={() => handleOpenEdit(product)}
                                 title="Editar produto"
                                 style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                  padding: '0.3rem 0.55rem', background: 'transparent',
                                   border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                                   fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
                                   cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
@@ -848,8 +852,8 @@ export default function ProdutosPage() {
                                 onClick={() => handleDeleteProduct(product)}
                                 title="Apagar produto"
                                 style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                  padding: '0.375rem 0.75rem', background: 'transparent',
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                  padding: '0.3rem 0.55rem', background: 'transparent',
                                   border: '1px solid #ef4444', borderRadius: 'var(--radius-sm)',
                                   fontSize: '0.75rem', fontWeight: 500, color: '#ef4444',
                                   cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
@@ -868,8 +872,8 @@ export default function ProdutosPage() {
                                   onClick={() => handleOpenCustomerModal(product)}
                                   title="Alterar cliente vinculado a este produto"
                                   style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                    padding: '0.375rem 0.75rem', background: 'transparent',
+                                    display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                    padding: '0.3rem 0.55rem', background: 'transparent',
                                     border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                                     fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)',
                                     cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
@@ -884,8 +888,8 @@ export default function ProdutosPage() {
                                   onClick={() => handleOpenHistory(product)}
                                   title="Histórico de movimentações"
                                   style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                    padding: '0.375rem 0.75rem', background: 'transparent',
+                                    display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                    padding: '0.3rem 0.55rem', background: 'transparent',
                                     border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                                     fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
                                     cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
@@ -903,8 +907,8 @@ export default function ProdutosPage() {
                                   onClick={() => handleOpenHistory(product)}
                                   title="Histórico de movimentações"
                                   style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: '0.375rem',
-                                    padding: '0.375rem 0.75rem', background: 'transparent',
+                                    display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                    padding: '0.3rem 0.55rem', background: 'transparent',
                                     border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                                     fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)',
                                     cursor: 'pointer', transition: 'all 0.15s ease', whiteSpace: 'nowrap'
