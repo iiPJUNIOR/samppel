@@ -919,37 +919,62 @@ export class ContaAzulService {
       const dbClient = supabaseAdmin || supabase;
       if (!dbClient) throw new Error('Cliente Supabase não inicializado.');
 
-      // 1. Busca Produtos no Conta Azul
+      // 1. Busca Produtos no Conta Azul (com paginação completa v2)
       let productsList: any[] = [];
-      try {
-        const prodRes = await fetch(`${CONTA_AZUL_API_URL}/v1/products?size=200`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (prodRes.ok) {
-          const prodData = await prodRes.json();
-          productsList = Array.isArray(prodData) ? prodData : (prodData.items || prodData.data || []);
-        } else {
-          console.warn('Endpoint /v1/products respondeu status:', prodRes.status);
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        onProgress?.(`Buscando catálogo de produtos no Conta Azul (Página ${page})...`, 15);
+        try {
+          const prodRes = await fetch(`${CONTA_AZUL_API_URL}/v1/produtos?tamanho_pagina=100&pagina=${page}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (prodRes.ok) {
+            const prodData = await prodRes.json();
+            const pageItems = prodData.items || prodData.itens || (Array.isArray(prodData) ? prodData : []);
+            productsList.push(...pageItems);
+            if (pageItems.length < 100 || (prodData.totalItems && productsList.length >= prodData.totalItems)) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          } else {
+            console.warn(`Endpoint /v1/produtos respondeu status ${prodRes.status} na página ${page}`);
+            hasMore = false;
+          }
+        } catch (e) {
+          console.error(`Erro ao buscar /v1/produtos na página ${page}:`, e);
+          hasMore = false;
         }
-      } catch (e) {
-        console.error('Erro ao buscar /v1/products:', e);
       }
 
-      // 2. Busca Serviços no Conta Azul (caso existam produtos cadastrados como serviços)
+      // 2. Busca Serviços no Conta Azul (caso existam itens cadastrados como serviços)
       try {
-        const servRes = await fetch(`${CONTA_AZUL_API_URL}/v1/services?size=200`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (servRes.ok) {
-          const servData = await servRes.json();
-          const servList = Array.isArray(servData) ? servData : (servData.items || servData.data || []);
-          productsList = [...productsList, ...servList];
+        let servPage = 1;
+        let hasMoreServ = true;
+        while (hasMoreServ) {
+          const servRes = await fetch(`${CONTA_AZUL_API_URL}/v1/servicos?tamanho_pagina=100&pagina=${servPage}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (servRes.ok) {
+            const servData = await servRes.json();
+            const servItems = servData.items || servData.itens || (Array.isArray(servData) ? servData : []);
+            productsList.push(...servItems);
+            if (servItems.length < 100 || (servData.totalItems && servItems.length >= servData.totalItems)) {
+              hasMoreServ = false;
+            } else {
+              servPage++;
+            }
+          } else {
+            hasMoreServ = false;
+          }
         }
       } catch (e) {
         // Serviços são opcionais
       }
 
-      onProgress?.(`Encontrados ${productsList.length} itens no Conta Azul. Processando...`, 30);
+      onProgress?.(`Encontrados ${productsList.length} itens no Conta Azul. Processando catálogo...`, 30);
 
       let imported = 0;
       let updated = 0;
@@ -958,22 +983,22 @@ export class ContaAzulService {
       for (const prod of productsList) {
         currentIdx++;
         const pct = 30 + Math.floor((currentIdx / (productsList.length || 1)) * 65);
-        const prodName = prod.name || prod.nome || 'Produto sem nome';
+        const prodName = prod.nome || prod.name || 'Produto sem nome';
         onProgress?.(`Processando ${prodName}...`, pct);
 
         const caId = prod.id || prod.conta_azul_id;
-        const code = prod.code || prod.codigo || prod.sku || (prodName.toUpperCase().replace(/\s+/g, '-'));
-        const price = prod.value || prod.preco || prod.price || prod.valor || 0;
-        const desc = prod.description || prod.descricao || '';
+        const code = prod.codigo || prod.code || prod.sku || (prodName.toUpperCase().replace(/\s+/g, '-').slice(0, 50));
+        const price = prod.valor_venda ?? prod.value ?? prod.preco ?? prod.price ?? prod.valor ?? 0;
+        const desc = prod.descricao || prod.description || '';
         
         // Extrai saldo em estoque
         let stockQty = 0;
-        if (typeof prod.stock === 'object' && prod.stock !== null) {
+        if (typeof prod.saldo === 'number') {
+          stockQty = prod.saldo;
+        } else if (typeof prod.stock === 'object' && prod.stock !== null) {
           stockQty = prod.stock.quantity ?? prod.stock.saldo ?? 0;
         } else if (typeof prod.stock_quantity === 'number') {
           stockQty = prod.stock_quantity;
-        } else if (typeof prod.saldo === 'number') {
-          stockQty = prod.saldo;
         } else if (typeof prod.quantidade === 'number') {
           stockQty = prod.quantidade;
         }
@@ -1001,7 +1026,8 @@ export class ContaAzulService {
           sku: code,
           description: desc,
           price: price,
-          conta_azul_id: caId || undefined
+          conta_azul_id: caId || undefined,
+          stock_quantity: stockQty
         };
 
         if (existingProd) {
@@ -1014,7 +1040,7 @@ export class ContaAzulService {
         } else {
           const { error } = await dbClient
             .from('products')
-            .insert([{ tenant_id: this.tenantId, ...payload, stock_quantity: 0 }]);
+            .insert([{ tenant_id: this.tenantId, ...payload }]);
           if (error) console.error('Erro ao inserir produto:', error);
           else imported++;
         }

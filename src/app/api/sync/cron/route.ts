@@ -14,11 +14,18 @@ async function performSync(tenantId: string, startDateStr: string, endDateStr: s
     const queueResult = await queueService.processQueue();
     console.log(`[CronSync] Fila processada:`, queueResult);
 
-    // 2. Fetch new orders from Conta Azul
+    // 2. Sincronizar catálogo de produtos do Conta Azul
     const caService = new ContaAzulService(tenantId);
+    const productResult = await caService.importProducts().catch(err => {
+      console.error('[CronSync] Erro ao sincronizar catálogo de produtos:', err);
+      return { imported: 0, updated: 0, total: 0 };
+    });
+    console.log(`[CronSync] Catálogo de produtos sincronizado:`, productResult);
+
+    // 3. Fetch new orders from Conta Azul
     const importResult = await caService.importOrders(startDateStr, endDateStr);
     console.log(`[CronSync] Importação concluída com sucesso:`, importResult);
-    return { queueResult, importResult };
+    return { queueResult, productResult, importResult };
   } catch (error: any) {
     console.error('[CronSync] Erro durante a sincronização:', error);
     throw error;
