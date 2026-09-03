@@ -101,54 +101,87 @@ export default function ProdutosPage() {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed && (!parsed.actions || parsed.actions < 350)) {
-            parsed.actions = 360;
+          if (parsed && typeof parsed === 'object') {
+            if (!parsed.actions || parsed.actions < 350) {
+              parsed.actions = 360;
+            }
+            return { ...DEFAULT_COLUMN_WIDTHS, ...parsed };
           }
-          return { ...DEFAULT_COLUMN_WIDTHS, ...parsed };
         } catch (e) {}
       }
     }
     return DEFAULT_COLUMN_WIDTHS;
   });
 
-  const resizingRef = React.useRef<{ col: string; startX: number; startWidth: number } | null>(null);
+  const resizingStateRef = React.useRef<{
+    col: string;
+    startX: number;
+    startWidth: number;
+    currentWidth: number;
+  } | null>(null);
+
+  const rafRef = React.useRef<number | null>(null);
 
   const handleMouseDownResize = (col: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    resizingRef.current = {
+
+    const startWidth = colWidths[col] || DEFAULT_COLUMN_WIDTHS[col] || 150;
+    resizingStateRef.current = {
       col,
       startX: e.clientX,
-      startWidth: colWidths[col] || DEFAULT_COLUMN_WIDTHS[col] || 150
+      startWidth,
+      currentWidth: startWidth,
     };
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const diff = moveEvent.clientX - resizingRef.current.startX;
-      const minW = resizingRef.current.col === 'name' ? 180 : (resizingRef.current.col === 'actions' ? 320 : 70);
-      const newWidth = Math.max(minW, resizingRef.current.startWidth + diff);
-      setColWidths(prev => ({
-        ...prev,
-        [resizingRef.current!.col]: newWidth
-      }));
-    };
+    if (typeof document !== 'undefined') {
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+    }
 
-    const handleMouseUp = () => {
-      if (resizingRef.current) {
-        setColWidths(latest => {
-          try {
-            localStorage.setItem('produtos_column_widths', JSON.stringify(latest));
-          } catch (e) {}
-          return latest;
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingStateRef.current) return;
+      const { col: activeCol, startX: initialX, startWidth: initialWidth } = resizingStateRef.current;
+      const diff = moveEvent.clientX - initialX;
+      const minW = activeCol === 'name' ? 180 : (activeCol === 'actions' ? 320 : 70);
+      const newWidth = Math.max(minW, initialWidth + diff);
+      resizingStateRef.current.currentWidth = newWidth;
+
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        setColWidths(prev => {
+          if (prev[activeCol] === newWidth) return prev;
+          return { ...prev, [activeCol]: newWidth };
         });
-        resizingRef.current = null;
-      }
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      });
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    const onMouseUp = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+      if (typeof document !== 'undefined') {
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+      }
+
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      if (resizingStateRef.current) {
+        const { col: activeCol, currentWidth: finalWidth } = resizingStateRef.current;
+        resizingStateRef.current = null;
+        setColWidths(latest => {
+          const updated = { ...latest, [activeCol]: finalWidth };
+          try {
+            localStorage.setItem('produtos_column_widths', JSON.stringify(updated));
+          } catch (e) {}
+          return updated;
+        });
+      }
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   const handleResetColWidths = () => {
@@ -651,9 +684,20 @@ export default function ProdutosPage() {
               tableLayout: 'fixed'
             }}
           >
+            <colgroup>
+              <col style={{ width: `${colWidths.sku || 130}px` }} />
+              <col style={{ width: `${colWidths.name || 340}px` }} />
+              <col style={{ width: `${colWidths.description || 180}px` }} />
+              {isAdmin && <col style={{ width: `${colWidths.price || 130}px` }} />}
+              <col style={{ width: `${colWidths.category || 120}px` }} />
+              <col style={{ width: `${colWidths.customer || 190}px` }} />
+              <col style={{ width: `${colWidths.stock || 130}px` }} />
+              <col style={{ width: `${colWidths.sync || 150}px` }} />
+              <col style={{ width: `${colWidths.actions || 360}px` }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ width: `${colWidths.sku || 130}px`, minWidth: `${colWidths.sku || 130}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>SKU / Código / Lote</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('sku', e)}
@@ -661,7 +705,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.name || 340}px`, minWidth: `${colWidths.name || 340}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Nome do Produto</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('name', e)}
@@ -669,7 +713,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.description || 180}px`, minWidth: `${colWidths.description || 180}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Descrição</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('description', e)}
@@ -678,7 +722,7 @@ export default function ProdutosPage() {
                   />
                 </th>
                 {isAdmin && (
-                  <th style={{ width: `${colWidths.price || 130}px`, minWidth: `${colWidths.price || 130}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                  <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                     <span>Preço Unitário</span>
                     <div
                       onMouseDown={(e) => handleMouseDownResize('price', e)}
@@ -687,7 +731,7 @@ export default function ProdutosPage() {
                     />
                   </th>
                 )}
-                <th style={{ width: `${colWidths.category || 120}px`, minWidth: `${colWidths.category || 120}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Categoria</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('category', e)}
@@ -695,7 +739,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.customer || 190}px`, minWidth: `${colWidths.customer || 190}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Cliente Vinculado</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('customer', e)}
@@ -703,7 +747,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.stock || 130}px`, minWidth: `${colWidths.stock || 130}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Estoque Físico</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('stock', e)}
@@ -711,7 +755,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.sync || 150}px`, minWidth: `${colWidths.sync || 150}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Sincronização ERP</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('sync', e)}
@@ -719,7 +763,7 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ width: `${colWidths.actions || 360}px`, minWidth: `${colWidths.actions || 360}px`, position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Ações</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('actions', e)}
@@ -745,28 +789,28 @@ export default function ProdutosPage() {
                   const linkedCust = customers.find(c => c.id === product.customer_id);
                   return (
                     <tr key={product.id}>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.sku || 130}px`, maxWidth: `${colWidths.sku || 130}px`, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         <code style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', backgroundColor: 'var(--background)', borderRadius: '4px' }}>
                           {product.sku || '---'}
                         </code>
                       </td>
-                      <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', width: `${colWidths.name || 340}px`, maxWidth: `${colWidths.name || 340}px`, overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.name}>
+                      <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.name}>
                         {product.name}
                       </td>
-                      <td style={{ verticalAlign: 'middle', fontSize: '0.8125rem', color: 'var(--text-muted)', width: `${colWidths.description || 180}px`, maxWidth: `${colWidths.description || 180}px`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.description || ''}>
+                      <td style={{ verticalAlign: 'middle', fontSize: '0.8125rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.description || ''}>
                         {product.description || '---'}
                       </td>
                       {isAdmin && (
-                        <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)', width: `${colWidths.price || 130}px`, maxWidth: `${colWidths.price || 130}px` }}>
+                        <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
                           {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price || 0)}
                         </td>
                       )}
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.category || 120}px`, maxWidth: `${colWidths.category || 120}px` }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <span className={`badge ${product.category === 'LISAS' ? 'badge-secondary' : 'badge-primary'}`}>
                           {product.category === 'LISAS' ? 'Lisas' : 'Personalizada'}
                         </span>
                       </td>
-                      <td style={{ verticalAlign: 'middle', fontSize: '0.85rem', width: `${colWidths.customer || 190}px`, maxWidth: `${colWidths.customer || 190}px`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={linkedCust ? linkedCust.name : 'Não vinculado'}>
+                      <td style={{ verticalAlign: 'middle', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={linkedCust ? linkedCust.name : 'Não vinculado'}>
                         {product.category === 'PERSONALIZADA' ? (
                           linkedCust ? (
                             <span style={{ fontWeight: 600, color: 'var(--text)' }}>{linkedCust.name}</span>
@@ -777,10 +821,10 @@ export default function ProdutosPage() {
                           <span style={{ color: 'var(--text-muted)' }}>—</span>
                         )}
                       </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600, width: `${colWidths.stock || 130}px`, maxWidth: `${colWidths.stock || 130}px` }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600 }}>
                         <StockInlineEdit product={product} onSave={handleInlineStockSave} canEdit={isAdmin} />
                       </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.sync || 150}px`, maxWidth: `${colWidths.sync || 150}px` }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         {product.conta_azul_id ? (
                           <span className="badge badge-success" title={`ID: ${product.conta_azul_id}`}>
                             <CheckCircle2 size={12} />
@@ -793,7 +837,7 @@ export default function ProdutosPage() {
                           </span>
                         )}
                       </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', width: `${colWidths.actions || 360}px`, minWidth: `${colWidths.actions || 360}px` }}>
+                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
                           {isAdmin ? (
                             <>
