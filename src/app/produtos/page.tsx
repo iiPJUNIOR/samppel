@@ -463,8 +463,8 @@ export default function ProdutosPage() {
 
   const handleOpenStock = (product: any) => {
     setSelectedProduct(product);
-    setStockQtyChange(100);
-    setStockAdjType('ENTRADA');
+    setStockAdjType('AJUSTE');
+    setStockQtyChange(product.stock_quantity || 0);
     setStockDescription('');
     setIsStockModalOpen(true);
   };
@@ -541,9 +541,25 @@ export default function ProdutosPage() {
     e.preventDefault();
     if (!selectedProduct) return;
 
-    // Output is stored as negative quantity
-    const quantity = stockAdjType === 'SAIDA' ? -Math.abs(stockQtyChange) : Math.abs(stockQtyChange);
-    const desc = stockDescription || `Ajuste manual de estoque (${stockAdjType})`;
+    const currentStock = Number(selectedProduct.stock_quantity || 0);
+    let quantity = 0;
+    let desc = '';
+
+    if (stockAdjType === 'AJUSTE') {
+      const newTotal = Number(stockQtyChange);
+      quantity = newTotal - currentStock;
+      if (quantity === 0) {
+        setIsStockModalOpen(false);
+        return;
+      }
+      desc = stockDescription || `Ajuste de saldo de ${currentStock} un para ${newTotal} un`;
+    } else if (stockAdjType === 'SAIDA') {
+      quantity = -Math.abs(Number(stockQtyChange));
+      desc = stockDescription || `Saída manual de estoque (${Math.abs(quantity)} un)`;
+    } else {
+      quantity = Math.abs(Number(stockQtyChange));
+      desc = stockDescription || `Entrada manual de estoque (${quantity} un)`;
+    }
 
     if (user?.role === 'Administrador') {
       const { error } = await adjustStock(
@@ -1483,7 +1499,7 @@ export default function ProdutosPage() {
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-premium)',
             width: '100%',
-            maxWidth: '450px',
+            maxWidth: '480px',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{
@@ -1493,9 +1509,14 @@ export default function ProdutosPage() {
               justifyContent: 'space-between',
               alignItems: 'center'
             }}>
-              <h3 style={{ fontSize: '1.15rem' }}>
-                Ajustar Estoque: {selectedProduct?.name}
-              </h3>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', margin: 0 }}>
+                  Ajustar Estoque
+                </h3>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  {selectedProduct?.name}
+                </span>
+              </div>
               <button 
                 onClick={() => setIsStockModalOpen(false)} 
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)' }}
@@ -1506,48 +1527,103 @@ export default function ProdutosPage() {
 
             <form onSubmit={handleStockSubmit} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--background)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Estoque Atual:</span>
-                <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{selectedProduct?.stock_quantity.toLocaleString('pt-BR')} un</span>
-              </div>
-
+              {/* TIPO DE MOVIMENTAÇÃO */}
               <div className="form-group">
-                <label className="form-label">Tipo de Movimentação *</label>
+                <label className="form-label">Tipo de Operação *</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                   <button 
                     type="button" 
+                    className={`btn ${stockAdjType === 'AJUSTE' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '0.5rem', fontSize: '0.8rem', display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'center' }}
+                    onClick={() => {
+                      setStockAdjType('AJUSTE');
+                      setStockQtyChange(selectedProduct?.stock_quantity || 0);
+                    }}
+                  >
+                    Definir Saldo
+                  </button>
+                  <button 
+                    type="button" 
                     className={`btn ${stockAdjType === 'ENTRADA' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ padding: '0.5rem', fontSize: '0.8rem', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
-                    onClick={() => setStockAdjType('ENTRADA')}
+                    style={{ padding: '0.5rem', fontSize: '0.8rem', display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'center' }}
+                    onClick={() => {
+                      setStockAdjType('ENTRADA');
+                      setStockQtyChange(0);
+                    }}
                   >
                     <ArrowUpRight size={14} />
-                    Entrada
+                    Entrada (+)
                   </button>
                   <button 
                     type="button" 
                     className={`btn ${stockAdjType === 'SAIDA' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ padding: '0.5rem', fontSize: '0.8rem', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
-                    onClick={() => setStockAdjType('SAIDA')}
+                    style={{ padding: '0.5rem', fontSize: '0.8rem', display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'center' }}
+                    onClick={() => {
+                      setStockAdjType('SAIDA');
+                      setStockQtyChange(0);
+                    }}
                   >
                     <ArrowDownRight size={14} />
-                    Saída
-                  </button>
-                  <button 
-                    type="button" 
-                    className={`btn ${stockAdjType === 'AJUSTE' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ padding: '0.5rem', fontSize: '0.8rem' }}
-                    onClick={() => setStockAdjType('AJUSTE')}
-                  >
-                    Ajuste
+                    Saída (-)
                   </button>
                 </div>
               </div>
 
+              {/* CARD DE PREVIEW DE ESTOQUE */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: 'var(--background)',
+                padding: '0.85rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border)'
+              }}>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Estoque Atual:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: '0.95rem' }}>
+                    {Number(selectedProduct?.stock_quantity || 0).toLocaleString('pt-BR')} un
+                  </span>
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>
+                    {stockAdjType === 'AJUSTE' ? 'Novo Saldo Final:' : 'Saldo Previsto:'}
+                  </span>
+                  <span style={{
+                    fontWeight: 700,
+                    fontSize: '1rem',
+                    color: (() => {
+                      const cur = Number(selectedProduct?.stock_quantity || 0);
+                      const next = stockAdjType === 'AJUSTE'
+                        ? Number(stockQtyChange || 0)
+                        : (stockAdjType === 'ENTRADA' ? cur + Math.abs(Number(stockQtyChange || 0)) : cur - Math.abs(Number(stockQtyChange || 0)));
+                      return next < 500 ? 'var(--danger)' : 'var(--primary)';
+                    })()
+                  }}>
+                    {(() => {
+                      const cur = Number(selectedProduct?.stock_quantity || 0);
+                      const next = stockAdjType === 'AJUSTE'
+                        ? Number(stockQtyChange || 0)
+                        : (stockAdjType === 'ENTRADA' ? cur + Math.abs(Number(stockQtyChange || 0)) : cur - Math.abs(Number(stockQtyChange || 0)));
+                      return `${Number(next).toLocaleString('pt-BR')} un`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+
+              {/* QUANTIDADE INPUT */}
               <div className="form-group">
-                <label className="form-label">Quantidade de Unidades *</label>
+                <label className="form-label">
+                  {stockAdjType === 'AJUSTE' 
+                    ? 'Novo Saldo Total em Estoque (Unidades) *' 
+                    : stockAdjType === 'ENTRADA' 
+                      ? 'Quantidade a Adicionar (Unidades) *' 
+                      : 'Quantidade a Retirar (Unidades) *'}
+                </label>
                 <input 
                   type="number" 
-                  min="1"
+                  min={stockAdjType === 'AJUSTE' ? 0 : 1}
                   className="form-input" 
                   required
                   value={stockQtyChange}
@@ -1560,7 +1636,13 @@ export default function ProdutosPage() {
                 <textarea 
                   className="form-textarea" 
                   required
-                  placeholder="Ex: Recebimento de bobina de fornecedor Klabin, ou Retirada de caixas para produção, etc..."
+                  placeholder={
+                    stockAdjType === 'AJUSTE'
+                      ? 'Ex: Contagem física de balanço, ajuste de inventário mensal...'
+                      : stockAdjType === 'ENTRADA'
+                        ? 'Ex: Recebimento de compra de fornecedor, devolução de lote...'
+                        : 'Ex: Baixa por refugo, retirada para amostras...'
+                  }
                   value={stockDescription}
                   onChange={(e) => setStockDescription(e.target.value)}
                 />
@@ -1577,7 +1659,7 @@ export default function ProdutosPage() {
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Confirmar Movimentação
+                  {stockAdjType === 'AJUSTE' ? 'Confirmar Novo Saldo' : 'Confirmar Movimentação'}
                 </button>
               </footer>
             </form>
