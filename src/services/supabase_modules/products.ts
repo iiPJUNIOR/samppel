@@ -9,7 +9,7 @@ export interface Product {
   description?: string | null;
   price?: number;
   stock_quantity: number;
-  category?: 'LISAS' | 'PERSONALIZADA' | string;
+  category?: 'LISAS' | 'PERSONALIZADA' | 'COMPRA' | string;
   conta_azul_id?: string | null;
   bind_to_first_item?: boolean;
   bind_requires_handling?: boolean;
@@ -17,17 +17,26 @@ export interface Product {
   updated_at?: string;
 }
 
-function parseProductCategory(p: any): string {
-  if (p.category) return p.category;
+function parseProductCategory(p: any): string | null {
+  if (p.category) {
+    if (p.category === 'SEM_CATEGORIA' || p.category === '' || p.category === 'NENHUMA') return null;
+    return p.category;
+  }
   if (p.description && typeof p.description === 'string') {
     const match = p.description.match(/\[CATEGORIA:\s*([A-Z_]+)\]/i);
-    if (match && match[1]) return match[1].toUpperCase();
+    if (match && match[1]) {
+      const cat = match[1].toUpperCase();
+      if (cat === 'SEM_CATEGORIA' || cat === 'NENHUMA' || cat === 'NENHUM' || cat === 'VAZIO') {
+        return null;
+      }
+      return cat;
+    }
   }
   const normName = (p.name || '').toLowerCase();
   if (normName.includes('sem impress') || normName.includes('lisa') || normName.includes('padrao')) {
     return 'LISAS';
   }
-  return 'PERSONALIZADA';
+  return null;
 }
 
 function parseProductMeasure(p: any): string | null {
@@ -64,7 +73,7 @@ function parseProductBindHandling(p: any): boolean {
   return !!p.bind_requires_handling;
 }
 
-function encodeProductDescription(desc: string | null | undefined, category: string | undefined, measure: string | undefined, customerId: string | undefined, bindToFirst: boolean | undefined = false, bindHandling: boolean | undefined = false): string {
+function encodeProductDescription(desc: string | null | undefined, category: string | undefined | null, measure: string | undefined, customerId: string | undefined, bindToFirst: boolean | undefined = false, bindHandling: boolean | undefined = false): string {
   let cleanDesc = (desc || '')
     .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
     .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
@@ -72,8 +81,10 @@ function encodeProductDescription(desc: string | null | undefined, category: str
     .replace(/\s*\[BIND_FIRST:\s*(TRUE|FALSE)\]/gi, '')
     .replace(/\s*\[BIND_HANDLING:\s*(TRUE|FALSE)\]/gi, '')
     .trim();
-  if (category) {
+  if (category && category !== 'SEM_CATEGORIA') {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[CATEGORIA:${category}]` : `[CATEGORIA:${category}]`;
+  } else {
+    cleanDesc = cleanDesc ? `${cleanDesc}\n[CATEGORIA:SEM_CATEGORIA]` : `[CATEGORIA:SEM_CATEGORIA]`;
   }
   if (measure) {
     cleanDesc = cleanDesc ? `${cleanDesc}\n[MEDIDA:${measure}]` : `[MEDIDA:${measure}]`;
@@ -118,8 +129,148 @@ export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99
   return { data, error };
 }
 
+export interface PaginatedProductsParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  tab?: 'lisas' | 'custom_stocks' | 'compra' | 'sem_categoria' | 'all';
+  tenantId?: string;
+}
+
+export async function getProductsPaginated({
+  page = 1,
+  pageSize = 25,
+  search = '',
+  tab = 'all',
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+}: PaginatedProductsParams) {
+  if (isMockMode) {
+    let list = mockProducts.filter(p => p.tenant_id === tenantId);
+    if (tab === 'lisas') list = list.filter(p => p.category === 'LISAS');
+    else if (tab === 'custom_stocks') list = list.filter(p => p.category === 'PERSONALIZADA');
+    else if (tab === 'compra') list = list.filter(p => p.category === 'COMPRA');
+    else if (tab === 'sem_categoria') list = list.filter(p => !p.category || (p.category !== 'LISAS' && p.category !== 'PERSONALIZADA' && p.category !== 'COMPRA'));
+    
+    if (search) {
+      const s = search.toLowerCase();
+      list = list.filter(p => (p.name || '').toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s));
+    }
+    const totalCount = list.length;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize;
+    return {
+      data: list.slice(from, to),
+      totalCount,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+      error: null
+    };
+  }
+
+  let query = getDbClient()
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('tenant_id', tenantId);
+
+  // Filtro de Categoria por Aba
+  if (tab === 'lisas') {
+    query = query.or('description.ilike.%[CATEGORIA:LISAS]%,and(description.not.ilike.%[CATEGORIA:%,name.ilike.%sem impress%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%lisa%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%padrao%)');
+  } else if (tab === 'custom_stocks') {
+    query = query.ilike('description', '%[CATEGORIA:PERSONALIZADA]%');
+  } else if (tab === 'compra') {
+    query = query.ilike('description', '%[CATEGORIA:COMPRA]%');
+  } else if (tab === 'sem_categoria') {
+    query = query.or('description.ilike.%[CATEGORIA:SEM_CATEGORIA]%,and(description.not.ilike.%[CATEGORIA:LISAS]%,description.not.ilike.%[CATEGORIA:PERSONALIZADA]%,description.not.ilike.%[CATEGORIA:COMPRA]%,name.not.ilike.%sem impress%,name.not.ilike.%lisa%,name.not.ilike.%padrao%)');
+  }
+
+  // Filtro de Pesquisa
+  if (search && search.trim()) {
+    const s = search.trim().replace(/[%_]/g, '');
+    query = query.or(`name.ilike.%${s}%,sku.ilike.%${s}%,description.ilike.%${s}%`);
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const { data, count, error } = await query
+    .order('name', { ascending: true })
+    .range(from, to);
+
+  if (error) {
+    return { data: [], totalCount: 0, page, pageSize, totalPages: 1, error };
+  }
+
+  const mapped = (data || []).map((p: any) => ({
+    ...p,
+    category: parseProductCategory(p),
+    measure: parseProductMeasure(p),
+    customer_id: parseProductCustomer(p),
+    bind_to_first_item: parseProductBindToFirst(p),
+    bind_requires_handling: parseProductBindHandling(p),
+    description: (p.description || '')
+      .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
+      .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
+      .replace(/\s*\[CLIENTE:\s*[^\]]+\]/gi, '')
+      .replace(/\s*\[BIND_FIRST:\s*(TRUE|FALSE)\]/gi, '')
+      .replace(/\s*\[BIND_HANDLING:\s*(TRUE|FALSE)\]/gi, '')
+      .trim()
+  }));
+
+  const total = count || 0;
+
+  return {
+    data: mapped,
+    totalCount: total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    error: null
+  };
+}
+
+export async function getProductCategoryCounts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  if (isMockMode) {
+    const list = mockProducts.filter(p => p.tenant_id === tenantId);
+    return {
+      all: list.length,
+      lisas: list.filter(p => p.category === 'LISAS').length,
+      custom_stocks: list.filter(p => p.category === 'PERSONALIZADA').length,
+      compra: list.filter(p => p.category === 'COMPRA').length,
+      sem_categoria: list.filter(p => !p.category || (p.category !== 'LISAS' && p.category !== 'PERSONALIZADA' && p.category !== 'COMPRA')).length
+    };
+  }
+
+  try {
+    const client = getDbClient();
+    const [allRes, compraRes, customRes, lisasRes] = await Promise.all([
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).ilike('description', '%[CATEGORIA:COMPRA]%'),
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).ilike('description', '%[CATEGORIA:PERSONALIZADA]%'),
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).or('description.ilike.%[CATEGORIA:LISAS]%,and(description.not.ilike.%[CATEGORIA:%,name.ilike.%sem impress%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%lisa%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%padrao%)')
+    ]);
+
+    const all = allRes.count || 0;
+    const compra = compraRes.count || 0;
+    const custom_stocks = customRes.count || 0;
+    const lisas = lisasRes.count || 0;
+    const sem_categoria = Math.max(0, all - (lisas + custom_stocks + compra));
+
+    return {
+      all,
+      lisas,
+      custom_stocks,
+      compra,
+      sem_categoria
+    };
+  } catch (e) {
+    console.error('Error fetching category counts:', e);
+    return { all: 0, lisas: 0, custom_stocks: 0, compra: 0, sem_categoria: 0 };
+  }
+}
+
 export async function createProduct(product: any) {
-  const category = product.category || 'LISAS';
+  const category = product.category || null;
   const description = encodeProductDescription(product.description, category, product.measure, product.customer_id, product.bind_to_first_item, product.bind_requires_handling);
   const payload = {
     ...product,

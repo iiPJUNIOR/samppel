@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getProducts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
+import { getProducts, getProductsPaginated, getProductCategoryCounts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import SearchableCustomerSelect from '@/components/SearchableCustomerSelect';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2, Users } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2, Users, ShoppingCart, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 function StockInlineEdit({ product, onSave, canEdit = true }: { product: any, onSave: (id: string, newStock: number) => Promise<void>, canEdit?: boolean }) {
   const [val, setVal] = useState(product.stock_quantity?.toString() || '0');
@@ -74,14 +74,10 @@ function StockInlineEdit({ product, onSave, canEdit = true }: { product: any, on
 }
 
 const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
-  sku: 130,
-  name: 340,
-  description: 180,
-  price: 130,
-  category: 120,
-  customer: 190,
-  stock: 130,
-  sync: 150,
+  name: 420,
+  category: 140,
+  customer: 240,
+  stock: 140,
   actions: 360,
 };
 
@@ -90,9 +86,23 @@ export default function ProdutosPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Pagination States
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [categoryCounts, setCategoryCounts] = useState({
+    all: 0,
+    lisas: 0,
+    custom_stocks: 0,
+    compra: 0,
+    sem_categoria: 0
+  });
   
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'lisas' | 'custom_stocks' | 'all'>('lisas');
+  const [activeTab, setActiveTab] = useState<'lisas' | 'custom_stocks' | 'compra' | 'sem_categoria' | 'all'>('lisas');
   const [customStocks, setCustomStocks] = useState<any[]>([]);
 
   // Column Resizing State
@@ -195,6 +205,8 @@ export default function ProdutosPage() {
   // Modals State
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [detailProduct, setDetailProduct] = useState<any>(null);
   const [modalType, setModalType] = useState<'create' | 'edit'>('create');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
@@ -262,7 +274,7 @@ export default function ProdutosPage() {
   const [formStock, setFormStock] = useState(0);
   const [formBindToFirstItem, setFormBindToFirstItem] = useState(false);
   const [formBindRequiresHandling, setFormBindRequiresHandling] = useState(false);
-  const [formCategory, setFormCategory] = useState<'LISAS' | 'PERSONALIZADA'>('LISAS');
+  const [formCategory, setFormCategory] = useState<'LISAS' | 'PERSONALIZADA' | 'COMPRA' | ''>('');
   const [formMeasure, setFormMeasure] = useState('');
   const [formCustomer, setFormCustomer] = useState('');
   const [customers, setCustomers] = useState<any[]>([]);
@@ -340,15 +352,35 @@ export default function ProdutosPage() {
     }
   };
 
+  // Search debounce effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const [productsRes, customStocksRes, customersRes] = await Promise.all([
-        getProducts(user?.tenant_id),
+      const [paginatedRes, countsRes, customStocksRes, customersRes] = await Promise.all([
+        getProductsPaginated({
+          page,
+          pageSize,
+          search: debouncedSearch,
+          tab: activeTab,
+          tenantId: user?.tenant_id
+        }),
+        getProductCategoryCounts(user?.tenant_id),
         getCustomerProductStock(undefined, undefined, user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'),
         getCustomers(user?.tenant_id)
       ]);
-      setProducts(productsRes.data || []);
+
+      setProducts(paginatedRes.data || []);
+      setTotalCount(paginatedRes.totalCount || 0);
+      setTotalPages(paginatedRes.totalPages || 1);
+      if (countsRes) setCategoryCounts(countsRes);
       setCustomStocks(customStocksRes.data || []);
       setCustomers(customersRes.data || []);
     } catch (e) {
@@ -363,7 +395,7 @@ export default function ProdutosPage() {
     if (user && allowedRoles.includes(user.role)) {
       fetchProducts();
     }
-  }, [user]);
+  }, [user, page, pageSize, activeTab, debouncedSearch]);
 
   // Security guard check
   const allowedRoles = ['Administrador', 'Comercial', 'Vendedor', 'Produção'];
@@ -389,7 +421,7 @@ export default function ProdutosPage() {
     setFormStock(0);
     setFormBindToFirstItem(false);
     setFormBindRequiresHandling(false);
-    setFormCategory('LISAS');
+    setFormCategory('');
     setFormMeasure('');
     setFormCustomer('');
     setIsFormModalOpen(true);
@@ -423,7 +455,7 @@ export default function ProdutosPage() {
     setFormStock(product.stock_quantity);
     setFormBindToFirstItem(!!product.bind_to_first_item);
     setFormBindRequiresHandling(!!product.bind_requires_handling);
-    setFormCategory(product.category || 'LISAS');
+    setFormCategory(product.category || '');
     setFormMeasure(product.measure || '');
     setFormCustomer(product.customer_id || '');
     setIsFormModalOpen(true);
@@ -447,7 +479,7 @@ export default function ProdutosPage() {
       price: Number(formPrice),
       bind_to_first_item: formBindToFirstItem,
       bind_requires_handling: formBindToFirstItem ? formBindRequiresHandling : false,
-      category: formCategory,
+      category: formCategory || null,
       measure: formMeasure || null,
       customer_id: formCategory === 'PERSONALIZADA' ? (formCustomer || null) : null,
       stock_quantity: modalType === 'create' ? Number(formStock) : undefined
@@ -557,34 +589,11 @@ export default function ProdutosPage() {
     }
   };
 
-  const filteredProducts = products.filter(p => {
-    const linkedCust = customers.find(c => c.id === p.customer_id);
-    const custName = linkedCust?.name || '';
-    const matchesSearch = 
-      p.name.toLowerCase().includes(search.toLowerCase()) || 
-      (p.sku && p.sku.toLowerCase().includes(search.toLowerCase())) ||
-      (p.description && p.description.toLowerCase().includes(search.toLowerCase())) ||
-      custName.toLowerCase().includes(search.toLowerCase());
-
-    if (!matchesSearch) return false;
-
-    if (activeTab === 'lisas') {
-      return p.category === 'LISAS';
-    }
-    if (activeTab === 'custom_stocks') {
-      return p.category === 'PERSONALIZADA';
-    }
-    return true; // 'all'
-  });
-
   const isAdmin = user?.role === 'Administrador';
   const isVendedor = user?.role === 'Vendedor' || user?.role === 'Comercial';
   const canCreate = isAdmin;
   const canEditDetails = isAdmin;
-  const numCols = isAdmin ? 9 : 8;
-
-  const lisasCount = products.filter(p => p.category === 'LISAS').length;
-  const customStocksCount = products.filter(p => p.category === 'PERSONALIZADA').length;
+  const numCols = activeTab === 'all' ? 5 : 4;
 
   return (
     <div className="page-container">
@@ -622,30 +631,50 @@ export default function ProdutosPage() {
       {/* TABS DE ALTERNÂNCIA */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', flexWrap: 'wrap' }}>
         <button 
-          onClick={() => setActiveTab('lisas')}
+          onClick={() => { setActiveTab('lisas'); setPage(1); }}
           className={`btn ${activeTab === 'lisas' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Package size={16} />
-          <span>Lisas / Genéricas ({lisasCount})</span>
+          <span>Lisas / Genéricas ({categoryCounts.lisas})</span>
         </button>
 
         <button 
-          onClick={() => setActiveTab('custom_stocks')}
+          onClick={() => { setActiveTab('custom_stocks'); setPage(1); }}
           className={`btn ${activeTab === 'custom_stocks' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Package size={16} />
-          <span>Estoque de Clientes ({customStocksCount})</span>
+          <span>Estoque de Clientes ({categoryCounts.custom_stocks})</span>
         </button>
 
         <button 
-          onClick={() => setActiveTab('all')}
+          onClick={() => { setActiveTab('compra'); setPage(1); }}
+          className={`btn ${activeTab === 'compra' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+        >
+          <ShoppingCart size={16} />
+          <span>Compra ({categoryCounts.compra})</span>
+        </button>
+
+        {categoryCounts.sem_categoria > 0 && (
+          <button 
+            onClick={() => { setActiveTab('sem_categoria'); setPage(1); }}
+            className={`btn ${activeTab === 'sem_categoria' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+          >
+            <HelpCircle size={16} />
+            <span>Sem Categoria ({categoryCounts.sem_categoria})</span>
+          </button>
+        )}
+
+        <button 
+          onClick={() => { setActiveTab('all'); setPage(1); }}
           className={`btn ${activeTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
           <Warehouse size={16} />
-          <span>Todos ({products.length})</span>
+          <span>Todos ({categoryCounts.all})</span>
         </button>
       </div>
 
@@ -680,32 +709,20 @@ export default function ProdutosPage() {
             className="table" 
             style={{ 
               width: '100%', 
-              minWidth: `${(colWidths.sku || 130) + (colWidths.name || 340) + (colWidths.description || 180) + (isAdmin ? (colWidths.price || 130) : 0) + (colWidths.category || 120) + (colWidths.customer || 190) + (colWidths.stock || 130) + (colWidths.sync || 150) + (colWidths.actions || 360)}px`,
+              minWidth: `${(colWidths.name || 420) + (activeTab === 'all' ? (colWidths.category || 140) : 0) + (colWidths.customer || 240) + (colWidths.stock || 140) + (colWidths.actions || 360)}px`,
               borderCollapse: 'collapse',
               tableLayout: 'fixed'
             }}
           >
             <colgroup>
-              <col style={{ width: `${colWidths.sku || 130}px` }} />
-              <col style={{ width: `${colWidths.name || 340}px` }} />
-              <col style={{ width: `${colWidths.description || 180}px` }} />
-              {isAdmin && <col style={{ width: `${colWidths.price || 130}px` }} />}
-              <col style={{ width: `${colWidths.category || 120}px` }} />
-              <col style={{ width: `${colWidths.customer || 190}px` }} />
-              <col style={{ width: `${colWidths.stock || 130}px` }} />
-              <col style={{ width: `${colWidths.sync || 150}px` }} />
+              <col style={{ width: `${colWidths.name || 420}px` }} />
+              {activeTab === 'all' && <col style={{ width: `${colWidths.category || 140}px` }} />}
+              <col style={{ width: `${colWidths.customer || 240}px` }} />
+              <col style={{ width: `${colWidths.stock || 140}px` }} />
               <col style={{ width: `${colWidths.actions || 360}px` }} />
             </colgroup>
             <thead>
               <tr>
-                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
-                  <span>SKU / Código / Lote</span>
-                  <div
-                    onMouseDown={(e) => handleMouseDownResize('sku', e)}
-                    title="Arraste para ajustar largura da coluna"
-                    style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
-                  />
-                </th>
                 <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Nome do Produto</span>
                   <div
@@ -714,32 +731,16 @@ export default function ProdutosPage() {
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
                 </th>
-                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
-                  <span>Descrição</span>
-                  <div
-                    onMouseDown={(e) => handleMouseDownResize('description', e)}
-                    title="Arraste para ajustar largura da coluna"
-                    style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
-                  />
-                </th>
-                {isAdmin && (
+                {activeTab === 'all' && (
                   <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
-                    <span>Preço Unitário</span>
+                    <span>Categoria</span>
                     <div
-                      onMouseDown={(e) => handleMouseDownResize('price', e)}
+                      onMouseDown={(e) => handleMouseDownResize('category', e)}
                       title="Arraste para ajustar largura da coluna"
                       style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                     />
                   </th>
                 )}
-                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
-                  <span>Categoria</span>
-                  <div
-                    onMouseDown={(e) => handleMouseDownResize('category', e)}
-                    title="Arraste para ajustar largura da coluna"
-                    style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
-                  />
-                </th>
                 <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
                   <span>Cliente Vinculado</span>
                   <div
@@ -752,14 +753,6 @@ export default function ProdutosPage() {
                   <span>Estoque Físico</span>
                   <div
                     onMouseDown={(e) => handleMouseDownResize('stock', e)}
-                    title="Arraste para ajustar largura da coluna"
-                    style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
-                  />
-                </th>
-                <th style={{ position: 'relative', whiteSpace: 'nowrap', userSelect: 'none' }}>
-                  <span>Sincronização ERP</span>
-                  <div
-                    onMouseDown={(e) => handleMouseDownResize('sync', e)}
                     title="Arraste para ajustar largura da coluna"
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'col-resize', zIndex: 10 }}
                   />
@@ -779,38 +772,64 @@ export default function ProdutosPage() {
                 Array.from({ length: 5 }).map((_, idx) => (
                   <TableRowSkeleton key={idx} cols={numCols} />
                 ))
-              ) : filteredProducts.length === 0 ? (
+              ) : products.length === 0 ? (
                 <tr>
                   <td colSpan={numCols} style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
                     Nenhum produto encontrado nesta visualização.
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((product) => {
+                products.map((product) => {
                   const linkedCust = customers.find(c => c.id === product.customer_id);
                   return (
                     <tr key={product.id}>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        <code style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', backgroundColor: 'var(--background)', borderRadius: '4px' }}>
-                          {product.sku || '---'}
-                        </code>
+                      <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDetailProduct(product);
+                            setIsDetailModalOpen(true);
+                          }}
+                          title="Clique para ver detalhes do produto"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            font: 'inherit',
+                            fontWeight: 600,
+                            color: 'var(--text)',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            display: 'inline-block',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            transition: 'color 0.15s ease'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--primary)'; e.currentTarget.style.textDecoration = 'underline'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.textDecoration = 'none'; }}
+                        >
+                          {product.name}
+                        </button>
                       </td>
-                      <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.name}>
-                        {product.name}
-                      </td>
-                      <td style={{ verticalAlign: 'middle', fontSize: '0.8125rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={product.description || ''}>
-                        {product.description || '---'}
-                      </td>
-                      {isAdmin && (
-                        <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.price || 0)}
+                      {activeTab === 'all' && (
+                        <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {product.category === 'LISAS' ? (
+                            <span className="badge badge-secondary">Lisas</span>
+                          ) : product.category === 'PERSONALIZADA' ? (
+                            <span className="badge badge-primary">Personalizada</span>
+                          ) : product.category === 'COMPRA' ? (
+                            <span className="badge" style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                              Compra
+                            </span>
+                          ) : (
+                            <span className="badge" style={{ backgroundColor: 'rgba(148, 163, 184, 0.15)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                              Sem Categoria
+                            </span>
+                          )}
                         </td>
                       )}
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                        <span className={`badge ${product.category === 'LISAS' ? 'badge-secondary' : 'badge-primary'}`}>
-                          {product.category === 'LISAS' ? 'Lisas' : 'Personalizada'}
-                        </span>
-                      </td>
                       <td style={{ verticalAlign: 'middle', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={linkedCust ? linkedCust.name : 'Não vinculado'}>
                         {product.category === 'PERSONALIZADA' ? (
                           linkedCust ? (
@@ -824,19 +843,6 @@ export default function ProdutosPage() {
                       </td>
                       <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap', fontWeight: 600 }}>
                         <StockInlineEdit product={product} onSave={handleInlineStockSave} canEdit={isAdmin} />
-                      </td>
-                      <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                        {product.conta_azul_id ? (
-                          <span className="badge badge-success" title={`ID: ${product.conta_azul_id}`}>
-                            <CheckCircle2 size={12} />
-                            Integrado ({product.conta_azul_id.substring(0, 8)})
-                          </span>
-                        ) : (
-                          <span className="badge badge-warning">
-                            <HelpCircle size={12} />
-                            Pendente
-                          </span>
-                        )}
                       </td>
                       <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
@@ -979,7 +985,284 @@ export default function ProdutosPage() {
             </tbody>
           </table>
         </div>
+
+        {/* PAGINATION BAR */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '0.875rem 1.25rem',
+          borderTop: '1px solid var(--border)',
+          backgroundColor: 'var(--surface)',
+          flexWrap: 'wrap',
+          gap: '0.75rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+            <span>
+              Exibindo <strong>{totalCount === 0 ? 0 : (page - 1) * pageSize + 1}</strong> a <strong>{Math.min(page * pageSize, totalCount)}</strong> de <strong>{totalCount}</strong> produtos
+            </span>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span>Itens por página:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                style={{
+                  padding: '0.25rem 0.5rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--background)',
+                  color: 'var(--text)',
+                  fontSize: '0.8125rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <button
+              onClick={() => setPage(1)}
+              disabled={page <= 1 || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Primeira Página"
+            >
+              <ChevronsLeft size={14} />
+            </button>
+
+            <button
+              onClick={() => setPage(prev => Math.max(1, prev - 1))}
+              disabled={page <= 1 || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Página Anterior"
+            >
+              <ChevronLeft size={14} />
+            </button>
+
+            <span style={{ fontSize: '0.8125rem', padding: '0 0.5rem', color: 'var(--text)', fontWeight: 600 }}>
+              Página {page} de {totalPages}
+            </span>
+
+            <button
+              onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={page >= totalPages || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Próxima Página"
+            >
+              <ChevronRight size={14} />
+            </button>
+
+            <button
+              onClick={() => setPage(totalPages)}
+              disabled={page >= totalPages || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Última Página"
+            >
+              <ChevronsRight size={14} />
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* PRODUCT DETAIL MODAL */}
+      {isDetailModalOpen && detailProduct && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '1rem',
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)',
+            borderRadius: 'var(--radius-lg)',
+            width: '100%',
+            maxWidth: '650px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+            border: '1px solid var(--border)'
+          }}>
+            <header style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>Detalhes do Produto</h3>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Visão geral completa dos atributos cadastrais e técnicos</span>
+              </div>
+              <button 
+                onClick={() => setIsDetailModalOpen(false)} 
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--text-muted)', padding: '0.2rem' }}
+              >
+                &times;
+              </button>
+            </header>
+
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div>
+                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 }}>
+                  Nome do Produto
+                </label>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.25rem' }}>
+                  {detailProduct.name}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                <div className="card" style={{ padding: '0.85rem', margin: 0, backgroundColor: 'var(--background)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>SKU / Código / Lote</span>
+                  <code style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>
+                    {detailProduct.sku || 'Não informado'}
+                  </code>
+                </div>
+
+                <div className="card" style={{ padding: '0.85rem', margin: 0, backgroundColor: 'var(--background)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Categoria</span>
+                  <div>
+                    {detailProduct.category === 'LISAS' ? (
+                      <span className="badge badge-secondary">Lisas</span>
+                    ) : detailProduct.category === 'PERSONALIZADA' ? (
+                      <span className="badge badge-primary">Personalizada</span>
+                    ) : detailProduct.category === 'COMPRA' ? (
+                      <span className="badge" style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                        Compra
+                      </span>
+                    ) : (
+                      <span className="badge" style={{ backgroundColor: 'rgba(148, 163, 184, 0.15)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                        Sem Categoria
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: '0.85rem', margin: 0, backgroundColor: 'var(--background)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Preço Unitário</span>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)' }}>
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(detailProduct.price || 0)}
+                  </span>
+                </div>
+
+                <div className="card" style={{ padding: '0.85rem', margin: 0, backgroundColor: 'var(--background)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Estoque Físico Atual</span>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 700, color: detailProduct.stock_quantity < 500 ? 'var(--danger)' : 'var(--primary)' }}>
+                    {Number(detailProduct.stock_quantity || 0).toLocaleString('pt-BR')} un
+                  </span>
+                </div>
+
+                <div className="card" style={{ padding: '0.85rem', margin: 0, backgroundColor: 'var(--background)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Medidas</span>
+                  <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)' }}>
+                    {detailProduct.measure || 'Não informada'}
+                  </span>
+                </div>
+
+                <div className="card" style={{ padding: '0.85rem', margin: 0, backgroundColor: 'var(--background)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Integração ERP (Conta Azul)</span>
+                  <div>
+                    {detailProduct.conta_azul_id ? (
+                      <span className="badge badge-success" title={`ID: ${detailProduct.conta_azul_id}`}>
+                        <CheckCircle2 size={12} />
+                        Integrado ({detailProduct.conta_azul_id.substring(0, 8)})
+                      </span>
+                    ) : (
+                      <span className="badge badge-warning">
+                        <HelpCircle size={12} />
+                        Pendente
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {detailProduct.category === 'PERSONALIZADA' && (
+                <div>
+                  <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    Cliente Vinculado
+                  </label>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text)', marginTop: '0.25rem' }}>
+                    {(() => {
+                      const linked = customers.find(c => c.id === detailProduct.customer_id);
+                      return linked ? `${linked.name} (${linked.document || 'Sem documento'})` : 'Nenhum cliente vinculado a este produto personalizado';
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 }}>
+                  Descrição Técnica e Observações
+                </label>
+                <div style={{
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.85rem',
+                  marginTop: '0.35rem',
+                  fontSize: '0.875rem',
+                  color: detailProduct.description ? 'var(--text)' : 'var(--text-muted)',
+                  whiteSpace: 'pre-wrap',
+                  maxHeight: '150px',
+                  overflowY: 'auto'
+                }}>
+                  {detailProduct.description || 'Nenhuma descrição técnica cadastrada.'}
+                </div>
+              </div>
+            </div>
+
+            <footer style={{
+              padding: '1.25rem 1.5rem',
+              borderTop: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '0.75rem'
+            }}>
+              <button
+                type="button"
+                onClick={() => setIsDetailModalOpen(false)}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.875rem' }}
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const prodToEdit = detailProduct;
+                  setIsDetailModalOpen(false);
+                  handleOpenEdit(prodToEdit);
+                }}
+                className="btn btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}
+              >
+                <Edit size={14} />
+                <span>Editar Produto</span>
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {/* FORM MODAL (CREATE / EDIT DETAILS) */}
       {isFormModalOpen && (
@@ -1027,15 +1310,16 @@ export default function ProdutosPage() {
             <form onSubmit={handleProductSubmit} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               
               <div className="form-group">
-                <label className="form-label">Categoria do Produto *</label>
+                <label className="form-label">Categoria do Produto</label>
                 <select 
                   className="form-input" 
                   value={formCategory} 
                   onChange={(e) => setFormCategory(e.target.value as any)}
-                  required
                 >
+                  <option value="">Sem Categoria</option>
                   <option value="LISAS">Lisas</option>
                   <option value="PERSONALIZADA">Personalizada</option>
+                  <option value="COMPRA">Compra</option>
                 </select>
               </div>
 
