@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getProducts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
+import SearchableCustomerSelect from '@/components/SearchableCustomerSelect';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2, Users } from 'lucide-react';
 
@@ -1075,16 +1076,12 @@ export default function ProdutosPage() {
               {formCategory === 'PERSONALIZADA' && (
                 <div className="form-group">
                   <label className="form-label">Cliente Vinculado (Opcional)</label>
-                  <select 
-                    className="form-select"
+                  <SearchableCustomerSelect
+                    customers={customers}
                     value={formCustomer}
-                    onChange={(e) => setFormCustomer(e.target.value)}
-                  >
-                    <option value="">— Nenhum —</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                    onChange={setFormCustomer}
+                    placeholder="Buscar cliente por nome ou CNPJ/CPF..."
+                  />
                 </div>
               )}
 
@@ -1485,19 +1482,12 @@ export default function ProdutosPage() {
                 <label className="form-label" style={{ fontWeight: 600 }}>
                   Selecione o Cliente Proprietário *
                 </label>
-                <select 
-                  className="form-select"
+                <SearchableCustomerSelect
+                  customers={customers}
                   value={selectedCustomerId}
-                  onChange={(e) => setSelectedCustomerId(e.target.value)}
-                  style={{ width: '100%', padding: '0.625rem', borderRadius: 'var(--radius-sm)', fontSize: '0.9rem' }}
-                >
-                  <option value="">— Nenhum (Desvincular Cliente) —</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.document ? `(${c.document})` : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedCustomerId}
+                  placeholder="Buscar cliente por nome ou CNPJ/CPF..."
+                />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
                   Ao salvar, este produto personalizado ficará associado a este cliente na fábrica e nas consultas de saldo.
                 </span>

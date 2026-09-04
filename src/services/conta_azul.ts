@@ -1052,41 +1052,48 @@ export class ContaAzulService {
           existingProd = prodsByName.get(prodName.toUpperCase());
         }
 
-        const payload: any = {
-          name: prodName,
-          sku: code,
-          description: desc,
-          price: price,
-          conta_azul_id: caId || undefined,
-          stock_quantity: stockQty
-        };
-
         if (existingProd) {
-          // Checagem de alteração real: só dispara PATCH se algum dado mudou
+          // Atualiza dados cadastrais comerciais, mas PRESERVA o estoque físico local gerenciado na Samppel
+          const updatePayload: any = {
+            name: prodName,
+            sku: code,
+            description: desc,
+            price: price,
+            conta_azul_id: caId || undefined
+          };
+
+          // Checagem de alteração real cadastral
           const nameDiff = (existingProd.name || '').trim() !== prodName;
           const skuDiff = code && (existingProd.sku || '').trim().toUpperCase() !== code.toUpperCase();
           const caIdDiff = caId && existingProd.conta_azul_id !== caId;
           const priceDiff = Math.abs(Number(existingProd.price || 0) - Number(price || 0)) > 0.001;
-          const stockDiff = Number(existingProd.stock_quantity ?? 0) !== Number(stockQty ?? 0);
           const descDiff = (existingProd.description || '') !== desc;
 
-          if (nameDiff || skuDiff || caIdDiff || priceDiff || stockDiff || descDiff) {
+          if (nameDiff || skuDiff || caIdDiff || priceDiff || descDiff) {
             const { error } = await dbClient
               .from('products')
-              .update(payload)
+              .update(updatePayload)
               .eq('id', existingProd.id);
             if (error) {
               console.error('Erro ao atualizar produto:', error);
             } else {
               updated++;
-              Object.assign(existingProd, payload);
+              Object.assign(existingProd, updatePayload);
             }
           }
         } else {
-          // Produto novo: insere no Supabase e atualiza os mapas em memória
+          // Produto novo: insere no Supabase inicializando estoque não-negativo e atualiza os mapas em memória
+          const insertPayload: any = {
+            name: prodName,
+            sku: code,
+            description: desc,
+            price: price,
+            conta_azul_id: caId || undefined,
+            stock_quantity: Math.max(0, stockQty)
+          };
           const { data: inserted, error } = await dbClient
             .from('products')
-            .insert([{ tenant_id: this.tenantId, ...payload }])
+            .insert([{ tenant_id: this.tenantId, ...insertPayload }])
             .select('id, name, sku, conta_azul_id, price, stock_quantity, description')
             .single();
           if (error) {
