@@ -25,6 +25,19 @@ async function performSync(tenantId: string, startDateStr: string, endDateStr: s
     // 3. Fetch new orders from Conta Azul
     const importResult = await caService.importOrders(startDateStr, endDateStr);
     console.log(`[CronSync] Importação concluída com sucesso:`, importResult);
+
+    // 4. Limpeza periódica de logs antigos (mantém apenas os últimos 7 dias para economizar espaço e tráfego)
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { getDbClient } = await import('@/services/supabaseClient');
+      await getDbClient()
+        .from('conta_azul_integration_logs')
+        .delete()
+        .lt('created_at', sevenDaysAgo);
+    } catch (cleanErr) {
+      console.warn('[CronSync] Aviso na limpeza de logs antigos:', cleanErr);
+    }
+
     return { queueResult, productResult, importResult };
   } catch (error: any) {
     console.error('[CronSync] Erro durante a sincronização:', error);

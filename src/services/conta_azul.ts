@@ -993,7 +993,27 @@ export class ContaAzulService {
         }
       }
 
-      onProgress?.(`Encontrados ${flatItems.length} itens ativos no Conta Azul. Processando catálogo...`, 30);
+      onProgress?.(`Encontrados ${flatItems.length} itens ativos no Conta Azul. Carregando catálogo local...`, 25);
+
+      // Carrega todo o catálogo local do tenant em 1 única requisição leve para eliminar N+1
+      const { data: existingProdsList, error: localProdsErr } = await dbClient
+        .from('products')
+        .select('id, name, sku, conta_azul_id, price, stock_quantity, description')
+        .eq('tenant_id', this.tenantId);
+
+      if (localProdsErr) {
+        console.error('Erro ao carregar catálogo local de produtos:', localProdsErr);
+      }
+
+      const prodsByCaId = new Map<string, any>();
+      const prodsBySku = new Map<string, any>();
+      const prodsByName = new Map<string, any>();
+
+      (existingProdsList || []).forEach((p: any) => {
+        if (p.conta_azul_id) prodsByCaId.set(p.conta_azul_id, p);
+        if (p.sku) prodsBySku.set(p.sku.toUpperCase().trim(), p);
+        if (p.name) prodsByName.set(p.name.toUpperCase().trim(), p);
+      });
 
       let imported = 0;
       let updated = 0;
@@ -1002,11 +1022,11 @@ export class ContaAzulService {
       for (const prod of flatItems) {
         currentIdx++;
         const pct = 30 + Math.floor((currentIdx / (flatItems.length || 1)) * 65);
-        const prodName = prod.nome || prod.name || 'Produto sem nome';
+        const prodName = (prod.nome || prod.name || 'Produto sem nome').trim();
         onProgress?.(`Processando ${prodName}...`, pct);
 
         const caId = prod.id || prod.conta_azul_id;
-        const code = prod.codigo || prod.code || prod.sku || (prodName.toUpperCase().replace(/\s+/g, '-').slice(0, 50));
+        const code = (prod.codigo || prod.code || prod.sku || (prodName.toUpperCase().replace(/\s+/g, '-').slice(0, 50))).trim();
         const price = prod.valor_venda ?? prod.value ?? prod.preco ?? prod.price ?? prod.valor ?? 0;
         const desc = prod.descricao || prod.description || '';
         
@@ -1022,23 +1042,15 @@ export class ContaAzulService {
           stockQty = prod.quantidade;
         }
 
-        // Tenta localizar produto existente no Supabase por conta_azul_id, sku ou name
-        let query = dbClient
-          .from('products')
-          .select('id, stock_quantity')
-          .eq('tenant_id', this.tenantId);
-
-        if (caId && code) {
-          query = query.or(`conta_azul_id.eq.${caId},sku.eq.${code}`);
-        } else if (caId) {
-          query = query.eq('conta_azul_id', caId);
-        } else if (code) {
-          query = query.eq('sku', code);
-        } else {
-          query = query.eq('name', prodName);
+        // Localiza em memória sem disparar requisições ao Supabase
+        let existingProd: any = null;
+        if (caId && prodsByCaId.has(caId)) {
+          existingProd = prodsByCaId.get(caId);
+        } else if (code && prodsBySku.has(code.toUpperCase())) {
+          existingProd = prodsBySku.get(code.toUpperCase());
+        } else if (prodsByName.has(prodName.toUpperCase())) {
+          existingProd = prodsByName.get(prodName.toUpperCase());
         }
-
-        const { data: existingProd } = await query.maybeSingle();
 
         const payload: any = {
           name: prodName,
@@ -1050,18 +1062,41 @@ export class ContaAzulService {
         };
 
         if (existingProd) {
-          const { error } = await dbClient
-            .from('products')
-            .update(payload)
-            .eq('id', existingProd.id);
-          if (error) console.error('Erro ao atualizar produto:', error);
-          else updated++;
+          // Checagem de alteração real: só dispara PATCH se algum dado mudou
+          const nameDiff = (existingProd.name || '').trim() !== prodName;
+          const skuDiff = code && (existingProd.sku || '').trim().toUpperCase() !== code.toUpperCase();
+          const caIdDiff = caId && existingProd.conta_azul_id !== caId;
+          const priceDiff = Math.abs(Number(existingProd.price || 0) - Number(price || 0)) > 0.001;
+          const stockDiff = Number(existingProd.stock_quantity ?? 0) !== Number(stockQty ?? 0);
+          const descDiff = (existingProd.description || '') !== desc;
+
+          if (nameDiff || skuDiff || caIdDiff || priceDiff || stockDiff || descDiff) {
+            const { error } = await dbClient
+              .from('products')
+              .update(payload)
+              .eq('id', existingProd.id);
+            if (error) {
+              console.error('Erro ao atualizar produto:', error);
+            } else {
+              updated++;
+              Object.assign(existingProd, payload);
+            }
+          }
         } else {
-          const { error } = await dbClient
+          // Produto novo: insere no Supabase e atualiza os mapas em memória
+          const { data: inserted, error } = await dbClient
             .from('products')
-            .insert([{ tenant_id: this.tenantId, ...payload }]);
-          if (error) console.error('Erro ao inserir produto:', error);
-          else imported++;
+            .insert([{ tenant_id: this.tenantId, ...payload }])
+            .select('id, name, sku, conta_azul_id, price, stock_quantity, description')
+            .single();
+          if (error) {
+            console.error('Erro ao inserir produto:', error);
+          } else if (inserted) {
+            imported++;
+            if (inserted.conta_azul_id) prodsByCaId.set(inserted.conta_azul_id, inserted);
+            if (inserted.sku) prodsBySku.set(inserted.sku.toUpperCase().trim(), inserted);
+            if (inserted.name) prodsByName.set(inserted.name.toUpperCase().trim(), inserted);
+          }
         }
       }
 
@@ -1097,18 +1132,32 @@ export class ContaAzulService {
   private async resolveOrCreateProduct(
     dbClient: any,
     mainItem: any,
-    customerId?: string
+    customerId?: string,
+    prodsCache?: { byCaId: Map<string, any>; bySku: Map<string, any>; byName: Map<string, any> }
   ): Promise<string | null> {
     if (!mainItem) return null;
 
     const mainItemCaId = mainItem.id_item || mainItem.id || mainItem.conta_azul_id;
-    const prodName = mainItem.descricao || mainItem.nome || mainItem.name || 'Produto Importado';
-    const prodSku = mainItem.codigo || mainItem.sku || '';
+    const prodName = (mainItem.descricao || mainItem.nome || mainItem.name || 'Produto Importado').trim();
+    const prodSku = (mainItem.codigo || mainItem.sku || '').trim();
+
+    // 0. Checagem em cache na memória primeiro (Zero chamadas de rede)
+    if (prodsCache) {
+      if (mainItemCaId && prodsCache.byCaId.has(mainItemCaId)) {
+        return prodsCache.byCaId.get(mainItemCaId).id;
+      }
+      if (prodSku && prodsCache.bySku.has(prodSku.toUpperCase())) {
+        return prodsCache.bySku.get(prodSku.toUpperCase()).id;
+      }
+      if (prodName && prodsCache.byName.has(prodName.toUpperCase())) {
+        return prodsCache.byName.get(prodName.toUpperCase()).id;
+      }
+    }
 
     // 1. Tentar encontrar por conta_azul_id ou sku
     let query = dbClient
       .from('products')
-      .select('id')
+      .select('id, name, sku, conta_azul_id')
       .eq('tenant_id', this.tenantId);
 
     if (mainItemCaId && prodSku) {
@@ -1123,6 +1172,11 @@ export class ContaAzulService {
 
     const { data: existingProd } = await query.maybeSingle();
     if (existingProd?.id) {
+      if (prodsCache) {
+        if (existingProd.conta_azul_id) prodsCache.byCaId.set(existingProd.conta_azul_id, existingProd);
+        if (existingProd.sku) prodsCache.bySku.set(existingProd.sku.toUpperCase().trim(), existingProd);
+        if (existingProd.name) prodsCache.byName.set(existingProd.name.toUpperCase().trim(), existingProd);
+      }
       return existingProd.id;
     }
 
@@ -1130,7 +1184,7 @@ export class ContaAzulService {
     if (prodName && prodName !== 'Produto Importado') {
       const { data: prodByName } = await dbClient
         .from('products')
-        .select('id')
+        .select('id, name, sku, conta_azul_id')
         .eq('tenant_id', this.tenantId)
         .ilike('name', prodName)
         .maybeSingle();
@@ -1138,6 +1192,12 @@ export class ContaAzulService {
       if (prodByName?.id) {
         if (mainItemCaId) {
           await dbClient.from('products').update({ conta_azul_id: mainItemCaId }).eq('id', prodByName.id);
+          prodByName.conta_azul_id = mainItemCaId;
+        }
+        if (prodsCache) {
+          if (prodByName.conta_azul_id) prodsCache.byCaId.set(prodByName.conta_azul_id, prodByName);
+          if (prodByName.sku) prodsCache.bySku.set(prodByName.sku.toUpperCase().trim(), prodByName);
+          if (prodByName.name) prodsCache.byName.set(prodByName.name.toUpperCase().trim(), prodByName);
         }
         return prodByName.id;
       }
@@ -1158,11 +1218,16 @@ export class ContaAzulService {
           category: 'PERSONALIZADA',
           customer_id: customerId || null
         }])
-        .select('id')
+        .select('id, name, sku, conta_azul_id')
         .single();
 
       if (newProd?.id) {
         console.log(`[resolveOrCreateProduct] Produto "${prodName}" auto-criado com sucesso (ID: ${newProd.id}).`);
+        if (prodsCache) {
+          if (newProd.conta_azul_id) prodsCache.byCaId.set(newProd.conta_azul_id, newProd);
+          if (newProd.sku) prodsCache.bySku.set(newProd.sku.toUpperCase().trim(), newProd);
+          if (newProd.name) prodsCache.byName.set(newProd.name.toUpperCase().trim(), newProd);
+        }
         return newProd.id;
       }
       if (prodErr) {
@@ -1231,10 +1296,38 @@ export class ContaAzulService {
       }
 
       const items = allItems;
-      onProgress?.(`Encontrados ${items.length} pedidos. Sincronizando...`, 15);
+      onProgress?.(`Encontrados ${items.length} pedidos. Carregando dados locais...`, 15);
 
       const dbClient = supabaseAdmin || supabase;
       if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
+
+      // Preload do catálogo de produtos para evitar queries N+1 durante a importação dos pedidos
+      const { data: allLocalProds } = await dbClient
+        .from('products')
+        .select('id, name, sku, conta_azul_id, price')
+        .eq('tenant_id', this.tenantId);
+
+      const prodsCache = {
+        byCaId: new Map<string, any>(),
+        bySku: new Map<string, any>(),
+        byName: new Map<string, any>()
+      };
+      (allLocalProds || []).forEach((p: any) => {
+        if (p.conta_azul_id) prodsCache.byCaId.set(p.conta_azul_id, p);
+        if (p.sku) prodsCache.bySku.set(p.sku.toUpperCase().trim(), p);
+        if (p.name) prodsCache.byName.set(p.name.toUpperCase().trim(), p);
+      });
+
+      // Preload de clientes locais para evitar queries repetidas
+      const { data: allLocalCusts } = await dbClient
+        .from('customers')
+        .select('id, name, conta_azul_id, document, email, phone, address')
+        .eq('tenant_id', this.tenantId);
+
+      const customersByCaId = new Map<string, any>();
+      (allLocalCusts || []).forEach((c: any) => {
+        if (c.conta_azul_id) customersByCaId.set(c.conta_azul_id, c);
+      });
 
       let imported = 0;
       let updated = 0;
@@ -1300,23 +1393,16 @@ export class ContaAzulService {
         if (saleItems.length === 0) continue;
 
         const mainItem = saleItems[0];
-        const mainItemCaId = mainItem.id_item;
-
         const clienteInfo = saleDetail.cliente;
         let customerId = '';
         if (clienteInfo) {
           const clientUuid = clienteInfo.uuid || clienteInfo.id;
-          const { data: existingCust } = await dbClient
-            .from('customers')
-            .select('id, document, email, phone')
-            .eq('tenant_id', this.tenantId)
-            .eq('conta_azul_id', clientUuid)
-            .maybeSingle();
+          const existingCust = clientUuid ? customersByCaId.get(clientUuid) : null;
 
           let custDetails: any = null;
           const needsDetails = !existingCust || !existingCust.document || !existingCust.email || !existingCust.phone;
 
-          if (needsDetails) {
+          if (needsDetails && clientUuid) {
             try {
               onProgress?.(`PV-${saleSummary.numero || currentIdx}: Buscando cadastro detalhado do cliente...`, pct);
               const custResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${clientUuid}`, {
@@ -1353,6 +1439,7 @@ export class ContaAzulService {
                   address: addrVal
                 })
                 .eq('id', customerId);
+              Object.assign(existingCust, { name: nameVal, document: docVal, email: emailVal, phone: phoneVal, address: addrVal });
             }
           } else {
             const { data: newCust, error: custErr } = await dbClient
@@ -1366,7 +1453,7 @@ export class ContaAzulService {
                 phone: phoneVal,
                 address: addrVal
               }])
-              .select('id')
+              .select('id, name, conta_azul_id, document, email, phone, address')
               .single();
 
             if (custErr || !newCust) {
@@ -1374,12 +1461,13 @@ export class ContaAzulService {
               continue;
             }
             customerId = newCust.id;
+            if (clientUuid) customersByCaId.set(clientUuid, newCust);
           }
         } else {
           continue;
         }
 
-        const productId = await this.resolveOrCreateProduct(dbClient, mainItem, customerId);
+        const productId = await this.resolveOrCreateProduct(dbClient, mainItem, customerId, prodsCache);
 
         let localStatus: any = 'A produzir';
         if (statusStr === 'PAGO' || statusStr === 'QUITADO') {
@@ -1628,17 +1716,11 @@ export class ContaAzulService {
 
           let itemProductId = null;
           const itemCaId = item.product_id || item.product?.id || item.id_item;
-          if (itemCaId) {
-            const { data: existingProd } = await dbClient
-              .from('products')
-              .select('id')
-              .eq('tenant_id', this.tenantId)
-              .eq('conta_azul_id', itemCaId)
-              .maybeSingle();
-
-            if (existingProd) {
-              itemProductId = existingProd.id;
-            }
+          if (itemCaId && prodsCache.byCaId.has(itemCaId)) {
+            itemProductId = prodsCache.byCaId.get(itemCaId).id;
+          } else if (itemCaId) {
+            const resolved = await this.resolveOrCreateProduct(dbClient, item, customerId, prodsCache);
+            itemProductId = resolved;
           }
 
           const itemDesc = (item.description || item.descricao || '').toLowerCase();

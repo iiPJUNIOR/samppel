@@ -151,8 +151,8 @@ export async function createIntegrationLog(action: string, status: 'SUCCESS' | '
     mockLogs.unshift(log);
     return { data: log, error: null };
   }
-  const { data, error } = await getDbClient().from('conta_azul_integration_logs').insert([log]).select().single();
-  return { data, error };
+  const { error } = await getDbClient().from('conta_azul_integration_logs').insert([log]);
+  return { data: log, error };
 }
 
 // Fila de sincronizacao (Sync Queue)

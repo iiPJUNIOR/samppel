@@ -28,9 +28,20 @@ export async function getOrders(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0
     return { data: ordersWithJoins, error: null };
   }
   
+  const selectQuery = [
+    'id', 'tenant_id', 'order_number', 'pv_number', 'op_number', 'art_name', 'seller_name',
+    'measure', 'print_run', 'boxes_count', 'packaging_type', 'freight_value', 'shipping_type',
+    'status', 'production_sector', 'physical_location', 'notes', 'internal_notes', 'order_date',
+    'installments_total', 'installments_paid', 'first_payment_date', 'over_short_quantity',
+    'conta_azul_status', 'conta_azul_id', 'customer_id', 'product_id', 'stage_id', 'created_at', 'updated_at',
+    'customer:customers(id, name, document, phone, email, address)',
+    'product:products(id, name, sku, price, stock_quantity)',
+    'stage:order_stages(id, name, color, sequence)'
+  ].join(', ');
+
   const { data, error } = await getDbClient()
     .from('orders')
-    .select('*, customer:customers(*), product:products(*), stage:order_stages(*)')
+    .select(selectQuery)
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
   return { data, error };
@@ -399,9 +410,22 @@ export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-
     return { data: itemsWithJoins, error: null };
   }
 
-  // Query base sem tabelas opcionais (production_machines / handling_teams podem não existir ainda)
-  const baseSelect = '*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))';
-  const fullSelect = '*, product:products(*), stage:order_stages(*), machine:production_machines(*), handling_team:handling_teams(*), order:orders(*, customer:customers(*))';
+  // Query base com colunas otimizadas para economizar Egress e acelerar carregamento
+  const itemFields = [
+    'id', 'tenant_id', 'order_id', 'product_id', 'item_type', 'name', 'item_index',
+    'friendly_id', 'measure', 'print_run', 'boxes_count', 'packaging_type',
+    'over_short_quantity', 'status', 'production_sector', 'stage_id', 'physical_location',
+    'notes', 'unit_price', 'total_price', 'created_at', 'updated_at'
+  ].join(', ');
+
+  const relationFields = [
+    'product:products(id, name, sku, price, stock_quantity)',
+    'stage:order_stages(id, name, color, sequence)',
+    'order:orders(id, order_number, pv_number, op_number, art_name, seller_name, status, order_date, customer:customers(id, name))'
+  ].join(', ');
+
+  const baseSelect = `${itemFields}, ${relationFields}`;
+  const fullSelect = `${itemFields}, machine:production_machines(id, name), handling_team:handling_teams(id, name), ${relationFields}`;
 
   const buildQuery = (selectStr: string) => {
     let q = getDbClient()
@@ -491,8 +515,14 @@ export async function updateOrderItem(id: string, updates: Partial<OrderItem>) {
     return { data: updated, error: null };
   }
 
-  const fullSelectForUpdate = '*, product:products(*), stage:order_stages(*), machine:production_machines(*), handling_team:handling_teams(*)';
-  const baseSelectForUpdate = '*, product:products(*), stage:order_stages(*)';
+  const selectItemFields = [
+    'id', 'tenant_id', 'order_id', 'product_id', 'item_type', 'name', 'item_index',
+    'friendly_id', 'measure', 'print_run', 'boxes_count', 'packaging_type',
+    'over_short_quantity', 'status', 'production_sector', 'stage_id', 'physical_location',
+    'notes', 'unit_price', 'total_price', 'created_at', 'updated_at'
+  ].join(', ');
+  const fullSelectForUpdate = `${selectItemFields}, product:products(id, name, sku, price, stock_quantity), stage:order_stages(id, name, color, sequence), machine:production_machines(id, name), handling_team:handling_teams(id, name)`;
+  const baseSelectForUpdate = `${selectItemFields}, product:products(id, name, sku, price, stock_quantity), stage:order_stages(id, name, color, sequence)`;
 
   let { data, error } = await getDbClient()
     .from('order_items')
