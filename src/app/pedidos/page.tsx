@@ -375,17 +375,25 @@ export default function PedidosPage() {
 
   const isManualOrder = (order: any): boolean => {
     if (!order) return true;
-    const caId = order.conta_azul_id;
+    const target = order.order || order;
+    const caId = target.conta_azul_id;
     if (!caId) return true;
-    if (typeof caId === 'string' && (
-      caId.startsWith('ca_sale_') ||
-      caId.startsWith('manual_') ||
-      caId.startsWith('mock_') ||
-      caId.length < 20
-    )) {
-      return true;
+    if (typeof caId === 'string') {
+      const clean = caId.trim().toLowerCase();
+      if (
+        clean.startsWith('manual_') ||
+        clean.startsWith('mock_') ||
+        clean.startsWith('ca_sale_') ||
+        clean === 'null' ||
+        clean === ''
+      ) {
+        return true;
+      }
+      if (clean.length >= 20) {
+        return false;
+      }
     }
-    return false;
+    return true;
   };
 
   // Modal de Confirmação de Exclusão de Pedido Manual (Apenas Admin)

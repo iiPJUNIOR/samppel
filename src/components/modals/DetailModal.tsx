@@ -143,9 +143,38 @@ export function DetailModal(props: any) {
                   priority
                 />
                 <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--border)', flexShrink: 0 }} />
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
-                  {modalType === 'create' ? 'Cadastrar Novo Pedido' : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
-                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
+                    {modalType === 'create' ? 'Cadastrar Novo Pedido' : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
+                  </h3>
+                  {modalType === 'edit' && selectedOrder && (
+                    !isManualOrder(selectedOrder) ? (
+                      <span style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                        color: 'var(--primary)',
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        border: '1px solid rgba(59, 130, 246, 0.25)'
+                      }}>
+                        Conta Azul
+                      </span>
+                    ) : (
+                      <span style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                        color: 'var(--text-muted)',
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border)'
+                      }}>
+                        Pedido Manual
+                      </span>
+                    )
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
@@ -179,7 +208,7 @@ export function DetailModal(props: any) {
                           onChange={() => setFormInitialDestination('PRODUCAO')}
                           style={{ accentColor: 'var(--primary)' }}
                         />
-                        <span>🏭 Entra em Produção (A Produzir)</span>
+                        <span>Entra em Produção (A Produzir)</span>
                       </label>
                       <label style={{
                         display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 0.8rem',
@@ -195,7 +224,7 @@ export function DetailModal(props: any) {
                           onChange={() => setFormInitialDestination('ESTOQUE')}
                           style={{ accentColor: 'var(--primary)' }}
                         />
-                        <span>📦 Entra em Estoque (Pronta Entrega)</span>
+                        <span>Entra em Estoque (Pronta Entrega)</span>
                       </label>
                     </div>
                   </div>
@@ -227,7 +256,6 @@ export function DetailModal(props: any) {
                     onChange={(e) => setFormOpNumber(e.target.value)}
                   />
                 </div>
-
 
                 {/* Seleção do Cliente (Obrigatório) */}
                 <div className="form-group">

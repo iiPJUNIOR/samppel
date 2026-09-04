@@ -421,7 +421,7 @@ export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-
   const relationFields = [
     'product:products(id, name, sku, price, stock_quantity)',
     'stage:order_stages(id, name, color, sequence)',
-    'order:orders(id, order_number, pv_number, op_number, art_name, seller_name, status, order_date, customer:customers(id, name))'
+    'order:orders(id, order_number, pv_number, op_number, art_name, seller_name, status, order_date, conta_azul_id, conta_azul_status, first_payment_date, shipping_type, freight_value, packaging_type, notes, internal_notes, installments_total, installments_paid, production_start_date, physical_location, customer:customers(id, name, document, phone, email, address))'
   ].join(', ');
 
   const baseSelect = `${itemFields}, ${relationFields}`;

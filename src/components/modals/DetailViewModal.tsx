@@ -130,6 +130,37 @@ export function DetailViewModal(props: any) {
                           {currentStage.name}
                         </span>
                       )}
+                      {!isManualOrder(order) ? (
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                          color: 'var(--primary)',
+                          padding: '2px 7px',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(59, 130, 246, 0.25)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}>
+                          Conta Azul {order.conta_azul_status ? `(${order.conta_azul_status})` : ''}
+                        </span>
+                      ) : (
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                          color: 'var(--text-muted)',
+                          padding: '2px 7px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--border)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}>
+                          Pedido Manual
+                        </span>
+                      )}
                       {isOverdue && (
                         <span style={{ fontSize: '0.68rem', color: 'var(--danger)', fontWeight: 700, whiteSpace: 'nowrap' }}>Atrasado</span>
                       )}
@@ -1061,13 +1092,14 @@ export function DetailViewModal(props: any) {
 
                   {!isManualOrder(order) && (
                     <button
-                      onClick={() => handleSyncSingleOrder(order.id)}
+                      onClick={() => handleSyncSingleOrder(order.id || detailItem.order_id)}
                       disabled={syncingSingleOrder}
                       className="btn btn-secondary"
                       style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                      title="Sincronizar dados e parcelas em tempo real com o Conta Azul"
                     >
                       <RefreshCw size={13} className={syncingSingleOrder ? 'spinner' : ''} />
-                      <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar'}</span>
+                      <span>{syncingSingleOrder ? 'Sincronizando...' : 'Sincronizar Conta Azul'}</span>
                     </button>
                   )}
 
