@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getCustomers, createCustomer, updateCustomer } from '@/services/supabase';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, RefreshCw, Copy } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, RefreshCw, Copy, AlertTriangle } from 'lucide-react';
 
 export default function ClientesPage() {
   const { user } = useAuth();
@@ -24,6 +24,8 @@ export default function ClientesPage() {
   const [formPhone, setFormPhone] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [searchingContaAzul, setSearchingContaAzul] = useState(false);
+  const [isGlobalSyncWarningOpen, setIsGlobalSyncWarningOpen] = useState(false);
+  const [syncingSingle, setSyncingSingle] = useState(false);
 
   // Sync Modal State (similar to order sync)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -188,6 +190,53 @@ export default function ClientesPage() {
       alert('Erro ao buscar cliente na Conta Azul: ' + err.message);
     } finally {
       setSearchingContaAzul(false);
+    }
+  };
+
+  const handleSyncCurrentCustomer = async () => {
+    if (!selectedCustomer) return;
+    const cleanDoc = (formDocument || '').replace(/\D/g, '');
+    const query = selectedCustomer.conta_azul_id || cleanDoc || formName;
+    if (!query) {
+      alert('Nenhum identificador (ID Conta Azul, CPF/CNPJ ou Nome) disponível para sincronizar.');
+      return;
+    }
+
+    setSyncingSingle(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedCustomer.conta_azul_id) {
+        params.append('conta_azul_id', selectedCustomer.conta_azul_id);
+      }
+      if (cleanDoc) {
+        params.append('document', cleanDoc);
+      }
+      if (formName) {
+        params.append('name', formName);
+      }
+      params.append('sync', 'true');
+
+      const res = await fetch(`/api/sync/search-customer?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.found) {
+        alert(data.message || data.error || 'Cliente não encontrado no Conta Azul para sincronizar.');
+        return;
+      }
+
+      const c = data.customer;
+      setFormName(c.name || formName);
+      if (c.document) setFormDocument(formatDocument(c.document));
+      if (c.email) setFormEmail((c.email || '').toLowerCase());
+      if (c.phone) setFormPhone(formatPhone(c.phone));
+      if (c.address) setFormAddress(c.address || '');
+
+      alert('Cliente sincronizado com o Conta Azul e atualizado com sucesso no portal!');
+      fetchCustomers();
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao sincronizar cliente com o Conta Azul: ' + err.message);
+    } finally {
+      setSyncingSingle(false);
     }
   };
 
@@ -405,7 +454,7 @@ export default function ClientesPage() {
         {user?.role !== 'Vendedor' && (
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <button
-              onClick={handleImportCustomers}
+              onClick={() => setIsGlobalSyncWarningOpen(true)}
               disabled={importing}
               className="btn btn-secondary"
               style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
@@ -843,17 +892,103 @@ export default function ClientesPage() {
                 paddingTop: '1rem',
                 borderTop: '1px solid var(--border)',
                 display: 'flex',
-                justifyContent: 'flex-end',
+                justifyContent: 'space-between',
+                alignItems: 'center',
                 gap: '0.75rem'
               }}>
-                <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-secondary">
-                  Cancelar
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {modalType === 'create' ? 'Salvar Cliente' : 'Salvar Alterações'}
-                </button>
+                <div>
+                  {modalType === 'edit' && (
+                    <button
+                      type="button"
+                      onClick={handleSyncCurrentCustomer}
+                      disabled={syncingSingle}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+                      title="Puxa os dados mais recentes deste cliente diretamente do Conta Azul e atualiza no portal"
+                    >
+                      <RefreshCw size={13} className={syncingSingle ? 'spinner' : ''} />
+                      <span>{syncingSingle ? 'Sincronizando...' : 'Sincronizar com Conta Azul'}</span>
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-secondary">
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    {modalType === 'create' ? 'Salvar Cliente' : 'Salvar Alterações'}
+                  </button>
+                </div>
               </footer>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* MODAL DE AVISO / CONFIRMAÇÃO DA IMPORTAÇÃO GERAL */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {isGlobalSyncWarningOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+            padding: '2rem', maxWidth: '480px', width: '100%',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
+            animation: 'fadeIn 0.2s ease', textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+              <div style={{
+                width: '40px', height: '40px', borderRadius: '50%',
+                backgroundColor: 'rgba(234, 179, 8, 0.15)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', color: '#eab308'
+              }}>
+                <AlertTriangle size={22} />
+              </div>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
+                Importação Geral de Clientes
+              </h2>
+            </div>
+
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
+              Atenção: A base de contatos do Conta Azul possui mais de <strong>6.500 cadastros</strong>. Uma importação geral varre todos os registros do ERP e pode causar <strong>lentidão temporária</strong> no sistema até a finalização da carga.
+            </p>
+
+            <div style={{
+              backgroundColor: 'rgba(59, 130, 246, 0.08)',
+              border: '1px solid rgba(59, 130, 246, 0.2)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.875rem',
+              marginBottom: '1.5rem',
+              fontSize: '0.8125rem',
+              color: 'var(--text)'
+            }}>
+              <strong>Recomendação:</strong> Se você precisa cadastrar ou atualizar apenas um cliente específico, recomendamos pesquisá-lo diretamente e usar o botão <em>&quot;Sincronizar com Conta Azul&quot;</em> no modal do cliente.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setIsGlobalSyncWarningOpen(false)}
+                className="btn btn-secondary"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsGlobalSyncWarningOpen(false);
+                  handleImportCustomers();
+                }}
+                className="btn btn-primary"
+              >
+                Prosseguir com Importação Geral
+              </button>
+            </div>
           </div>
         </div>
       )}

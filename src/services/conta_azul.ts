@@ -779,56 +779,71 @@ export class ContaAzulService {
     }
 
     try {
-      onProgress?.('Buscando clientes no Conta Azul...', 5);
+      onProgress?.('Autenticando e verificando tokens...', 5);
       const token = await this.getValidAccessToken();
-      const response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas?tamanho_pagina=100`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Erro ao buscar pessoas do Conta Azul: ${response.status} - ${errText}`);
-      }
-
-      const resData = await response.json();
-      const items = resData.items || [];
-      
       const dbClient = supabaseAdmin || supabase;
       if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
 
-      let imported = 0;
-      let updated = 0;
+      onProgress?.('Buscando contatos e clientes no Conta Azul...', 10);
+      const allItems: any[] = [];
+      let currentPage = 1;
+      let hasMore = true;
 
-      let currentIdx = 0;
-      for (const pessoa of items) {
-        currentIdx++;
-        const pct = 10 + Math.floor((currentIdx / items.length) * 85);
-        const isCliente = (pessoa.perfis || []).includes('Cliente');
-        if (!isCliente) continue;
+      while (hasMore) {
+        onProgress?.(`Baixando página ${currentPage} de contatos do Conta Azul...`, Math.min(30, 10 + currentPage * 3));
+        const response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas?tamanho_pagina=1000&pagina=${currentPage}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
 
-        onProgress?.(`Processando ${pessoa.nome || 'cliente'}...`, pct);
-        const document = pessoa.documento || pessoa.cnpj || pessoa.cpf || '';
-        
-        let query = dbClient
-          .from('customers')
-          .select('id')
-          .eq('tenant_id', this.tenantId);
-        
-        if (pessoa.id && document) {
-          query = query.or(`conta_azul_id.eq.${pessoa.id},document.eq.${document}`);
-        } else if (pessoa.id) {
-          query = query.eq('conta_azul_id', pessoa.id);
-        } else if (document) {
-          query = query.eq('document', document);
-        } else {
-          continue;
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro ao buscar pessoas do Conta Azul na página ${currentPage}: ${response.status} - ${errText}`);
         }
 
-        const { data: existing, error: findError } = await query.maybeSingle();
-        if (findError) console.error('Erro ao buscar cliente existente:', findError);
+        const resData = await response.json();
+        const pageItems = resData.items || [];
+        allItems.push(...pageItems);
+
+        if (pageItems.length < 1000) {
+          hasMore = false;
+        } else {
+          currentPage++;
+        }
+      }
+
+      onProgress?.(`Total de ${allItems.length} contatos obtidos. Filtrando clientes...`, 32);
+
+      // Filtra apenas registros com perfil 'Cliente'
+      const clientItems = allItems.filter(p => (p.perfis || []).includes('Cliente'));
+
+      onProgress?.('Carregando base local de clientes existentes...', 35);
+      const { data: existingList } = await dbClient
+        .from('customers')
+        .select('id, conta_azul_id, document')
+        .eq('tenant_id', this.tenantId);
+
+      const existingByCaId = new Map<string, string>();
+      const existingByDoc = new Map<string, string>();
+
+      for (const c of (existingList || [])) {
+        if (c.conta_azul_id) existingByCaId.set(c.conta_azul_id, c.id);
+        if (c.document) {
+          const clean = c.document.replace(/\D/g, '');
+          if (clean) existingByDoc.set(clean, c.id);
+        }
+      }
+
+      const toInsert: any[] = [];
+      const toUpdate: { id: string; payload: any }[] = [];
+
+      for (const pessoa of clientItems) {
+        const document = pessoa.documento || pessoa.cnpj || pessoa.cpf || '';
+        const cleanDoc = document.replace(/\D/g, '');
+        const existingId = (pessoa.id && existingByCaId.get(pessoa.id)) || (cleanDoc && existingByDoc.get(cleanDoc));
 
         let addressStr = '';
         const addr = pessoa.endereco || pessoa.address;
@@ -844,7 +859,7 @@ export class ContaAzulService {
           addressStr = parts.join(', ');
         }
 
-        const payload: any = {
+        const payload = {
           name: pessoa.nome || pessoa.razao_social || '',
           email: pessoa.email || '',
           phone: pessoa.telefone || pessoa.celular || '',
@@ -853,32 +868,50 @@ export class ContaAzulService {
           conta_azul_id: pessoa.id
         };
 
-        if (existing) {
-          const { error } = await dbClient
-            .from('customers')
-            .update(payload)
-            .eq('id', existing.id);
-          if (error) {
-            console.error('Erro ao atualizar cliente:', error);
-          } else {
-            updated++;
-          }
+        if (existingId) {
+          toUpdate.push({ id: existingId, payload });
         } else {
-          const { error } = await dbClient
-            .from('customers')
-            .insert([{ tenant_id: this.tenantId, ...payload }]);
-          if (error) {
-            console.error('Erro ao inserir cliente:', error);
-          } else {
-            imported++;
-          }
+          toInsert.push({ tenant_id: this.tenantId, ...payload });
         }
       }
+
+      let imported = 0;
+      let updated = 0;
+      const totalOps = toInsert.length + toUpdate.length;
+
+      // Inserção em lotes de 100
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+        const chunk = toInsert.slice(i, i + BATCH_SIZE);
+        const { error } = await dbClient.from('customers').insert(chunk);
+        if (error) {
+          console.error('Erro ao inserir lote de clientes:', error);
+        } else {
+          imported += chunk.length;
+        }
+        const pct = 35 + Math.floor(((i + chunk.length) / Math.max(1, totalOps)) * 55);
+        onProgress?.(`Gravando novos clientes (${imported}/${toInsert.length})...`, pct);
+      }
+
+      // Atualização de clientes existentes em concorrência controlada (lotes de 25)
+      for (let i = 0; i < toUpdate.length; i += 25) {
+        const chunk = toUpdate.slice(i, i + 25);
+        await Promise.all(
+          chunk.map(async item => {
+            const { error } = await dbClient.from('customers').update(item.payload).eq('id', item.id);
+            if (!error) updated++;
+          })
+        );
+        const pct = 35 + Math.floor(((toInsert.length + updated) / Math.max(1, totalOps)) * 55);
+        onProgress?.(`Atualizando clientes existentes (${updated}/${toUpdate.length})...`, pct);
+      }
+
+      onProgress?.('Finalizando sincronização de clientes...', 98);
 
       await createIntegrationLog(
         'IMPORT_CUSTOMERS',
         'SUCCESS',
-        { count: items.length },
+        { count: allItems.length, clientsCount: clientItems.length },
         { imported, updated },
         null,
         this.tenantId
@@ -2512,6 +2545,125 @@ export class ContaAzulService {
       phone: detail.telefone_celular || detail.telefone_comercial || detail.telefone || '',
       address: addrVal
     };
+  }
+
+  async syncSingleCustomer(customerIdOrDoc: string): Promise<{ success: boolean; customer?: any; error?: string }> {
+    const token = await this.getValidAccessToken();
+    const cleanDoc = (customerIdOrDoc || '').replace(/\D/g, '');
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(customerIdOrDoc.trim());
+
+    const dbClient = supabaseAdmin || supabase;
+    if (!dbClient) throw new Error('Cliente Supabase não inicializado');
+
+    let detail: any = null;
+
+    if (isUuid) {
+      const res = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${customerIdOrDoc.trim()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        detail = await res.json();
+      }
+    }
+
+    if (!detail) {
+      let searchUrl = `${CONTA_AZUL_API_URL}/v1/pessoas?tamanho_pagina=10`;
+      if (cleanDoc && (cleanDoc.length === 11 || cleanDoc.length === 14)) {
+        searchUrl += `&documento=${cleanDoc}`;
+      } else {
+        searchUrl += `&busca=${encodeURIComponent(customerIdOrDoc.trim())}`;
+      }
+
+      const searchRes = await fetch(searchUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!searchRes.ok) {
+        throw new Error(`Erro ao buscar no Conta Azul: ${await searchRes.text()}`);
+      }
+
+      const searchData = await searchRes.json();
+      const items = searchData.items || [];
+      if (items.length === 0) {
+        return { success: false, error: 'Cliente não encontrado no Conta Azul com esses dados.' };
+      }
+
+      const firstItem = items[0];
+      const detailRes = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${firstItem.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (detailRes.ok) {
+        detail = await detailRes.json();
+      } else {
+        detail = firstItem;
+      }
+    }
+
+    let addrVal = '';
+    if (detail.enderecos?.[0]) {
+      const addr = detail.enderecos[0];
+      addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
+    } else if (detail.endereco) {
+      const addr = detail.endereco;
+      const parts = [
+        addr.logradouro || addr.street,
+        addr.numero || addr.number,
+        addr.complemento || addr.complement,
+        addr.bairro || addr.neighborhood,
+        addr.cidade?.nome || addr.city,
+        addr.cidade?.uf || addr.state
+      ].filter(Boolean);
+      addrVal = parts.join(', ');
+    }
+
+    const docStr = detail.documento || detail.cnpj || detail.cpf || '';
+    const payload = {
+      name: detail.nome || detail.nome_fantasia || detail.razao_social || '',
+      document: docStr,
+      email: detail.email || '',
+      phone: detail.telefone_celular || detail.telefone_comercial || detail.telefone || '',
+      address: addrVal,
+      conta_azul_id: detail.id
+    };
+
+    // Upsert na tabela customers do Supabase
+    let query = dbClient
+      .from('customers')
+      .select('id')
+      .eq('tenant_id', this.tenantId);
+
+    if (detail.id && docStr) {
+      query = query.or(`conta_azul_id.eq.${detail.id},document.eq.${docStr}`);
+    } else if (detail.id) {
+      query = query.eq('conta_azul_id', detail.id);
+    } else if (docStr) {
+      query = query.eq('document', docStr);
+    }
+
+    const { data: existing } = await query.maybeSingle();
+
+    let savedData: any = null;
+    if (existing) {
+      const { data, error } = await dbClient
+        .from('customers')
+        .update(payload)
+        .eq('id', existing.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+      savedData = data;
+    } else {
+      const { data, error } = await dbClient
+        .from('customers')
+        .insert([{ tenant_id: this.tenantId, ...payload }])
+        .select('*')
+        .single();
+      if (error) throw error;
+      savedData = data;
+    }
+
+    return { success: true, customer: savedData };
   }
 }
 export default ContaAzulService;

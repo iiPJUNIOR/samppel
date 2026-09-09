@@ -7,15 +7,31 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const document = searchParams.get('document') || '';
   const name = searchParams.get('name') || '';
+  const contaAzulId = searchParams.get('conta_azul_id') || searchParams.get('id') || '';
+  const shouldSync = searchParams.get('sync') === 'true' || searchParams.get('save') === 'true';
 
-  if (!document && !name) {
-    return NextResponse.json({ success: false, error: 'Forneça o documento (CNPJ/CPF) ou nome para busca.' }, { status: 400 });
+  if (!document && !name && !contaAzulId) {
+    return NextResponse.json({ success: false, error: 'Forneça o ID Conta Azul, documento (CNPJ/CPF) ou nome para busca.' }, { status: 400 });
   }
 
   const tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
   const service = new ContaAzulService(tenantId);
 
   try {
+    if (shouldSync) {
+      const result = await service.syncSingleCustomer(contaAzulId || document || name);
+      if (!result.success || !result.customer) {
+        return NextResponse.json({ success: true, found: false, message: result.error || 'Nenhum cliente encontrado no Conta Azul com esses dados.' });
+      }
+
+      return NextResponse.json({
+        success: true,
+        found: true,
+        synced: true,
+        customer: result.customer
+      });
+    }
+
     const customerData = await service.findPessoaOnContaAzul({
       documento: document || undefined,
       busca: name || undefined
