@@ -33,7 +33,7 @@ export async function createFinancialTransaction(transaction: any) {
     await enqueueSync(newFin.tenant_id, 'FINANCIAL', newFin.id, 'CREATE');
     return { data: newFin, error: null };
   }
-  const { data, error } = await getDbClient().from('financial_transactions').insert([transaction]).select().single();
+  const { data, error } = await getDbClient().from('financial_transactions').insert([newFin]).select().single();
   if (!error && data) {
     await enqueueSync(data.tenant_id, 'FINANCIAL', data.id, 'CREATE');
   }

@@ -459,7 +459,8 @@ export async function adjustStock(
         product_id: productId,
         quantity: Math.abs(delta),
         type,
-        description
+        description,
+        operator_id: operatorId || null
       }]);
 
     if (txErr) {

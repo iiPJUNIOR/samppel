@@ -20,7 +20,7 @@ export async function createSupplier(supplier: any) {
     await enqueueSync(newSupp.tenant_id, 'SUPPLIER', newSupp.id, 'CREATE');
     return { data: newSupp, error: null };
   }
-  const { data, error } = await getDbClient().from('suppliers').insert([supplier]).select().single();
+  const { data, error } = await getDbClient().from('suppliers').insert([newSupp]).select().single();
   if (!error && data) {
     await enqueueSync(data.tenant_id, 'SUPPLIER', data.id, 'CREATE');
   }

@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const tables = [
       'sync_queue',
       'order_item_sector_history',
-      'order_item_packaging_volumes',
+      'order_shipping_volumes',
       'order_item_packaging',
       'financial_transactions',
       'order_items',

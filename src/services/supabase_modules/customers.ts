@@ -22,7 +22,7 @@ export async function createCustomer(customer: any) {
     return { data: newCust, error: null };
   }
   
-  const { data, error } = await getDbClient().from('customers').insert([customer]).select().single();
+  const { data, error } = await getDbClient().from('customers').insert([newCust]).select().single();
   if (!error && data) {
     await enqueueSync(data.tenant_id, 'CUSTOMER', data.id, 'CREATE');
   }

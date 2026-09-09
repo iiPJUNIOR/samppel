@@ -32,7 +32,9 @@ export async function getOrders(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0
     'id', 'tenant_id', 'order_number', 'pv_number', 'op_number', 'art_name', 'seller_name',
     'measure', 'print_run', 'boxes_count', 'packaging_type', 'freight_value', 'shipping_type',
     'status', 'production_sector', 'physical_location', 'notes', 'internal_notes', 'order_date',
-    'installments_total', 'installments_paid', 'first_payment_date', 'over_short_quantity',
+    'installments_total', 'installments_paid', 'first_payment_date', 'production_start_date', 'over_short_quantity',
+    'package_weight', 'package_length', 'package_width', 'package_height', 'quantity_per_box',
+    'invoice_number', 'pickup_number', 'freight_quotation',
     'conta_azul_status', 'conta_azul_id', 'customer_id', 'product_id', 'stage_id', 'created_at', 'updated_at',
     'customer:customers(id, name, document, phone, email, address)',
     'product:products(id, name, sku, price, stock_quantity)',
@@ -416,7 +418,11 @@ export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-
     'id', 'tenant_id', 'order_id', 'product_id', 'item_type', 'name', 'item_index',
     'friendly_id', 'measure', 'print_run', 'boxes_count', 'packaging_type',
     'over_short_quantity', 'status', 'production_sector', 'stage_id', 'physical_location',
-    'notes', 'unit_price', 'total_price', 'created_at', 'updated_at'
+    'machine_id', 'handling_team_id', 'notes', 'unit_price', 'total_price',
+    'shortage_quantity', 'courtesy_quantity', 'expedition_notes',
+    'adjustment_resolved', 'resolved_by_item_id', 'applied_adjustment_id',
+    'adjusted_quantity_math', 'adjusted_production_quantity', 'quantity_per_box', 'last_operator_id',
+    'created_at', 'updated_at'
   ].join(', ');
 
   const relationFields = [
@@ -520,7 +526,11 @@ export async function updateOrderItem(id: string, updates: Partial<OrderItem>) {
     'id', 'tenant_id', 'order_id', 'product_id', 'item_type', 'name', 'item_index',
     'friendly_id', 'measure', 'print_run', 'boxes_count', 'packaging_type',
     'over_short_quantity', 'status', 'production_sector', 'stage_id', 'physical_location',
-    'notes', 'unit_price', 'total_price', 'created_at', 'updated_at'
+    'machine_id', 'handling_team_id', 'notes', 'unit_price', 'total_price',
+    'shortage_quantity', 'courtesy_quantity', 'expedition_notes',
+    'adjustment_resolved', 'resolved_by_item_id', 'applied_adjustment_id',
+    'adjusted_quantity_math', 'adjusted_production_quantity', 'quantity_per_box', 'last_operator_id',
+    'created_at', 'updated_at'
   ].join(', ');
   const fullSelectForUpdate = `${selectItemFields}, product:products(id, name, sku, price, stock_quantity), stage:order_stages(id, name, color, sequence), machine:production_machines(id, name), handling_team:handling_teams(id, name)`;
   const baseSelectForUpdate = `${selectItemFields}, product:products(id, name, sku, price, stock_quantity), stage:order_stages(id, name, color, sequence)`;
@@ -2827,10 +2837,15 @@ export async function getShippingTypesConfig(tenantId = 'd3b07384-d113-4ec8-a5c6
   return { data, error };
 }
 
-export async function createShippingTypeConfig(typeConfig: Omit<ShippingTypeConfig, 'id' | 'created_at' | 'updated_at'>) {
+export async function createShippingTypeConfig(typeConfig: Omit<ShippingTypeConfig, 'id' | 'created_at' | 'updated_at'> & { tenant_id?: string }, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  const payload = {
+    ...typeConfig,
+    tenant_id: typeConfig.tenant_id || tenantId
+  };
+
   if (isMockMode) {
     const newConfig: ShippingTypeConfig = {
-      ...typeConfig,
+      ...payload,
       id: Math.random().toString(36).substring(2, 9),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -2841,7 +2856,7 @@ export async function createShippingTypeConfig(typeConfig: Omit<ShippingTypeConf
 
   const { data, error } = await getDbClient()
     .from('shipping_types_config')
-    .insert([typeConfig])
+    .insert([payload])
     .select()
     .single();
 
