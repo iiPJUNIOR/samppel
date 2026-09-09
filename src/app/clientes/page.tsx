@@ -2,15 +2,29 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getCustomers, createCustomer, updateCustomer } from '@/services/supabase';
+import { getCustomers, getCustomersPaginated, createCustomer, updateCustomer } from '@/services/supabase';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, RefreshCw, Copy, AlertTriangle } from 'lucide-react';
+import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, RefreshCw, Copy, AlertTriangle, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 export default function ClientesPage() {
   const { user } = useAuth();
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // Search debounce effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -243,8 +257,15 @@ export default function ClientesPage() {
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      const { data } = await getCustomers();
-      setCustomers(data || []);
+      const res = await getCustomersPaginated({
+        page,
+        pageSize,
+        search: debouncedSearch,
+        tenantId: user?.tenant_id
+      });
+      setCustomers(res.data || []);
+      setTotalCount(res.totalCount || 0);
+      setTotalPages(res.totalPages || 1);
     } catch (e) {
       console.error('Error fetching customers:', e);
     } finally {
@@ -256,7 +277,7 @@ export default function ClientesPage() {
     if (user?.role !== 'Produção') {
       fetchCustomers();
     }
-  }, [user]);
+  }, [user, page, pageSize, debouncedSearch]);
 
   // Security guard check
   if (user && user.role === 'Produção') {
@@ -404,42 +425,13 @@ export default function ClientesPage() {
     }
   };
 
-  const getGroupedCustomers = () => {
-    // 1. Filtra pela busca
-    const filtered = customers.filter(c => 
-      c.name.toLowerCase().includes(search.toLowerCase()) || 
-      (c.document && c.document.includes(search))
-    );
-
-    // 2. Agrupa por nome e documento
-    const groups: { [key: string]: any[] } = {};
-    for (const c of filtered) {
-      const cleanDoc = (c.document || '').replace(/\D/g, '');
-      const nameKey = (c.name || '').toLowerCase().trim();
-      const key = `${nameKey}_${cleanDoc}`;
-      if (!groups[key]) {
-        groups[key] = [];
-      }
-      groups[key].push(c);
-    }
-
-    // 3. Formata e junta os IDs
-    return Object.values(groups).map(group => {
-      const primary = group[0];
-      const allIds = group.map(c => {
-        const idStr = c.id || '';
-        return idStr.substring(idStr.length - 3);
-      }).join(', ');
-
-      return {
-        ...primary,
-        all_ids: allIds,
-        is_grouped: group.length > 1
-      };
-    });
-  };
-
-  const groupedCustomers = getGroupedCustomers();
+  const displayedCustomers = customers.map(c => {
+    const idStr = c.id || '';
+    return {
+      ...c,
+      all_ids: idStr.substring(Math.max(0, idStr.length - 3))
+    };
+  });
 
   return (
     <div className="page-container">
@@ -447,7 +439,7 @@ export default function ClientesPage() {
         <div>
           <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '0.25rem' }}>Cadastro de Clientes</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-            {groupedCustomers.length} cliente{groupedCustomers.length !== 1 ? 's' : ''} cadastrado{groupedCustomers.length !== 1 ? 's' : ''}
+            {totalCount} cliente{totalCount !== 1 ? 's' : ''} cadastrado{totalCount !== 1 ? 's' : ''}
           </p>
         </div>
 
@@ -580,14 +572,14 @@ export default function ClientesPage() {
                 Array.from({ length: 5 }).map((_, idx) => (
                   <TableRowSkeleton key={idx} cols={Object.keys(visibleColumns).filter(key => visibleColumns[key] !== false).length} />
                 ))
-              ) : groupedCustomers.length === 0 ? (
+              ) : displayedCustomers.length === 0 ? (
                 <tr>
                   <td colSpan={Object.keys(visibleColumns).filter(key => visibleColumns[key] !== false).length} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
                     Nenhum cliente cadastrado ou encontrado.
                   </td>
                 </tr>
               ) : (
-                groupedCustomers.map((customer) => {
+                displayedCustomers.map((customer) => {
                   const doc = formatDocument(customer.document) || '';
                   const phone = formatPhone(customer.phone) || '';
                   const email = customer.email || '';
@@ -772,6 +764,87 @@ export default function ClientesPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* PAGINATION CONTROLS */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '0.875rem 1.25rem',
+          borderTop: '1px solid var(--border)',
+          backgroundColor: 'var(--surface-hover)',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+              Mostrando {customers.length > 0 ? (page - 1) * pageSize + 1 : 0} a {Math.min(page * pageSize, totalCount)} de {totalCount} clientes
+            </span>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Linhas por página:</span>
+              <select
+                className="form-select"
+                style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8125rem' }}
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <button
+              onClick={() => setPage(1)}
+              disabled={page <= 1 || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Primeira Página"
+            >
+              <ChevronsLeft size={14} />
+            </button>
+
+            <button
+              onClick={() => setPage(prev => Math.max(1, prev - 1))}
+              disabled={page <= 1 || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Página Anterior"
+            >
+              <ChevronLeft size={14} />
+            </button>
+
+            <span style={{ fontSize: '0.8125rem', padding: '0 0.5rem', color: 'var(--text)', fontWeight: 600 }}>
+              Página {page} de {totalPages}
+            </span>
+
+            <button
+              onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={page >= totalPages || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Próxima Página"
+            >
+              <ChevronRight size={14} />
+            </button>
+
+            <button
+              onClick={() => setPage(totalPages)}
+              disabled={page >= totalPages || loading}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+              title="Última Página"
+            >
+              <ChevronsRight size={14} />
+            </button>
+          </div>
         </div>
       </div>
 

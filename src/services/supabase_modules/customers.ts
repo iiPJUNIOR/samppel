@@ -1,6 +1,74 @@
 import { getDbClient, isMockMode, mockCustomers, setMockCustomers } from '../supabaseClient';
 import { enqueueSync } from '../supabaseClient'; // Ensure it's imported correctly
 
+export interface PaginatedCustomersParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  tenantId?: string;
+}
+
+export async function getCustomersPaginated({
+  page = 1,
+  pageSize = 25,
+  search = '',
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+}: PaginatedCustomersParams = {}) {
+  if (isMockMode) {
+    let list = mockCustomers.filter(c => c.tenant_id === tenantId);
+    if (search && search.trim()) {
+      const s = search.toLowerCase().trim();
+      list = list.filter(c => 
+        (c.name || '').toLowerCase().includes(s) || 
+        (c.document || '').includes(s)
+      );
+    }
+    const totalCount = list.length;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize;
+    return {
+      data: list.slice(from, to),
+      totalCount,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+      error: null
+    };
+  }
+
+  let query = getDbClient()
+    .from('customers')
+    .select('*', { count: 'exact' })
+    .eq('tenant_id', tenantId);
+
+  if (search && search.trim()) {
+    const s = search.trim().replace(/[%_]/g, '');
+    const cleanDoc = s.replace(/\D/g, '');
+    if (cleanDoc && cleanDoc.length >= 3) {
+      query = query.or(`name.ilike.%${s}%,document.ilike.%${cleanDoc}%,document.ilike.%${s}%`);
+    } else {
+      query = query.or(`name.ilike.%${s}%,document.ilike.%${s}%`);
+    }
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const { data, count, error } = await query
+    .order('name', { ascending: true })
+    .range(from, to);
+
+  const totalCount = count || 0;
+  return {
+    data: data || [],
+    totalCount,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+    error
+  };
+}
+
 export async function getCustomers(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   if (isMockMode) return { data: mockCustomers.filter(c => c.tenant_id === tenantId), error: null };
   const { data, error } = await getDbClient().from('customers').select('*').eq('tenant_id', tenantId).order('name');
