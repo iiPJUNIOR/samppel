@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import Link from 'next/link';
 import { supabase } from '@/services/supabase';
+import { authenticatedFetch } from '@/lib/apiFetch';
 import { 
   getContaAzulConfig, 
   updateContaAzulConfig, 
@@ -154,7 +155,7 @@ export default function ConfiguracoesPage() {
     setFetchingInvites(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const res = await fetch(`/api/admin/invite?tenantId=${tenantId}`);
+      const res = await authenticatedFetch(`/api/admin/invite?tenantId=${tenantId}`);
       const json = await res.json();
       if (json.data) setInvitesList(json.data);
     } catch (err) {
@@ -174,7 +175,7 @@ export default function ConfiguracoesPage() {
 
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const res = await fetch('/api/admin/invite', {
+      const res = await authenticatedFetch('/api/admin/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -207,7 +208,7 @@ export default function ConfiguracoesPage() {
     if (!confirm('Deseja realmente cancelar e excluir este convite de usuário?')) return;
 
     try {
-      const res = await fetch(`/api/admin/invite?id=${id}`, {
+      const res = await authenticatedFetch(`/api/admin/invite?id=${id}`, {
         method: 'DELETE'
       });
       const json = await res.json();
@@ -224,7 +225,7 @@ export default function ConfiguracoesPage() {
     setInviteError(null);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const res = await fetch('/api/admin/invite', {
+      const res = await authenticatedFetch('/api/admin/invite', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -278,7 +279,7 @@ export default function ConfiguracoesPage() {
       const endDateStr = now.toISOString().split('T')[0];
 
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const response = await fetch(`/api/sync/import-orders?tenantId=${tenantId}&startDate=${startDateStr}&endDate=${endDateStr}`, {
+      const response = await authenticatedFetch(`/api/sync/import-orders?tenantId=${tenantId}&startDate=${startDateStr}&endDate=${endDateStr}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userRole: user?.role })
@@ -344,7 +345,7 @@ export default function ConfiguracoesPage() {
         getHandlingTeams(tenantId),
         getPackagingMaterialTypes(tenantId),
         getPackagingSettings(tenantId),
-        fetch(`/api/operators?tenantId=${tenantId}`).then(res => res.json()),
+        authenticatedFetch(`/api/operators?tenantId=${tenantId}`).then(res => res.json()),
         getOrderStages(tenantId),
         getProfilesWithPermissions(tenantId),
         getFactoryLocations(tenantId),
@@ -454,7 +455,7 @@ export default function ConfiguracoesPage() {
     setWiping(true);
     setWipingSuccess(false);
     try {
-      const res = await fetch('/api/config/wipe', {
+      const res = await authenticatedFetch('/api/config/wipe', {
         method: 'POST'
       });
       
@@ -482,7 +483,7 @@ export default function ConfiguracoesPage() {
     setWipingStock(true);
     setWipingStockSuccess(false);
     try {
-      const res = await fetch('/api/config/wipe-stock', {
+      const res = await authenticatedFetch('/api/config/wipe-stock', {
         method: 'POST'
       });
       
@@ -770,7 +771,7 @@ export default function ConfiguracoesPage() {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const response = await fetch('/api/sync/cron', { method: 'POST' });
+      const response = await authenticatedFetch('/api/sync/cron', { method: 'POST' });
       const result = await response.json();
       setSyncResult(result);
       fetchConfigAndLogs(); // Reload logs feed
@@ -802,7 +803,7 @@ export default function ConfiguracoesPage() {
     setSubmittingOperator(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const res = await fetch('/api/operators', {
+      const res = await authenticatedFetch('/api/operators', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -833,7 +834,7 @@ export default function ConfiguracoesPage() {
   const handleToggleOperatorStatus = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === 'ATIVO' ? 'INATIVO' : 'ATIVO';
     try {
-      const res = await fetch('/api/operators', {
+      const res = await authenticatedFetch('/api/operators', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status: newStatus })
@@ -850,7 +851,7 @@ export default function ConfiguracoesPage() {
 
   const handleToggleForcePassword = async (id: string, currentForce: boolean) => {
     try {
-      const res = await fetch('/api/operators', {
+      const res = await authenticatedFetch('/api/operators', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, force_password_change: !currentForce })
@@ -879,7 +880,7 @@ export default function ConfiguracoesPage() {
     setIsDeletingUserLoading(true);
 
     try {
-      const res = await fetch(`/api/admin/invite?id=${userToDelete.id}`, {
+      const res = await authenticatedFetch(`/api/admin/invite?id=${userToDelete.id}`, {
         method: 'DELETE'
       });
       const json = await res.json();
@@ -1022,7 +1023,7 @@ export default function ConfiguracoesPage() {
     try {
       const isFactory = newRole === 'Fábrica';
 
-      const res = await fetch('/api/operators', {
+      const res = await authenticatedFetch('/api/operators', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

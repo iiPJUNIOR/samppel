@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Users, Key, AlertCircle } from 'lucide-react';
+import { authenticatedFetch } from '@/lib/apiFetch';
 
 interface OperatorAuthModalProps {
   isOpen: boolean;
@@ -38,7 +39,7 @@ export default function OperatorAuthModal({
       setLoadingOps(true);
       
       // Carrega operadores ativos do tenant correspondente
-      fetch(`/api/operators?tenantId=${tenantId}`)
+      authenticatedFetch(`/api/operators?tenantId=${tenantId}`)
         .then(res => res.json())
         .then(resData => {
           if (resData.data) {
@@ -73,7 +74,7 @@ export default function OperatorAuthModal({
     setLoading(true);
 
     try {
-      const res = await fetch('/api/operators/authorize', {
+      const res = await authenticatedFetch('/api/operators/authorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

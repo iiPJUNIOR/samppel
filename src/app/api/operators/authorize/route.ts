@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyCredential } from '@/lib/crypto';
+import { supabaseAdmin, checkPinRateLimit, registerPinFailure, clearPinFailures } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-const supabaseAdmin = supabaseUrl && supabaseServiceKey 
-  ? createClient(supabaseUrl, supabaseServiceKey) 
-  : null;
-
 const defaultTenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
 export async function POST(request: NextRequest) {
@@ -22,6 +17,14 @@ export async function POST(request: NextRequest) {
 
     if (!operatorId || !authMethod || !credential) {
       return NextResponse.json({ error: 'Campos obrigatórios ausentes.' }, { status: 400 });
+    }
+
+    // Proteção contra ataques de força bruta no PIN
+    const rateCheck = checkPinRateLimit(operatorId);
+    if (!rateCheck.allowed) {
+      return NextResponse.json({ 
+        error: `Muitas tentativas consecutivas incorretas. Acesso bloqueado por segurança. Aguarde ${rateCheck.retryAfterSeconds}s.` 
+      }, { status: 429 });
     }
 
     const tId = tenantId || defaultTenantId;
@@ -68,8 +71,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (!isValid) {
+      registerPinFailure(operatorId);
       return NextResponse.json({ error: 'PIN ou Senha inválidos.' }, { status: 401 });
     }
+
+    // Credencial correta: limpa histórico de falhas
+    clearPinFailures(operatorId);
 
     // 4. Validar permissões de etapa no banco para este operador se for movimentação Kanban
     // Se o operador for um Administrador, ele tem permissão total por padrão

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { after } from 'next/server';
 import { SyncQueueService } from '@/services/sync_queue';
 import { ContaAzulService } from '@/services/conta_azul';
+import { requireCronOrAuth } from '@/lib/serverAuth';
 
 export const maxDuration = 300; // 5 minutos de timeout na Vercel (Pro)
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,14 @@ async function performSync(tenantId: string, startDateStr: string, endDateStr: s
 
 // Handles GET (cron call) and POST (manual UI trigger)
 async function handleSync(request: NextRequest) {
+  const authCheck = await requireCronOrAuth(request);
+  if (!authCheck.authorized) {
+    return NextResponse.json(
+      { error: 'Não autorizado. Forneça o cabeçalho Authorization: Bearer <CRON_SECRET>.' },
+      { status: 401 }
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const tenantId = searchParams.get('tenantId') || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
   const isSync = searchParams.get('sync') === 'true';

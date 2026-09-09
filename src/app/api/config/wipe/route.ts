@@ -1,19 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-const supabaseAdmin = supabaseUrl && supabaseServiceKey 
-  ? createClient(supabaseUrl, supabaseServiceKey) 
-  : null;
+import { supabaseAdmin, requireAdmin } from '@/lib/serverAuth';
 
 export async function POST(request: NextRequest) {
+  const authCheck = await requireAdmin(request);
+  if (!authCheck.authorized) {
+    return authCheck.response;
+  }
+
   if (!supabaseAdmin) {
     return NextResponse.json({ error: 'SupabaseAdmin não inicializado no servidor.' }, { status: 500 });
   }
 
-  console.log('[API Admin] Iniciando redefinição da base de dados local...');
+  console.log(`[API Admin] Iniciando redefinição da base de dados por ${authCheck.user.email}...`);
 
   try {
     // Lista de tabelas a serem limpas respeitando restrições de chaves estrangeiras
