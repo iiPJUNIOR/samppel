@@ -50,14 +50,14 @@ export default function ClientesPage() {
 
   // Column Resizing States
   const [columnWidths, setColumnWidths] = useState<{ [key: string]: number }>({
-    name: 200,
-    ids: 90,
-    document: 155,
-    email: 190,
+    name: 280,
+    ids: 70,
+    document: 165,
+    email: 220,
     phone: 150,
     address: 220,
     sync: 160,
-    actions: 100
+    actions: 90
   });
 
   // Column Visibility States
@@ -129,7 +129,6 @@ export default function ClientesPage() {
     return {
       width: `${width}px`,
       minWidth: `${width}px`,
-      maxWidth: `${width}px`,
       position: 'relative',
       whiteSpace: 'nowrap'
     };
@@ -591,9 +590,9 @@ export default function ClientesPage() {
                       {/* Nome */}
                       {visibleColumns.name !== false && (
                         <td style={{ ...getColStyle('name'), fontWeight: 600 }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, gap: '0.5rem' }}>
                             <span 
-                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.name || 200) - 25}px` }} 
+                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} 
                               title={name}
                             >
                               {name}
@@ -613,8 +612,8 @@ export default function ClientesPage() {
                       {/* IDs */}
                       {visibleColumns.ids !== false && (
                         <td style={getColStyle('ids')}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.ids || 90) - 25}px` }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, gap: '0.25rem' }}>
+                            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
                               {customer.all_ids}
                             </code>
                             <button
@@ -633,8 +632,8 @@ export default function ClientesPage() {
                       {visibleColumns.document !== false && (
                         <td style={getColStyle('document')}>
                           {doc ? (
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                              <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.document || 155) - 25}px` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, gap: '0.35rem' }}>
+                              <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
                                 {doc}
                               </code>
                               <button
@@ -654,9 +653,9 @@ export default function ClientesPage() {
                       {visibleColumns.email !== false && (
                         <td style={getColStyle('email')}>
                           {email ? (
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, gap: '0.5rem' }}>
                               <span 
-                                style={{ textTransform: 'lowercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.email || 190) - 25}px` }} 
+                                style={{ textTransform: 'lowercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} 
                                 title={email}
                               >
                                 {email}
@@ -678,8 +677,8 @@ export default function ClientesPage() {
                       {visibleColumns.phone !== false && (
                         <td style={getColStyle('phone')}>
                           {phone ? (
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.phone || 150) - 25}px` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, gap: '0.35rem' }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
                                 {phone}
                               </span>
                               <button
@@ -699,9 +698,9 @@ export default function ClientesPage() {
                       {visibleColumns.address !== false && (
                         <td style={{ ...getColStyle('address'), fontSize: '0.8rem' }}>
                           {address ? (
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', width: '100%', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, gap: '0.5rem' }}>
                               <span 
-                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, maxWidth: `${(columnWidths.address || 220) - 25}px` }} 
+                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} 
                                 title={address}
                               >
                                 {address}
