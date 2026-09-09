@@ -1,4 +1,5 @@
 import { getDbClient, isMockMode, mockProfiles, setMockProfiles } from '../supabaseClient';
+import { authenticatedFetch } from '@/lib/apiFetch';
 
 export async function getProfilesWithPermissions(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   if (isMockMode) {
@@ -11,17 +12,18 @@ export async function getProfilesWithPermissions(tenantId = 'd3b07384-d113-4ec8-
     };
   }
 
-  // Se executado no cliente, chama a rota de API do servidor para pular RLS de profiles
+  // Se executado no cliente, tenta obter via rota protegida por token
   if (typeof window !== 'undefined') {
     try {
-      const response = await fetch('/api/config/profiles');
-      if (!response.ok) {
-        throw new Error('Falha ao obter perfis via API');
+      const response = await authenticatedFetch(`/api/config/profiles?tenantId=${tenantId}`);
+      if (response.ok) {
+        const json = await response.json();
+        if (json.data && Array.isArray(json.data)) {
+          return { data: json.data, error: null };
+        }
       }
-      const json = await response.json();
-      return { data: json.data, error: null };
     } catch (err: any) {
-      return { data: null, error: err };
+      console.warn('Aviso: Falha na API /api/config/profiles, acionando consulta direta ao banco:', err);
     }
   }
 
@@ -41,19 +43,18 @@ export async function saveProfileStagePermission(profileId: string, stageId: str
   // Se executado no cliente, chama a rota de API do servidor para pular RLS de permissões
   if (typeof window !== 'undefined') {
     try {
-      const response = await fetch('/api/config/profiles', {
+      const response = await authenticatedFetch('/api/config/profiles', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ profileId, stageId, canEnter, canExit })
       });
-      if (!response.ok) {
-        throw new Error('Falha ao salvar permissões via API');
+      if (response.ok) {
+        return { data: null, error: null };
       }
-      return { data: null, error: null };
     } catch (err: any) {
-      return { data: null, error: err };
+      console.warn('Aviso: Falha na API /api/config/profiles para salvar permissões, tentando fallback direto:', err);
     }
   }
   
@@ -141,7 +142,7 @@ export async function saveSellerPermissions(
 
   if (typeof window !== 'undefined') {
     try {
-      await fetch('/api/config/profiles', {
+      await authenticatedFetch('/api/config/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

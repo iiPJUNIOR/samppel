@@ -18,22 +18,24 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get('tenantId') || defaultTenantId;
 
-    // Busca da tabela principal profiles com papel 'Produção'
+    // Busca da tabela principal profiles com papel 'Produção', 'Fábrica' ou 'Administrador'
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, full_name, email, status, force_password_change, created_at, profile_stage_permissions(stage_id, can_enter, can_exit)')
+      .select('id, full_name, email, role, pin, status, force_password_change, created_at, profile_stage_permissions(stage_id, can_enter, can_exit)')
       .eq('tenant_id', tenantId)
-      .eq('role', 'Produção')
+      .in('role', ['Produção', 'Fábrica', 'Administrador'])
       .order('full_name', { ascending: true });
 
     if (error) throw error;
 
-    // Adapta os nomes dos campos para o frontend (full_name -> name)
+    // Adapta os nomes dos campos para o frontend (full_name -> name, has_pin booleano seguro)
     const operators = (data || []).map((p: any) => ({
       id: p.id,
       name: p.full_name,
       email: p.email,
+      role: p.role,
       status: p.status || 'ATIVO',
+      has_pin: !!p.pin,
       force_password_change: !!p.force_password_change,
       profile_stage_permissions: p.profile_stage_permissions || [],
       created_at: p.created_at
@@ -127,7 +129,7 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id, status, force_password_change, role, is_factory_account } = body;
+    const { id, status, force_password_change, role, is_factory_account, pin } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'ID é obrigatório.' }, { status: 400 });
@@ -138,6 +140,17 @@ export async function PUT(request: NextRequest) {
     if (force_password_change !== undefined) updates.force_password_change = force_password_change;
     if (role !== undefined) updates.role = role;
     if (is_factory_account !== undefined) updates.is_factory_account = is_factory_account;
+    if (pin !== undefined) {
+      if (pin && typeof pin === 'string') {
+        const trimmedPin = pin.trim();
+        if (!/^\d{4,6}$/.test(trimmedPin)) {
+          return NextResponse.json({ error: 'O PIN deve conter de 4 a 6 dígitos numéricos.' }, { status: 400 });
+        }
+        updates.pin = hashCredential(trimmedPin);
+      } else {
+        updates.pin = null;
+      }
+    }
 
     // Se estiver definido como conta de fábrica, reseta as outras contas do mesmo tenant
     if (is_factory_account === true) {

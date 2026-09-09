@@ -149,55 +149,81 @@ export default function OperatorAuthModal({
               <select 
                 className="form-select" 
                 value={selectedOp} 
-                onChange={e => setSelectedOp(e.target.value)} 
+                onChange={e => {
+                  const newId = e.target.value;
+                  setSelectedOp(newId);
+                  setCredential('');
+                  setError('');
+                  const targetOp = operators.find(op => op.id === newId);
+                  if (targetOp && !targetOp.has_pin) {
+                    setAuthMethod('PASSWORD');
+                  }
+                }} 
                 required
                 style={{ width: '100%' }}
               >
                 <option value="">Selecione seu nome da lista...</option>
                 {operators.map(op => (
-                  <option key={op.id} value={op.id}>{op.name}</option>
+                  <option key={op.id} value={op.id}>
+                    {op.name} {op.role ? `(${op.role})` : ''} {!op.has_pin ? '[Sem PIN]' : ''}
+                  </option>
                 ))}
               </select>
             )}
             {operators.length === 0 && !loadingOps && (
-              <span style={{ fontSize: '0.72rem', color: 'var(--danger)', marginTop: '0.25rem', display: 'block' }}>
-                ⚠️ Nenhum operador de produção ativo cadastrado para esta unidade.
+              <span style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <AlertCircle size={13} />
+                <span>Nenhum operador ativo cadastrado para esta unidade.</span>
               </span>
             )}
           </div>
 
           {/* MÉTODOS DE CREDENCIAL */}
-          <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', marginTop: '0.25rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer' }}>
-              <input 
-                type="radio" 
-                name="authMethod" 
-                checked={authMethod === 'PIN'} 
-                onChange={() => { setAuthMethod('PIN'); setCredential(''); setError(''); }}
-                style={{ accentColor: 'var(--primary)' }}
-              />
-              <span>PIN de Acesso</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer' }}>
-              <input 
-                type="radio" 
-                name="authMethod" 
-                checked={authMethod === 'PASSWORD'} 
-                onChange={() => { setAuthMethod('PASSWORD'); setCredential(''); setError(''); }}
-                style={{ accentColor: 'var(--primary)' }}
-              />
-              <span>Senha de Login</span>
-            </label>
-          </div>
+          {(() => {
+            const currentOp = operators.find(op => op.id === selectedOp);
+            const hasNoPin = !!currentOp && !currentOp.has_pin;
+            return (
+              <>
+                <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', marginTop: '0.25rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: 600, cursor: hasNoPin ? 'not-allowed' : 'pointer', opacity: hasNoPin ? 0.45 : 1 }}>
+                    <input 
+                      type="radio" 
+                      name="authMethod" 
+                      disabled={hasNoPin}
+                      checked={authMethod === 'PIN'} 
+                      onChange={() => { setAuthMethod('PIN'); setCredential(''); setError(''); }}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    <span>PIN de Acesso</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer' }}>
+                    <input 
+                      type="radio" 
+                      name="authMethod" 
+                      checked={authMethod === 'PASSWORD'} 
+                      onChange={() => { setAuthMethod('PASSWORD'); setCredential(''); setError(''); }}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    <span>Senha de Login</span>
+                  </label>
+                </div>
+                {hasNoPin && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', backgroundColor: 'var(--surface-hover)', padding: '0.45rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                    Este operador ainda não cadastrou um PIN de fábrica. Utilize sua senha de login do portal para liberar.
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* CREDENCIAL */}
           <div className="form-group">
             <label className="form-label" style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', fontWeight: 600 }}>
               <Key size={15} style={{ color: 'var(--text-muted)' }} />
-              <span>{authMethod === 'PIN' ? 'PIN Numérico (4 a 6 dígitos) *' : 'Senha de Produção *'}</span>
+              <span>{authMethod === 'PIN' ? 'PIN Numérico (4 a 6 dígitos) *' : 'Senha de Login *'}</span>
             </label>
             <input 
-              type={authMethod === 'PIN' ? 'password' : 'password'} 
+              type="password" 
               pattern={authMethod === 'PIN' ? '\\d*' : undefined}
               inputMode={authMethod === 'PIN' ? 'numeric' : undefined}
               className="form-input"

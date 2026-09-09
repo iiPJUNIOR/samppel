@@ -14,10 +14,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const tenantId = searchParams.get('tenantId') || defaultTenantId;
+
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .select('*, profile_stage_permissions(stage_id, can_enter, can_exit)')
-      .eq('tenant_id', defaultTenantId)
+      .eq('tenant_id', tenantId)
       .order('full_name');
 
     if (error) throw error;
