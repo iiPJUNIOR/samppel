@@ -1030,17 +1030,19 @@ export class ContaAzulService {
         const price = prod.valor_venda ?? prod.value ?? prod.preco ?? prod.price ?? prod.valor ?? 0;
         const desc = prod.descricao || prod.description || '';
         
-        // Extrai saldo em estoque
+        // Extrai saldo em estoque (suporta números decimais e strings numéricas)
         let stockQty = 0;
-        if (typeof prod.saldo === 'number') {
-          stockQty = prod.saldo;
+        if (prod.saldo !== undefined && prod.saldo !== null && !isNaN(Number(prod.saldo))) {
+          stockQty = Number(prod.saldo);
         } else if (typeof prod.stock === 'object' && prod.stock !== null) {
-          stockQty = prod.stock.quantity ?? prod.stock.saldo ?? 0;
-        } else if (typeof prod.stock_quantity === 'number') {
-          stockQty = prod.stock_quantity;
-        } else if (typeof prod.quantidade === 'number') {
-          stockQty = prod.quantidade;
+          const rawStock = prod.stock.quantity ?? prod.stock.saldo ?? 0;
+          stockQty = Number(rawStock) || 0;
+        } else if (prod.stock_quantity !== undefined && prod.stock_quantity !== null && !isNaN(Number(prod.stock_quantity))) {
+          stockQty = Number(prod.stock_quantity);
+        } else if (prod.quantidade !== undefined && prod.quantidade !== null && !isNaN(Number(prod.quantidade))) {
+          stockQty = Number(prod.quantidade);
         }
+        if (isNaN(stockQty)) stockQty = 0;
 
         // Localiza em memória sem disparar requisições ao Supabase
         let existingProd: any = null;
@@ -1053,11 +1055,10 @@ export class ContaAzulService {
         }
 
         if (existingProd) {
-          // Atualiza dados cadastrais comerciais, mas PRESERVA o estoque físico local gerenciado na Samppel
+          // Atualiza dados cadastrais comerciais, mas PRESERVA o estoque físico local gerenciado na Samppel e atributos de produção (categoria, medidas, cliente)
           const updatePayload: any = {
             name: prodName,
             sku: code,
-            description: desc,
             price: price,
             conta_azul_id: caId || undefined
           };
@@ -1067,9 +1068,18 @@ export class ContaAzulService {
           const skuDiff = code && (existingProd.sku || '').trim().toUpperCase() !== code.toUpperCase();
           const caIdDiff = caId && existingProd.conta_azul_id !== caId;
           const priceDiff = Math.abs(Number(existingProd.price || 0) - Number(price || 0)) > 0.001;
-          const descDiff = (existingProd.description || '') !== desc;
 
-          if (nameDiff || skuDiff || caIdDiff || priceDiff || descDiff) {
+          // Preserva a descrição local caso a do Conta Azul seja vazia ou contenha especificações técnicas
+          const currentDesc = (existingProd.description || '').trim();
+          const incomingDesc = (desc || '').trim();
+          let shouldUpdateDesc = false;
+          if (incomingDesc && incomingDesc !== currentDesc) {
+            // Só atualiza descrição se o Conta Azul trouxer um conteúdo real não vazio
+            updatePayload.description = incomingDesc;
+            shouldUpdateDesc = true;
+          }
+
+          if (nameDiff || skuDiff || caIdDiff || priceDiff || shouldUpdateDesc) {
             const { error } = await dbClient
               .from('products')
               .update(updatePayload)

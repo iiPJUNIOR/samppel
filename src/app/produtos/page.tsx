@@ -524,14 +524,14 @@ export default function ProdutosPage() {
     
     const { error } = await adjustStock(
       productId,
-      Math.abs(diff),
+      diff,
       diff > 0 ? 'ENTRADA' : 'SAIDA',
       'Ajuste Rápido Inline',
       user?.tenant_id
     );
 
     if (error) {
-      alert('Erro ao atualizar estoque: ' + error);
+      alert('Erro ao atualizar estoque: ' + ((error as any)?.message || error));
     } else {
       setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock_quantity: newStock } : p));
     }

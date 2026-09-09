@@ -98,6 +98,7 @@ export async function createOrder(order: any) {
         .insert([{
           tenant_id: orderToInsert.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
           name: 'Produto Sob Encomenda / Geral',
+          category: 'PERSONALIZADA',
           description: '[CATEGORIA:PERSONALIZADA]',
           price: 0,
           stock_quantity: 0

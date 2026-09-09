@@ -175,13 +175,13 @@ export async function getProductsPaginated({
 
   // Filtro de Categoria por Aba
   if (tab === 'lisas') {
-    query = query.or('description.ilike.%[CATEGORIA:LISAS]%,and(description.not.ilike.%[CATEGORIA:%,name.ilike.%sem impress%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%lisa%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%padrao%)');
+    query = query.or('category.eq.LISAS,description.ilike.%[CATEGORIA:LISAS]%,and(category.is.null,description.not.ilike.%[CATEGORIA:%,name.ilike.%sem impress%),and(category.is.null,description.not.ilike.%[CATEGORIA:%,name.ilike.%lisa%),and(category.is.null,description.not.ilike.%[CATEGORIA:%,name.ilike.%padrao%)');
   } else if (tab === 'custom_stocks') {
-    query = query.ilike('description', '%[CATEGORIA:PERSONALIZADA]%');
+    query = query.or('category.eq.PERSONALIZADA,description.ilike.%[CATEGORIA:PERSONALIZADA]%');
   } else if (tab === 'compra') {
-    query = query.ilike('description', '%[CATEGORIA:COMPRA]%');
+    query = query.or('category.eq.COMPRA,description.ilike.%[CATEGORIA:COMPRA]%');
   } else if (tab === 'sem_categoria') {
-    query = query.or('description.ilike.%[CATEGORIA:SEM_CATEGORIA]%,and(description.not.ilike.%[CATEGORIA:LISAS]%,description.not.ilike.%[CATEGORIA:PERSONALIZADA]%,description.not.ilike.%[CATEGORIA:COMPRA]%,name.not.ilike.%sem impress%,name.not.ilike.%lisa%,name.not.ilike.%padrao%)');
+    query = query.or('category.eq.SEM_CATEGORIA,description.ilike.%[CATEGORIA:SEM_CATEGORIA]%,and(category.is.null,description.not.ilike.%[CATEGORIA:LISAS]%,description.not.ilike.%[CATEGORIA:PERSONALIZADA]%,description.not.ilike.%[CATEGORIA:COMPRA]%,name.not.ilike.%sem impress%,name.not.ilike.%lisa%,name.not.ilike.%padrao%)');
   }
 
   // Filtro de Pesquisa
@@ -245,9 +245,9 @@ export async function getProductCategoryCounts(tenantId = 'd3b07384-d113-4ec8-a5
     const client = getDbClient();
     const [allRes, compraRes, customRes, lisasRes] = await Promise.all([
       client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).ilike('description', '%[CATEGORIA:COMPRA]%'),
-      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).ilike('description', '%[CATEGORIA:PERSONALIZADA]%'),
-      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).or('description.ilike.%[CATEGORIA:LISAS]%,and(description.not.ilike.%[CATEGORIA:%,name.ilike.%sem impress%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%lisa%),and(description.not.ilike.%[CATEGORIA:%,name.ilike.%padrao%)')
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).or('category.eq.COMPRA,description.ilike.%[CATEGORIA:COMPRA]%'),
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).or('category.eq.PERSONALIZADA,description.ilike.%[CATEGORIA:PERSONALIZADA]%'),
+      client.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).or('category.eq.LISAS,description.ilike.%[CATEGORIA:LISAS]%,and(category.is.null,description.not.ilike.%[CATEGORIA:%,name.ilike.%sem impress%),and(category.is.null,description.not.ilike.%[CATEGORIA:%,name.ilike.%lisa%),and(category.is.null,description.not.ilike.%[CATEGORIA:%,name.ilike.%padrao%)')
     ]);
 
     const all = allRes.count || 0;
@@ -275,13 +275,12 @@ export async function createProduct(product: any) {
   const payload = {
     ...product,
     description,
-    category
+    category,
+    measure: product.measure || null,
+    customer_id: product.customer_id || null,
+    bind_to_first_item: !!product.bind_to_first_item,
+    bind_requires_handling: !!product.bind_requires_handling
   };
-  
-  delete payload.measure;
-  delete payload.customer_id;
-  delete payload.bind_requires_handling;
-  delete payload.bind_to_first_item;
 
   const newProd = {
     id: product.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
@@ -334,13 +333,25 @@ export async function updateProduct(id: string, updates: any) {
     return { data: updated, error: null };
   }
 
-  const payload = { ...updates };
+  const category = updates.category !== undefined ? (updates.category || null) : undefined;
+  const payload: any = { ...updates };
   payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id, payload.bind_to_first_item, payload.bind_requires_handling);
   
-  delete payload.measure;
-  delete payload.customer_id;
-  delete payload.bind_requires_handling;
-  delete payload.bind_to_first_item;
+  if (category !== undefined) {
+    payload.category = category;
+  }
+  if (payload.measure !== undefined) {
+    payload.measure = payload.measure || null;
+  }
+  if (payload.customer_id !== undefined) {
+    payload.customer_id = payload.customer_id || null;
+  }
+  if (payload.bind_to_first_item !== undefined) {
+    payload.bind_to_first_item = !!payload.bind_to_first_item;
+  }
+  if (payload.bind_requires_handling !== undefined) {
+    payload.bind_requires_handling = !!payload.bind_requires_handling;
+  }
 
   let { data, error } = await getDbClient().from('products').update(payload).eq('id', id).select().single();
   if (error && error.message?.includes('category')) {
@@ -389,11 +400,24 @@ export async function deleteProduct(id: string) {
   return { data, error };
 }
 
-export async function adjustStock(productId: string, quantity: number, type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', description: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', operatorId?: string | null, allowNegative = true) {
+export async function adjustStock(
+  productId: string, 
+  quantity: number, 
+  type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', 
+  description: string, 
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', 
+  operatorId?: string | null, 
+  allowNegative = true
+) {
+  let delta = Number(quantity);
+  if (type === 'SAIDA' && delta > 0) {
+    delta = -delta;
+  }
+
   if (isMockMode) {
     const updatedMocks = mockProducts.map(p => {
       if (p.id === productId) {
-        const newQty = p.stock_quantity + quantity;
+        const newQty = Number(p.stock_quantity || 0) + delta;
         return { ...p, stock_quantity: !allowNegative && newQty < 0 ? 0 : newQty };
       }
       return p;
@@ -401,23 +425,48 @@ export async function adjustStock(productId: string, quantity: number, type: 'EN
     setMockProducts(updatedMocks);
     return { error: null };
   }
-  const { data: prod } = await getDbClient().from('products').select('stock_quantity').eq('id', productId).single();
+
+  const { data: prod, error: prodErr } = await getDbClient()
+    .from('products')
+    .select('stock_quantity')
+    .eq('id', productId)
+    .single();
+
+  if (prodErr) {
+    console.error('Erro ao consultar produto para ajuste de estoque:', prodErr);
+    return { error: prodErr };
+  }
+
   if (prod) {
-    const newQty = (prod.stock_quantity || 0) + quantity;
+    const currentQty = Number(prod.stock_quantity || 0);
+    const newQty = currentQty + delta;
     const finalQty = !allowNegative && newQty < 0 ? 0 : newQty;
     
-    // Check if operator_id column exists by omitting it first if it fails, but let's just omit it since it's not in schema.sql
-    await getDbClient().from('products').update({ stock_quantity: finalQty }).eq('id', productId);
+    const { error: updateErr } = await getDbClient()
+      .from('products')
+      .update({ stock_quantity: finalQty })
+      .eq('id', productId);
+
+    if (updateErr) {
+      console.error('Erro ao atualizar estoque:', updateErr);
+      return { error: updateErr };
+    }
     
-    // We omit operator_id because it was not found in schema.sql for stock_transactions
-    await getDbClient().from('stock_transactions').insert([{
-      tenant_id: tenantId,
-      product_id: productId,
-      quantity,
-      type,
-      description
-    }]);
+    const { error: txErr } = await getDbClient()
+      .from('stock_transactions')
+      .insert([{
+        tenant_id: tenantId,
+        product_id: productId,
+        quantity: Math.abs(delta),
+        type,
+        description
+      }]);
+
+    if (txErr) {
+      console.warn('Aviso ao registrar transação de estoque:', txErr);
+    }
   }
+
   return { error: null };
 }
 
