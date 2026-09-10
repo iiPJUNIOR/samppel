@@ -332,7 +332,7 @@ export default function ProdutosPage() {
               if (data.step) setSyncStep(data.step);
               if (typeof data.progress === 'number') setSyncProgress(data.progress);
               if (data.success) {
-                const msg = `Sincronização concluída com sucesso!\n\n• Novas criações: ${data.imported || 0}\n• Atualizações e Estoque: ${data.updated || 0}`;
+                const msg = `Catálogo atualizado com sucesso!\n\n• Novos produtos cadastrados: ${data.imported || 0}\n• Cadastros atualizados (nome, código ou preço): ${data.updated || 0}\n\nNota: A quantidade de estoque físico gerenciada no portal foi 100% preservada e não foi alterada.`;
                 alert(msg);
                 await fetchProducts();
               } else if (data.error) {
@@ -628,7 +628,7 @@ export default function ProdutosPage() {
               disabled={isSyncingProducts}
               className="btn btn-secondary"
               style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8125rem' }}
-              title="Sincronizar novos produtos e atualizações cadastrais do Conta Azul (preserva saldos de estoque locais)"
+              title="Sincronizar novos produtos e dados cadastrais do Conta Azul (o estoque físico no portal não é modificado)"
             >
               <RefreshCw size={14} className={isSyncingProducts ? 'spinner' : ''} />
               <span>{isSyncingProducts ? 'Sincronizando...' : 'Atualizar Catálogo (Conta Azul)'}</span>

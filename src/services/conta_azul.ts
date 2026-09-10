@@ -933,7 +933,8 @@ export class ContaAzulService {
   }
 
   /**
-   * Importa / Sincroniza Produtos e Quantidades de Estoque do Conta Azul para o Supabase local
+   * Importa / Sincroniza Catálogo de Produtos do Conta Azul para o Supabase local.
+   * O estoque físico gerenciado no Portal Samppel NUNCA é modificado por esta sincronização.
    */
   public async importProducts(onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number; total: number }> {
     const { data: config } = await getContaAzulConfig(this.tenantId);
@@ -947,7 +948,7 @@ export class ContaAzulService {
       onProgress?.('Autenticando com Conta Azul...', 5);
       const token = await this.getValidAccessToken();
 
-      onProgress?.('Buscando catálogo de produtos e estoque no Conta Azul...', 15);
+      onProgress?.('Buscando catálogo de produtos no Conta Azul...', 15);
 
       const dbClient = supabaseAdmin || supabase;
       if (!dbClient) throw new Error('Cliente Supabase não inicializado.');
@@ -1062,20 +1063,6 @@ export class ContaAzulService {
         const code = (prod.codigo || prod.code || prod.sku || (prodName.toUpperCase().replace(/\s+/g, '-').slice(0, 50))).trim();
         const price = prod.valor_venda ?? prod.value ?? prod.preco ?? prod.price ?? prod.valor ?? 0;
         const desc = prod.descricao || prod.description || '';
-        
-        // Extrai saldo em estoque (suporta números decimais e strings numéricas)
-        let stockQty = 0;
-        if (prod.saldo !== undefined && prod.saldo !== null && !isNaN(Number(prod.saldo))) {
-          stockQty = Number(prod.saldo);
-        } else if (typeof prod.stock === 'object' && prod.stock !== null) {
-          const rawStock = prod.stock.quantity ?? prod.stock.saldo ?? 0;
-          stockQty = Number(rawStock) || 0;
-        } else if (prod.stock_quantity !== undefined && prod.stock_quantity !== null && !isNaN(Number(prod.stock_quantity))) {
-          stockQty = Number(prod.stock_quantity);
-        } else if (prod.quantidade !== undefined && prod.quantidade !== null && !isNaN(Number(prod.quantidade))) {
-          stockQty = Number(prod.quantidade);
-        }
-        if (isNaN(stockQty)) stockQty = 0;
 
         // Localiza em memória sem disparar requisições ao Supabase
         let existingProd: any = null;
@@ -1125,14 +1112,14 @@ export class ContaAzulService {
             }
           }
         } else {
-          // Produto novo: insere no Supabase inicializando estoque não-negativo e atualiza os mapas em memória
+          // Produto novo: insere no Supabase com estoque inicial em 0 (controle soberano e exclusivo no Portal)
           const insertPayload: any = {
             name: prodName,
             sku: code,
             description: desc,
             price: price,
             conta_azul_id: caId || undefined,
-            stock_quantity: Math.max(0, stockQty)
+            stock_quantity: 0
           };
           const { data: inserted, error } = await dbClient
             .from('products')
@@ -1150,7 +1137,7 @@ export class ContaAzulService {
         }
       }
 
-      onProgress?.('Sincronização de produtos e estoque concluída!', 100);
+      onProgress?.('Sincronização do catálogo de produtos concluída!', 100);
 
       await createIntegrationLog(
         'IMPORT_PRODUCTS',
