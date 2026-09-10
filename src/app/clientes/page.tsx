@@ -40,6 +40,8 @@ export default function ClientesPage() {
   const [searchingContaAzul, setSearchingContaAzul] = useState(false);
   const [isGlobalSyncWarningOpen, setIsGlobalSyncWarningOpen] = useState(false);
   const [syncingSingle, setSyncingSingle] = useState(false);
+  const [specificSyncTerm, setSpecificSyncTerm] = useState('');
+  const [syncingSpecific, setSyncingSpecific] = useState(false);
 
   // Sync Modal State (similar to order sync)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -250,6 +252,45 @@ export default function ClientesPage() {
       alert('Erro ao sincronizar cliente com o Conta Azul: ' + err.message);
     } finally {
       setSyncingSingle(false);
+    }
+  };
+
+  const handleSyncSpecificCustomer = async (termToSync?: string) => {
+    const term = (termToSync !== undefined ? termToSync : specificSyncTerm).trim();
+    if (!term) {
+      alert('Digite o nome ou documento (CPF/CNPJ) do cliente para buscar no Conta Azul.');
+      return;
+    }
+
+    setSyncingSpecific(true);
+    try {
+      const cleanDoc = term.replace(/\D/g, '');
+      const params = new URLSearchParams();
+      if (cleanDoc && (cleanDoc.length === 11 || cleanDoc.length === 14)) {
+        params.append('document', cleanDoc);
+      } else {
+        params.append('name', term);
+      }
+      params.append('sync', 'true');
+
+      const res = await fetch(`/api/sync/search-customer?${params.toString()}`);
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.found) {
+        alert(data.message || data.error || 'Cliente não encontrado no Conta Azul com esses dados.');
+        return;
+      }
+
+      const c = data.customer;
+      alert(`Cliente "${c.name}" sincronizado com sucesso do Conta Azul e salvo no portal!`);
+      setSpecificSyncTerm('');
+      setIsGlobalSyncWarningOpen(false);
+      fetchCustomers();
+    } catch (err: any) {
+      console.error('Erro ao sincronizar cliente:', err);
+      alert('Erro ao conectar com Conta Azul: ' + (err.message || 'Falha na requisição'));
+    } finally {
+      setSyncingSpecific(false);
     }
   };
 
@@ -573,8 +614,26 @@ export default function ClientesPage() {
                 ))
               ) : displayedCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={Object.keys(visibleColumns).filter(key => visibleColumns[key] !== false).length} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
-                    Nenhum cliente cadastrado ou encontrado.
+                  <td colSpan={Object.keys(visibleColumns).filter(key => visibleColumns[key] !== false).length} style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
+                    {debouncedSearch.trim().length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                        <div>
+                          Nenhum cliente local encontrado para <strong>&quot;{debouncedSearch}&quot;</strong>.
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSyncSpecificCustomer(debouncedSearch)}
+                          disabled={syncingSpecific}
+                          className="btn btn-primary"
+                          style={{ fontSize: '0.8125rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                          <RefreshCw size={13} className={syncingSpecific ? 'spinner' : ''} style={{ animation: syncingSpecific ? 'spin 1s linear infinite' : 'none' }} />
+                          <span>{syncingSpecific ? 'Buscando no Conta Azul...' : `Buscar e importar "${debouncedSearch}" direto do Conta Azul`}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      'Nenhum cliente cadastrado ou encontrado.'
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -1009,7 +1068,7 @@ export default function ClientesPage() {
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
-            padding: '2rem', maxWidth: '480px', width: '100%',
+            padding: '2rem', maxWidth: '520px', width: '100%',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease', textAlign: 'left'
           }}>
@@ -1022,44 +1081,86 @@ export default function ClientesPage() {
                 <AlertTriangle size={22} />
               </div>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
-                Importação Geral de Clientes
+                Importação de Clientes
               </h2>
             </div>
 
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
-              Atenção: A base de contatos do Conta Azul possui mais de <strong>6.500 cadastros</strong>. Uma importação geral varre todos os registros do ERP e pode causar <strong>lentidão temporária</strong> no sistema até a finalização da carga.
-            </p>
-
+            {/* SEÇÃO RECOMENDADA: SINCRONIZAR CLIENTE ESPECÍFICO */}
             <div style={{
               backgroundColor: 'rgba(59, 130, 246, 0.08)',
-              border: '1px solid rgba(59, 130, 246, 0.2)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
               borderRadius: 'var(--radius-md)',
-              padding: '0.875rem',
+              padding: '1rem',
               marginBottom: '1.5rem',
-              fontSize: '0.8125rem',
-              color: 'var(--text)'
+              fontSize: '0.85rem'
             }}>
-              <strong>Recomendação:</strong> Se você precisa cadastrar ou atualizar apenas um cliente específico, recomendamos pesquisá-lo diretamente e usar o botão <em>&quot;Sincronizar com Conta Azul&quot;</em> no modal do cliente.
+              <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: '0.35rem' }}>
+                Recomendado: Sincronizar Cliente Específico
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 0.75rem 0', lineHeight: 1.4 }}>
+                Se você precisa de um cliente específico (ex: novo cliente ou atualização), busque-o diretamente abaixo para cadastrá-lo instantaneamente sem sobrecarregar o sistema.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Nome ou CNPJ/CPF do cliente..."
+                  value={specificSyncTerm}
+                  onChange={(e) => setSpecificSyncTerm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSyncSpecificCustomer();
+                    }
+                  }}
+                  style={{ fontSize: '0.8125rem' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSyncSpecificCustomer()}
+                  disabled={syncingSpecific || !specificSyncTerm.trim()}
+                  className="btn btn-primary"
+                  style={{ fontSize: '0.8125rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+                >
+                  <RefreshCw size={13} className={syncingSpecific ? 'spinner' : ''} style={{ animation: syncingSpecific ? 'spin 1s linear infinite' : 'none' }} />
+                  <span>{syncingSpecific ? 'Buscando...' : 'Sincronizar'}</span>
+                </button>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <button
-                type="button"
-                onClick={() => setIsGlobalSyncWarningOpen(false)}
-                className="btn btn-secondary"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsGlobalSyncWarningOpen(false);
-                  handleImportCustomers();
-                }}
-                className="btn btn-primary"
-              >
-                Prosseguir com Importação Geral
-              </button>
+            {/* SEÇÃO IMPORTAÇÃO GERAL */}
+            <div style={{
+              borderTop: '1px solid var(--border)',
+              paddingTop: '1.25rem'
+            }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', marginBottom: '0.35rem' }}>
+                Importação Geral de Toda a Base
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+                Atenção: A base de contatos do Conta Azul possui mais de <strong>6.500 cadastros</strong>. Uma importação geral varre todos os registros do ERP e pode causar <strong>lentidão temporária</strong> no sistema até a finalização da carga.
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsGlobalSyncWarningOpen(false)}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.8125rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGlobalSyncWarningOpen(false);
+                    handleImportCustomers();
+                  }}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.8125rem', borderColor: 'var(--border)', color: 'var(--text)' }}
+                >
+                  Prosseguir com Importação Geral
+                </button>
+              </div>
             </div>
           </div>
         </div>

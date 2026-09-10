@@ -69,6 +69,37 @@ export async function getCustomersPaginated({
   };
 }
 
+export async function searchCustomers(query: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', limit = 20) {
+  if (!query || !query.trim()) return { data: [], error: null };
+  const s = query.trim().replace(/[%_]/g, '');
+  const cleanDoc = s.replace(/\D/g, '');
+
+  if (isMockMode) {
+    const sLower = s.toLowerCase();
+    const list = mockCustomers
+      .filter(c => c.tenant_id === tenantId && (
+        (c.name || '').toLowerCase().includes(sLower) ||
+        (c.document || '').includes(cleanDoc || sLower)
+      ))
+      .slice(0, limit);
+    return { data: list, error: null };
+  }
+
+  let q = getDbClient()
+    .from('customers')
+    .select('id, name, document, phone, email, address, conta_azul_id')
+    .eq('tenant_id', tenantId);
+
+  if (cleanDoc && cleanDoc.length >= 3) {
+    q = q.or(`name.ilike.%${s}%,document.ilike.%${cleanDoc}%,document.ilike.%${s}%`);
+  } else {
+    q = q.or(`name.ilike.%${s}%,document.ilike.%${s}%`);
+  }
+
+  const { data, error } = await q.order('name', { ascending: true }).limit(limit);
+  return { data: data || [], error };
+}
+
 export async function getCustomers(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   if (isMockMode) return { data: mockCustomers.filter(c => c.tenant_id === tenantId), error: null };
   const { data, error } = await getDbClient().from('customers').select('*').eq('tenant_id', tenantId).order('name');

@@ -3616,7 +3616,6 @@ export default function PedidosPage() {
     });
     setIsDeleteConfirmModalOpen(true);
   };
-
   const handleConfirmDeleteManualOrder = async () => {
     if (!orderToDelete || !isAdmin) return;
     setIsDeletingManualOrder(true);
@@ -3643,17 +3642,36 @@ export default function PedidosPage() {
 
   const resolveCustomerId = async (name: string) => {
     if (!name || !name.trim()) return null;
-    const existingCust = customers.find(c => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    const trimmed = name.trim();
+    const existingCust = customers.find(c => c.name.trim().toLowerCase() === trimmed.toLowerCase());
     if (existingCust) {
       return existingCust.id;
-    } else {
-      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const { data: newCust, error: custError } = await createCustomer({ name: name.trim(), tenant_id: tenantId });
-      if (custError) {
-        console.error('Erro ao criar cliente:', custError.message);
-        return null;
+    }
+
+    const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
+    if (supabase) {
+      const { data: dbCust } = await supabase
+        .from('customers')
+        .select('id, name')
+        .eq('tenant_id', tenantId)
+        .ilike('name', trimmed)
+        .maybeSingle();
+
+      if (dbCust) {
+        setCustomers(prev => [...prev, dbCust]);
+        return dbCust.id;
       }
-      if (newCust) return newCust.id;
+    }
+
+    const { data: newCust, error: custError } = await createCustomer({ name: trimmed, tenant_id: tenantId });
+    if (custError) {
+      console.error('Erro ao criar cliente:', custError.message);
+      return null;
+    }
+    if (newCust) {
+      setCustomers(prev => [...prev, newCust]);
+      return newCust.id;
     }
     return null;
   };
