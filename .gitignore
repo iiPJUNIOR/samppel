@@ -54,3 +54,9 @@ migrate_*.js
 mapa_samppel.md
 env samppel*
 
+# backups
+backup_pre_coleta_fields/
+temp_*_backup/
+temp_backup/
+*.zip
+

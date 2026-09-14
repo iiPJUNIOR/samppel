@@ -30,5 +30,11 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "backup_pre_coleta_fields",
+    "temp_backup",
+    "temp_frontend_backup",
+    "temp_detail_backup"
+  ]
 }

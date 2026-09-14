@@ -14,9 +14,11 @@ export function ColetaAgendadaModal(props: any) {
     coletaAgendadaItem,
     coletaAgendadaMoveBypass,
     coletaAgendadaTargetStageId,
+    coletaCarrierName,
     coletaFreightQuotation,
     coletaInvoiceNumber,
     coletaPickupNumber,
+    coletaScheduledDate,
     coletaSelectedSiblings,
     coletaSiblings,
     loading,
@@ -24,9 +26,11 @@ export function ColetaAgendadaModal(props: any) {
     orderItems,
     resetAllBypasses,
     setColetaAgendadaItem,
+    setColetaCarrierName,
     setColetaFreightQuotation,
     setColetaInvoiceNumber,
     setColetaPickupNumber,
+    setColetaScheduledDate,
     setColetaSelectedSiblings,
     setIsColetaAgendadaModalOpen,
     setLoading,
@@ -74,7 +78,9 @@ export function ColetaAgendadaModal(props: any) {
                 await updateOrder(coletaAgendadaItem.order_id, {
                   invoice_number: coletaInvoiceNumber || null,
                   pickup_number: coletaPickupNumber || null,
-                  freight_quotation: coletaFreightQuotation || null
+                  freight_quotation: coletaFreightQuotation || null,
+                  scheduled_date: coletaScheduledDate || null,
+                  carrier_name: coletaCarrierName || null
                 });
 
                 // 2. Mover Item Principal para Coleta Agendada
@@ -143,6 +149,33 @@ export function ColetaAgendadaModal(props: any) {
                 </div>
               </div>
 
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '0.85rem' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Data de Agendamento *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    required
+                    value={coletaScheduledDate}
+                    onChange={(e) => setColetaScheduledDate(e.target.value)}
+                    style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>Nome da Transportadora *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={coletaCarrierName}
+                    onChange={(e) => setColetaCarrierName(e.target.value)}
+                    placeholder="Ex: Braspress, Jadlog, Rodonaves..."
+                    style={{ padding: '0.45rem 0.6rem', fontSize: '0.82rem' }}
+                  />
+                </div>
+              </div>
+
               {/* CHECKLIST DE ITENS IRMÃOS PARA COLETA AGENDADA */}
               {coletaSiblings.length > 0 && (
                 <div style={{
@@ -154,9 +187,10 @@ export function ColetaAgendadaModal(props: any) {
                   flexDirection: 'column',
                   gap: '0.75rem'
                 }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)' }}>
-                    📦 Mover outros itens deste pedido para Coleta Agendada juntos ({coletaSiblings.length})
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)' }}>
+                    <Package size={16} />
+                    <span>Mover outros itens deste pedido para Coleta Agendada juntos ({coletaSiblings.length})</span>
+                  </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '180px', overflowY: 'auto' }}>
                     {coletaSiblings.map((sib: any) => {

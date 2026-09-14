@@ -242,6 +242,8 @@ export function DetailViewModal(props: any) {
                       { label: 'Nota Fiscal (NF-e)', value: order.invoice_number || '—' },
                       { label: 'Número da Coleta', value: order.pickup_number || '—' },
                       { label: 'Cotação de Frete', value: order.freight_quotation || '—' },
+                      { label: 'Data de Agendamento', value: order.scheduled_date ? new Date(order.scheduled_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' },
+                      { label: 'Transportadora', value: order.carrier_name || '—' },
                     ].map(({ label, value }) => (
                       <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
                         <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</span>

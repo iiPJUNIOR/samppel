@@ -661,6 +661,8 @@ export default function PedidosPage() {
   const [coletaInvoiceNumber, setColetaInvoiceNumber] = useState<string>('');
   const [coletaPickupNumber, setColetaPickupNumber] = useState<string>('');
   const [coletaFreightQuotation, setColetaFreightQuotation] = useState<string>('');
+  const [coletaScheduledDate, setColetaScheduledDate] = useState<string>('');
+  const [coletaCarrierName, setColetaCarrierName] = useState<string>('');
   const [coletaSiblings, setColetaSiblings] = useState<any[]>([]);
   const [coletaSelectedSiblings, setColetaSelectedSiblings] = useState<string[]>([]);
   const coletaAgendadaMoveBypass = useRef(false);
@@ -1854,6 +1856,8 @@ export default function PedidosPage() {
       setColetaInvoiceNumber(parentOrder?.invoice_number || '');
       setColetaPickupNumber(parentOrder?.pickup_number || '');
       setColetaFreightQuotation(parentOrder?.freight_quotation || '');
+      setColetaScheduledDate(parentOrder?.scheduled_date || '');
+      setColetaCarrierName(parentOrder?.carrier_name || '');
       setColetaSiblings(siblingItems);
       setColetaSelectedSiblings(siblingItems.map(s => s.id));
 
@@ -3476,7 +3480,7 @@ export default function PedidosPage() {
       setSelectedOrder(order);
 
       const cust = customers.find(c => c.id === order.customer_id);
-      setFormCustomer(cust ? cust.name : '');
+      setFormCustomer(cust ? cust.name : (order.customer?.name || ''));
       setFormProduct(entity.product_id || '');
       setFormMeasure(getItemRealMeasure(entity));
       setFormPrintRun(entity.print_run || 1000);
@@ -3580,7 +3584,8 @@ export default function PedidosPage() {
         setFormPhysicalLocation(entity.physical_location || 'Salão');
       }
 
-      setFormCustomer(entity.customer_id || '');
+      const cust = customers.find(c => c.id === entity.customer_id);
+      setFormCustomer(cust ? cust.name : (entity.customer?.name || ''));
       setFormFreight(Number(entity.freight_value || 0));
       setFormSeller(entity.seller_name || '');
       setFormInternalNotes(entity.internal_notes || '');
@@ -6206,7 +6211,7 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {/* MODAL DE DADOS DA COLETA AGENDADA (NOTA, COLETA E COTAÇÃO) */}
       {/* ──────────────────────────────────────────────────────────── */}
-      {isColetaAgendadaModalOpen && <ColetaAgendadaModal {...{ coletaAgendadaItem, coletaAgendadaMoveBypass, coletaAgendadaTargetStageId, coletaFreightQuotation, coletaInvoiceNumber, coletaPickupNumber, coletaSelectedSiblings, coletaSiblings, loading, moveOrderItemToStage, orderItems, resetAllBypasses, setColetaAgendadaItem, setColetaFreightQuotation, setColetaInvoiceNumber, setColetaPickupNumber, setColetaSelectedSiblings, setIsColetaAgendadaModalOpen, setLoading, stages, updateOrder }} />}
+      {isColetaAgendadaModalOpen && <ColetaAgendadaModal {...{ coletaAgendadaItem, coletaAgendadaMoveBypass, coletaAgendadaTargetStageId, coletaCarrierName, coletaFreightQuotation, coletaInvoiceNumber, coletaPickupNumber, coletaScheduledDate, coletaSelectedSiblings, coletaSiblings, loading, moveOrderItemToStage, orderItems, resetAllBypasses, setColetaAgendadaItem, setColetaCarrierName, setColetaFreightQuotation, setColetaInvoiceNumber, setColetaPickupNumber, setColetaScheduledDate, setColetaSelectedSiblings, setIsColetaAgendadaModalOpen, setLoading, stages, updateOrder }} />}
 
       {/* ──────────────────────────────────────────────────────────── */}
       {/* MODAL DE DADOS TÉCNICOS DE FRETE E EMBALAGEM (OBRIGATÓRIO) */}

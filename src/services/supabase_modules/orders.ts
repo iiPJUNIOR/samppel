@@ -34,7 +34,7 @@ export async function getOrders(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0
     'status', 'production_sector', 'physical_location', 'notes', 'internal_notes', 'order_date',
     'installments_total', 'installments_paid', 'first_payment_date', 'production_start_date', 'over_short_quantity',
     'package_weight', 'package_length', 'package_width', 'package_height', 'quantity_per_box',
-    'invoice_number', 'pickup_number', 'freight_quotation',
+    'invoice_number', 'pickup_number', 'freight_quotation', 'scheduled_date', 'carrier_name',
     'conta_azul_status', 'conta_azul_id', 'customer_id', 'product_id', 'stage_id', 'created_at', 'updated_at',
     'customer:customers(id, name, document, phone, email, address)',
     'product:products(id, name, sku, price, stock_quantity)',

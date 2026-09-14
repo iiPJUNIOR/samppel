@@ -353,7 +353,7 @@ export function DetailModal(props: any) {
                 {/* Seleção do Cliente (Obrigatório - Autocomplete Dinâmico) */}
                 <div className="form-group" style={{ position: 'relative' }} ref={customerDropdownRef}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <label className="form-label" style={{ margin: 0 }}>Cliente (Razão Social) *</label>
+                    <label className="form-label" style={{ margin: 0 }}>Cliente (Razão Social) (Opcional)</label>
                     {formCustomer && formCustomer.trim().length > 0 && (
                       <button
                         type="button"
@@ -383,7 +383,6 @@ export function DetailModal(props: any) {
                     <input
                       type="text"
                       className="form-input"
-                      required
                       placeholder="Ex: Doce Vida Doceria (Digite o nome ou documento)"
                       value={formCustomer}
                       disabled={isReadOnlyForForm('customer')}
@@ -566,16 +565,43 @@ export function DetailModal(props: any) {
 
                 {/* Seleção de Máquina de Produção (Opcional) */}
                 <div className="form-group">
-                  <label className="form-label">Máquina de Produção (Opcional)</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label className="form-label" style={{ margin: 0 }}>Máquina de Produção (Opcional)</label>
+                    {user?.role === 'Administrador' && (
+                      <button
+                        type="button"
+                        onClick={() => setIsMachineCrudModalOpen(true)}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: '20px', height: '20px', borderRadius: '4px',
+                          border: '1px solid var(--primary)', backgroundColor: 'rgba(37,99,235,0.08)',
+                          color: 'var(--primary)', cursor: 'pointer', fontSize: '0.9rem',
+                          fontWeight: 700, padding: 0, transition: 'all 0.15s ease'
+                        }}
+                        title="Gerenciar Máquinas de Produção"
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--primary)'; e.currentTarget.style.color = '#fff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(37,99,235,0.08)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
                   <select
                     className="form-select"
                     value={formMachineId}
                     disabled={isReadOnlyForForm('machine_id')}
-                    onChange={(e) => setFormMachineId(e.target.value)}
+                    onChange={(e) => {
+                      const mId = e.target.value;
+                      setFormMachineId(mId);
+                      const mach = productionMachines.find(m => m.id === mId);
+                      if (mach?.sector && setFormSector) {
+                        setFormSector(mach.sector as any);
+                      }
+                    }}
                   >
                     <option value="">— Nenhuma máquina vinculada —</option>
                     {productionMachines.filter(m => m.status === 'ATIVO').map(m => (
-                      <option key={m.id} value={m.id}>{m.name} ({m.sector})</option>
+                      <option key={m.id} value={m.id}>{m.name} {m.sector ? `(${m.sector})` : ''}</option>
                     ))}
                   </select>
                 </div>
@@ -847,7 +873,7 @@ export function DetailModal(props: any) {
                 </div>
               )}
 
-              {/* ETAPA DO KANBAN E SETOR (DINÂMICO) */}
+              {/* ETAPA DO KANBAN (DINÂMICO) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1rem', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}>
 
                 <div className="form-group">
@@ -868,87 +894,6 @@ export function DetailModal(props: any) {
                     {stages.map((stage) => (
                       <option key={stage.id} value={stage.id}>{stage.name}</option>
                     ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <label className="form-label" style={{ fontWeight: 600, margin: 0 }}>Setor de Produção Física</label>
-                    {user?.role === 'Administrador' && (
-                      <button
-                        type="button"
-                        onClick={() => setIsSectorCrudModalOpen(true)}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          width: '20px', height: '20px', borderRadius: '4px',
-                          border: '1px solid var(--primary)', backgroundColor: 'rgba(37,99,235,0.08)',
-                          color: 'var(--primary)', cursor: 'pointer', fontSize: '0.9rem',
-                          fontWeight: 700, padding: 0, transition: 'all 0.15s ease'
-                        }}
-                        title="Gerenciar Setores de Produção"
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--primary)'; e.currentTarget.style.color = '#fff'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(37,99,235,0.08)'; e.currentTarget.style.color = 'var(--primary)'; }}
-                      >
-                        +
-                      </button>
-                    )}
-                  </div>
-                  <select
-                    className="form-select"
-                    value={formSector}
-                    disabled={isReadOnlyForForm('sector')}
-                    onChange={(e) => {
-                      setFormSector(e.target.value as any);
-                      setFormMachineId('');
-                      setFormHandlingTeamId('');
-                    }}
-                  >
-                    {productionSectors
-                      .filter(s => s.status === 'ATIVO')
-                      .map((sec) => (
-                        <option key={sec.id} value={sec.name}>{sec.name}</option>
-                      ))
-                    }
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <label className="form-label" style={{ fontWeight: 600, margin: 0 }}>Máquina de Produção Vinculada</label>
-                    {user?.role === 'Administrador' && (
-                      <button
-                        type="button"
-                        onClick={() => setIsMachineCrudModalOpen(true)}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          width: '20px', height: '20px', borderRadius: '4px',
-                          border: '1px solid var(--primary)', backgroundColor: 'rgba(37,99,235,0.08)',
-                          color: 'var(--primary)', cursor: 'pointer', fontSize: '0.9rem',
-                          fontWeight: 700, padding: 0, transition: 'all 0.15s ease'
-                        }}
-                        title="Gerenciar Máquinas de Produção"
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--primary)'; e.currentTarget.style.color = '#fff'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(37,99,235,0.08)'; e.currentTarget.style.color = 'var(--primary)'; }}
-                      >
-                        +
-                      </button>
-                    )}
-                  </div>
-                  <select
-                    className="form-select"
-                    value={formMachineId}
-                    disabled={isReadOnlyForForm('machine_id')}
-                    onChange={(e) => setFormMachineId(e.target.value)}
-                  >
-                    <option value="">Nenhuma Máquina Vinculada</option>
-                    {productionMachines
-                      .filter(m => m.status === 'ATIVO')
-                      .map((mach) => (
-                        <option key={mach.id} value={mach.id}>
-                          {mach.name} {mach.sector ? `(${mach.sector})` : ''}
-                        </option>
-                      ))
-                    }
                   </select>
                 </div>
 
