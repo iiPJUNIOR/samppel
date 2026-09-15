@@ -3097,6 +3097,7 @@ export default function PedidosPage() {
     setFormSector('Impressão');
     setFormMachineId('');
     setFormHandlingTeamId('');
+    setFormHandlingAllocations([]);
 
     setFormPvNumber('');
     setFormOpNumber('');
@@ -3503,11 +3504,12 @@ export default function PedidosPage() {
           is_completed: a.is_completed || false,
           completed_at: a.completed_at || ''
         })));
-      } else {
-        const defaultTeam = entity.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+      } else if (entity.handling_team_id) {
         setFormHandlingAllocations([
-          { handling_team_id: defaultTeam, quantity: Number(entity.print_run || 1000), is_completed: false, completed_at: '' }
+          { handling_team_id: entity.handling_team_id, quantity: Number(entity.print_run || 1000), is_completed: false, completed_at: '' }
         ]);
+      } else {
+        setFormHandlingAllocations([]);
       }
 
       setFormPvNumber(order.pv_number || '');
@@ -3554,11 +3556,12 @@ export default function PedidosPage() {
             is_completed: a.is_completed || false,
             completed_at: a.completed_at || ''
           })));
-        } else {
-          const defaultTeam = correspondingItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
+        } else if (correspondingItem.handling_team_id) {
           setFormHandlingAllocations([
-            { handling_team_id: defaultTeam, quantity: Number(correspondingItem.print_run || 1000), is_completed: false, completed_at: '' }
+            { handling_team_id: correspondingItem.handling_team_id, quantity: Number(correspondingItem.print_run || 1000), is_completed: false, completed_at: '' }
           ]);
+        } else {
+          setFormHandlingAllocations([]);
         }
 
         setFormArtName(correspondingItem.name || '');
@@ -3695,6 +3698,11 @@ export default function PedidosPage() {
       formFormaPag ? `Forma de pag.: ${formFormaPag}` : ''
     ].filter(Boolean).join('\n');
 
+    const isManuseio = formSector === 'Manuseio' || stages.find(s => s.id === formStageId)?.name === 'Manuseio';
+    const finalHandlingTeamId = isManuseio
+      ? (formHandlingAllocations[0]?.handling_team_id || formHandlingTeamId || null)
+      : (selectedItem.handling_team_id || null);
+
     // 1. Atualizar campos do item de pedido
     const itemPayload = {
       name: formArtName,
@@ -3707,7 +3715,7 @@ export default function PedidosPage() {
       stage_id: formStageId || null,
       production_sector: formSector,
       machine_id: formMachineId || null,
-      handling_team_id: formHandlingAllocations[0]?.handling_team_id || formHandlingTeamId || null,
+      handling_team_id: finalHandlingTeamId,
       physical_location: formPhysicalLocation,
       over_short_quantity: Number(formOverShortQuantity),
       notes: specLines || formNotes
@@ -3757,7 +3765,7 @@ export default function PedidosPage() {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
       // Gravar divisão de equipes de manuseio se estiver em Manuseio
-      if (formHandlingAllocations && formHandlingAllocations.length > 0) {
+      if (isManuseio && formHandlingAllocations && formHandlingAllocations.length > 0) {
         const validAllocations = formHandlingAllocations.filter(a => a.handling_team_id && a.quantity > 0);
         if (validAllocations.length > 0) {
           try {

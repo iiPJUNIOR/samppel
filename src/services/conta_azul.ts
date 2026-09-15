@@ -1169,7 +1169,7 @@ export class ContaAzulService {
   private async resolveOrCreateProduct(
     dbClient: any,
     mainItem: any,
-    customerId?: string,
+    customerId?: string | null,
     prodsCache?: { byCaId: Map<string, any>; bySku: Map<string, any>; byName: Map<string, any> }
   ): Promise<string | null> {
     if (!mainItem) return null;
@@ -1278,6 +1278,198 @@ export class ContaAzulService {
   }
 
   /**
+   * Localiza ou cadastra o cliente de forma pontual e segura.
+   * Evita leitura em massa no Supabase para proteger o plano gratuito.
+   * Prioriza busca por CPF/CNPJ limpo e conta_azul_id com índices diretos.
+   */
+  private async resolveOrCreateCustomer(
+    dbClient: any,
+    clienteInfo: any,
+    token: string,
+    customersCache: Map<string, any>,
+    saleNumber?: string | number,
+    onProgress?: (step: string, progress: number) => void,
+    pct?: number
+  ): Promise<string | null> {
+    if (!clienteInfo) return null;
+
+    const clientUuid = (clienteInfo.uuid || clienteInfo.id || '').toString().trim();
+    const rawDoc = (clienteInfo.documento || clienteInfo.document || '').toString();
+    let cleanDoc = rawDoc.replace(/\D/g, '');
+
+    // 1. Cache em memória da execução atual (0 leituras no Supabase)
+    if (clientUuid && customersCache.has(clientUuid)) {
+      return customersCache.get(clientUuid).id;
+    }
+    if (cleanDoc && customersCache.has(cleanDoc)) {
+      return customersCache.get(cleanDoc).id;
+    }
+
+    // 2. Busca pontual no Supabase por conta_azul_id (índice único, leitura instantânea de 1 linha)
+    let existingCust: any = null;
+    if (clientUuid) {
+      const { data: custByCaId, error: caErr } = await dbClient
+        .from('customers')
+        .select('id, name, conta_azul_id, document, email, phone, address')
+        .eq('tenant_id', this.tenantId)
+        .eq('conta_azul_id', clientUuid)
+        .maybeSingle();
+
+      if (!caErr && custByCaId?.id) {
+        existingCust = custByCaId;
+      }
+    }
+
+    // 3. Se não achou por conta_azul_id e já temos cleanDoc, busca pontual por CPF/CNPJ limpo
+    if (!existingCust && cleanDoc) {
+      const { data: custByDoc, error: docErr } = await dbClient
+        .from('customers')
+        .select('id, name, conta_azul_id, document, email, phone, address')
+        .eq('tenant_id', this.tenantId)
+        .eq('document', cleanDoc)
+        .maybeSingle();
+
+      if (!docErr && custByDoc?.id) {
+        existingCust = custByDoc;
+        if (clientUuid && !existingCust.conta_azul_id) {
+          await dbClient
+            .from('customers')
+            .update({ conta_azul_id: clientUuid })
+            .eq('id', existingCust.id);
+          existingCust.conta_azul_id = clientUuid;
+        }
+      }
+    }
+
+    // 4. Se ainda não achou, ou se precisa de detalhes adicionais (documento, email, telefone)
+    let custDetails: any = null;
+    const needsDetails = !existingCust || !existingCust.document || !existingCust.email || !existingCust.phone;
+
+    if (needsDetails && clientUuid) {
+      try {
+        if (saleNumber && onProgress && pct) {
+          onProgress(`PV-${saleNumber}: Buscando cadastro detalhado do cliente no Conta Azul...`, pct);
+        }
+        const custResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${clientUuid}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (custResponse.ok) {
+          custDetails = await custResponse.json();
+          const detailDoc = (custDetails?.documento || '').toString().replace(/\D/g, '');
+          if (detailDoc && !cleanDoc) {
+            cleanDoc = detailDoc;
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao buscar detalhes da pessoa no Conta Azul:', err);
+      }
+    }
+
+    // Se encontramos o documento no detalhe da pessoa e ainda não tínhamos achado o cliente no banco, tenta buscar pelo documento
+    if (!existingCust && cleanDoc) {
+      const { data: custByDoc2 } = await dbClient
+        .from('customers')
+        .select('id, name, conta_azul_id, document, email, phone, address')
+        .eq('tenant_id', this.tenantId)
+        .eq('document', cleanDoc)
+        .maybeSingle();
+
+      if (custByDoc2?.id) {
+        existingCust = custByDoc2;
+        if (clientUuid && !existingCust.conta_azul_id) {
+          await dbClient
+            .from('customers')
+            .update({ conta_azul_id: clientUuid })
+            .eq('id', existingCust.id);
+          existingCust.conta_azul_id = clientUuid;
+        }
+      }
+    }
+
+    const nameVal = custDetails?.nome || clienteInfo.nome || 'Cliente Importado';
+    const docVal = cleanDoc || custDetails?.documento || clienteInfo.documento || '';
+    const emailVal = custDetails?.email || '';
+    const phoneVal = custDetails?.telefone_celular || custDetails?.telefone_comercial || '';
+    let addrVal = '';
+    if (custDetails?.enderecos?.[0]) {
+      const addr = custDetails.enderecos[0];
+      addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
+    }
+
+    // 5. Cliente existente localizado: atualiza dados se necessário e salva em cache
+    if (existingCust) {
+      if (needsDetails && custDetails) {
+        await dbClient
+          .from('customers')
+          .update({
+            name: nameVal,
+            document: docVal || existingCust.document,
+            email: emailVal || existingCust.email,
+            phone: phoneVal || existingCust.phone,
+            address: addrVal || existingCust.address
+          })
+          .eq('id', existingCust.id);
+        Object.assign(existingCust, {
+          name: nameVal,
+          document: docVal || existingCust.document,
+          email: emailVal || existingCust.email,
+          phone: phoneVal || existingCust.phone,
+          address: addrVal || existingCust.address
+        });
+      }
+
+      if (clientUuid) customersCache.set(clientUuid, existingCust);
+      if (cleanDoc) customersCache.set(cleanDoc, existingCust);
+      return existingCust.id;
+    }
+
+    // 6. Cliente realmente novo: insere no Supabase
+    try {
+      const { data: newCust, error: custErr } = await dbClient
+        .from('customers')
+        .insert([{
+          tenant_id: this.tenantId,
+          name: nameVal,
+          conta_azul_id: clientUuid || null,
+          document: docVal,
+          email: emailVal,
+          phone: phoneVal,
+          address: addrVal
+        }])
+        .select('id, name, conta_azul_id, document, email, phone, address')
+        .maybeSingle();
+
+      if (newCust?.id) {
+        if (clientUuid) customersCache.set(clientUuid, newCust);
+        if (cleanDoc) customersCache.set(cleanDoc, newCust);
+        return newCust.id;
+      }
+
+      if (custErr) {
+        console.warn('Conflito ou erro ao inserir novo cliente no Supabase, tentando recuperação pontual:', custErr.message);
+        let retryQuery = dbClient.from('customers').select('id, name, conta_azul_id').eq('tenant_id', this.tenantId);
+        if (clientUuid && cleanDoc) {
+          retryQuery = retryQuery.or(`conta_azul_id.eq.${clientUuid},document.eq.${cleanDoc}`);
+        } else if (clientUuid) {
+          retryQuery = retryQuery.eq('conta_azul_id', clientUuid);
+        } else if (cleanDoc) {
+          retryQuery = retryQuery.eq('document', cleanDoc);
+        }
+        const { data: recoveredCust } = await retryQuery.maybeSingle();
+        if (recoveredCust?.id) {
+          if (clientUuid) customersCache.set(clientUuid, recoveredCust);
+          if (cleanDoc) customersCache.set(cleanDoc, recoveredCust);
+          return recoveredCust.id;
+        }
+      }
+    } catch (e: any) {
+      console.error('Erro na criação de cliente para pedido:', e);
+    }
+
+    return null;
+  }
+
+  /**
    * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
    */
   public async importOrders(startDate?: string, endDate?: string, onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
@@ -1355,16 +1547,8 @@ export class ContaAzulService {
         if (p.name) prodsCache.byName.set(p.name.toUpperCase().trim(), p);
       });
 
-      // Preload de clientes locais para evitar queries repetidas
-      const { data: allLocalCusts } = await dbClient
-        .from('customers')
-        .select('id, name, conta_azul_id, document, email, phone, address')
-        .eq('tenant_id', this.tenantId);
-
-      const customersByCaId = new Map<string, any>();
-      (allLocalCusts || []).forEach((c: any) => {
-        if (c.conta_azul_id) customersByCaId.set(c.conta_azul_id, c);
-      });
+      // Cache dinâmico sob demanda durante a execução para evitar leituras em massa (protege free tier do Supabase)
+      const customersCache = new Map<string, any>();
 
       let imported = 0;
       let updated = 0;
@@ -1430,81 +1614,21 @@ export class ContaAzulService {
         if (saleItems.length === 0) continue;
 
         const mainItem = saleItems[0];
-        const clienteInfo = saleDetail.cliente;
-        let customerId = '';
-        if (clienteInfo) {
-          const clientUuid = clienteInfo.uuid || clienteInfo.id;
-          const existingCust = clientUuid ? customersByCaId.get(clientUuid) : null;
+        const customerId = await this.resolveOrCreateCustomer(
+          dbClient,
+          saleDetail.cliente || saleSummary.cliente,
+          token,
+          customersCache,
+          saleSummary.numero || currentIdx,
+          onProgress,
+          pct
+        );
 
-          let custDetails: any = null;
-          const needsDetails = !existingCust || !existingCust.document || !existingCust.email || !existingCust.phone;
-
-          if (needsDetails && clientUuid) {
-            try {
-              onProgress?.(`PV-${saleSummary.numero || currentIdx}: Buscando cadastro detalhado do cliente...`, pct);
-              const custResponse = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${clientUuid}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-              });
-              if (custResponse.ok) {
-                custDetails = await custResponse.json();
-              }
-            } catch (err) {
-              console.error('Erro ao buscar detalhes da pessoa no Conta Azul:', err);
-            }
-          }
-
-          const nameVal = custDetails?.nome || clienteInfo.nome || 'Cliente Importado';
-          const docVal = custDetails?.documento || clienteInfo.documento || '';
-          const emailVal = custDetails?.email || '';
-          const phoneVal = custDetails?.telefone_celular || custDetails?.telefone_comercial || '';
-          let addrVal = '';
-          if (custDetails?.enderecos?.[0]) {
-            const addr = custDetails.enderecos[0];
-            addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
-          }
-
-          if (existingCust) {
-            customerId = existingCust.id;
-            if (needsDetails && custDetails) {
-              await dbClient
-                .from('customers')
-                .update({
-                  name: nameVal,
-                  document: docVal,
-                  email: emailVal,
-                  phone: phoneVal,
-                  address: addrVal
-                })
-                .eq('id', customerId);
-              Object.assign(existingCust, { name: nameVal, document: docVal, email: emailVal, phone: phoneVal, address: addrVal });
-            }
-          } else {
-            const { data: newCust, error: custErr } = await dbClient
-              .from('customers')
-              .insert([{
-                tenant_id: this.tenantId,
-                name: nameVal,
-                conta_azul_id: clientUuid,
-                document: docVal,
-                email: emailVal,
-                phone: phoneVal,
-                address: addrVal
-              }])
-              .select('id, name, conta_azul_id, document, email, phone, address')
-              .single();
-
-            if (custErr || !newCust) {
-              console.error('Erro ao criar cliente para pedido:', custErr);
-              continue;
-            }
-            customerId = newCust.id;
-            if (clientUuid) customersByCaId.set(clientUuid, newCust);
-          }
-        } else {
-          continue;
+        if (!customerId) {
+          console.warn(`[importOrders] PV-${saleSummary.numero || currentIdx}: Não foi possível associar cliente local, pedido será importado com cliente nulo.`);
         }
 
-        const productId = await this.resolveOrCreateProduct(dbClient, mainItem, customerId, prodsCache);
+        const productId = await this.resolveOrCreateProduct(dbClient, mainItem, customerId || undefined, prodsCache);
 
         let localStatus: any = 'A produzir';
         if (statusStr === 'PAGO' || statusStr === 'QUITADO') {
