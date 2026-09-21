@@ -391,14 +391,14 @@ export default function ProdutosPage() {
   };
 
   useEffect(() => {
-    const allowedRoles = ['Administrador', 'Comercial', 'Vendedor', 'Produção'];
+    const allowedRoles = ['Administrador', 'Supervisão', 'Comercial', 'Vendedor', 'Produção'];
     if (user && allowedRoles.includes(user.role)) {
       fetchProducts();
     }
   }, [user, page, pageSize, activeTab, debouncedSearch]);
 
   // Security guard check
-  const allowedRoles = ['Administrador', 'Comercial', 'Vendedor', 'Produção'];
+  const allowedRoles = ['Administrador', 'Supervisão', 'Comercial', 'Vendedor', 'Produção'];
   if (user && !allowedRoles.includes(user.role)) {
     return (
       <div className="page-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80vh', flexDirection: 'column', gap: '1rem', textAlign: 'center' }}>
@@ -605,7 +605,7 @@ export default function ProdutosPage() {
     }
   };
 
-  const isAdmin = user?.role === 'Administrador';
+  const isAdmin = user?.role === 'Administrador' || user?.role === 'Supervisão';
   const isVendedor = user?.role === 'Vendedor' || user?.role === 'Comercial';
   const canCreate = isAdmin;
   const canEditDetails = isAdmin;

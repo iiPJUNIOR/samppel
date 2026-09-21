@@ -55,6 +55,41 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
           if (!['/pedidos', '/clientes', '/produtos', '/operador-perfil'].includes(pathname) && !pathname.startsWith('/pedidos/') && !pathname.startsWith('/clientes/') && !pathname.startsWith('/produtos/')) {
             router.push('/pedidos');
           }
+        } else if (user.role === 'Supervisão') {
+          if (pathname === '/configuracoes') {
+            router.push('/dashboard');
+            return;
+          }
+          const modules = user.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard'];
+          const getDefaultSupervisorRoute = () => {
+            if (modules.includes('dashboard')) return '/dashboard';
+            if (modules.includes('pedidos')) return '/pedidos';
+            if (modules.includes('produtos')) return '/produtos';
+            if (modules.includes('financeiro')) return '/pedidos/saldos';
+            if (modules.includes('clientes')) return '/clientes';
+            if (modules.includes('relatorios')) return '/relatorios';
+            return '/operador-perfil';
+          };
+
+          if (pathname === '/') {
+            router.push(getDefaultSupervisorRoute());
+            return;
+          }
+
+          const isAllowedPath = () => {
+            if (pathname === '/operador-perfil' || pathname === '/redefinir-senha') return true;
+            if (pathname === '/dashboard') return modules.includes('dashboard');
+            if (pathname === '/pedidos/saldos') return modules.includes('financeiro');
+            if (pathname === '/pedidos' || pathname.startsWith('/pedidos/')) return modules.includes('pedidos');
+            if (pathname === '/produtos' || pathname.startsWith('/produtos/')) return modules.includes('produtos');
+            if (pathname === '/clientes' || pathname.startsWith('/clientes/')) return modules.includes('clientes');
+            if (pathname === '/relatorios' || pathname.startsWith('/relatorios/')) return modules.includes('relatorios');
+            return false;
+          };
+
+          if (!isAllowedPath()) {
+            router.push(getDefaultSupervisorRoute());
+          }
         } else {
           if (pathname === '/') {
             router.push('/dashboard');
@@ -255,6 +290,72 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
           >
             <Users size={18} />
             <span>Ir para Meus Dados de Operador</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Restrição estrita para perfil de Supervisão em /configuracoes
+  if (user && user.role === 'Supervisão' && pathname === '/configuracoes') {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '80vh',
+        width: '100%',
+        padding: '2rem',
+        textAlign: 'center',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      }}>
+        <div style={{
+          maxWidth: '480px',
+          width: '100%',
+          backgroundColor: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '16px',
+          padding: '2.5rem 2rem',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.08)'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            color: '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.25rem auto'
+          }}>
+            <ShieldAlert size={34} />
+          </div>
+
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text, #0f172a)', margin: '0 0 0.5rem 0' }}>
+            Acesso Restrito
+          </h2>
+
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted, #64748b)', margin: '0 0 1.5rem 0', lineHeight: '1.5' }}>
+            Usuários com perfil <strong>Supervisão</strong> não possuem permissão para acessar o painel de Configurações do sistema. Esta área é restrita exclusivamente a Administradores.
+          </p>
+
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="btn btn-primary"
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              borderRadius: '8px',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <span>Ir para o Dashboard</span>
           </button>
         </div>
       </div>

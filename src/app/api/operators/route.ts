@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hashCredential } from '@/lib/crypto';
-import { supabaseAdmin, requireAdmin, requireAuth } from '@/lib/serverAuth';
+import { supabaseAdmin, requireAdmin, requireAuth, getAuthenticatedUser } from '@/lib/serverAuth';
 
 const defaultTenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
@@ -18,12 +18,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get('tenantId') || defaultTenantId;
 
-    // Busca da tabela principal profiles com papel 'Produção', 'Fábrica' ou 'Administrador'
+    // Busca da tabela principal profiles com todos os operadores e usuarios do tenant
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, full_name, email, role, pin, status, force_password_change, created_at, profile_stage_permissions(stage_id, can_enter, can_exit)')
+      .select('id, full_name, email, role, pin, status, force_password_change, allowed_modules, can_delete_any_order, created_at, profile_stage_permissions(stage_id, can_enter, can_exit)')
       .eq('tenant_id', tenantId)
-      .in('role', ['Produção', 'Fábrica', 'Administrador'])
+      .in('role', ['Produção', 'Fábrica', 'Administrador', 'Supervisão', 'Vendedor', 'Comercial', 'Financeiro', 'Estoque', 'Expedição'])
       .order('full_name', { ascending: true });
 
     if (error) throw error;
@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
       status: p.status || 'ATIVO',
       has_pin: !!p.pin,
       force_password_change: !!p.force_password_change,
+      allowed_modules: p.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard'],
+      can_delete_any_order: !!p.can_delete_any_order,
       profile_stage_permissions: p.profile_stage_permissions || [],
       created_at: p.created_at
     }));
@@ -129,7 +131,7 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id, status, force_password_change, role, is_factory_account, pin } = body;
+    const { id, status, force_password_change, role, is_factory_account, pin, allowed_modules, can_delete_any_order } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'ID é obrigatório.' }, { status: 400 });
@@ -140,6 +142,22 @@ export async function PUT(request: NextRequest) {
     if (force_password_change !== undefined) updates.force_password_change = force_password_change;
     if (role !== undefined) updates.role = role;
     if (is_factory_account !== undefined) updates.is_factory_account = is_factory_account;
+    if (allowed_modules !== undefined) {
+      updates.allowed_modules = Array.isArray(allowed_modules) ? allowed_modules : [];
+    }
+
+    if (can_delete_any_order !== undefined) {
+      // Validar que apenas junior.8350i@gmail.com pode alterar esta permissão
+      const authUser = await getAuthenticatedUser(request);
+      const requesterEmail = authUser.user?.email?.toLowerCase().trim();
+      if (requesterEmail !== 'junior.8350i@gmail.com') {
+        return NextResponse.json({ 
+          error: 'Apenas junior.8350i@gmail.com possui autorização para conceder ou revogar a autonomia total de exclusão de pedidos.' 
+        }, { status: 403 });
+      }
+      updates.can_delete_any_order = Boolean(can_delete_any_order);
+    }
+
     if (pin !== undefined) {
       if (pin && typeof pin === 'string') {
         const trimmedPin = pin.trim();
@@ -172,7 +190,7 @@ export async function PUT(request: NextRequest) {
       .from('profiles')
       .update(updates)
       .eq('id', id)
-      .select('id, full_name, status, force_password_change, role, is_factory_account')
+      .select('id, full_name, status, force_password_change, role, is_factory_account, allowed_modules, can_delete_any_order')
       .single();
 
     if (error) throw error;
@@ -184,7 +202,9 @@ export async function PUT(request: NextRequest) {
         status: data.status,
         force_password_change: data.force_password_change,
         role: data.role,
-        is_factory_account: data.is_factory_account
+        is_factory_account: data.is_factory_account,
+        allowed_modules: data.allowed_modules || [],
+        can_delete_any_order: !!data.can_delete_any_order
       } 
     });
   } catch (err: any) {

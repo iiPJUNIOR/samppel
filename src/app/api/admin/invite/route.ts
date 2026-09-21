@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'O e-mail é obrigatório.' }, { status: 400 });
     }
 
-    const validRoles = ['Administrador', 'Produção', 'Fábrica', 'Vendedor'];
+    const validRoles = ['Administrador', 'Supervisão', 'Produção', 'Fábrica', 'Vendedor'];
     const selectedRole = validRoles.includes(role) ? role : 'Vendedor';
     const tId = tenantId || defaultTenantId;
     const name = full_name || email.split('@')[0];

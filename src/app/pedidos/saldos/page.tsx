@@ -25,8 +25,9 @@ export default function SaldosCreditosPage() {
   const { user } = useAuth();
   
   // Controle de Permissão (Administrador, Comercial, Vendedor ou Supervisor têm acesso)
-  const isSupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
-  const isAuthorized = user?.role === 'Administrador' || user?.role === 'Vendedor' || user?.role === 'Comercial' || isSupervisor;
+  const isSupervisorWithFinance = user?.role === 'Supervisão' && (user?.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard']).includes('financeiro');
+  const isLegacySupervisor = user?.role === 'Comercial' && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
+  const isAuthorized = user?.role === 'Administrador' || user?.role === 'Vendedor' || user?.role === 'Comercial' || isSupervisorWithFinance || isLegacySupervisor;
 
   // Listas de dados
   const [credits, setCredits] = useState<any[]>([]);

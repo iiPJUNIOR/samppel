@@ -12,6 +12,7 @@ import { searchCustomers } from '@/services/supabase';
 export function DetailModal(props: any) {
   const {
     CheckCircle2,
+    canUserDeleteOrder,
     customers,
     factoryLocations,
     formArtName,
@@ -1094,16 +1095,16 @@ export function DetailModal(props: any) {
                 gap: '0.75rem'
               }}>
                 <div>
-                  {modalType === 'edit' && isAdmin && selectedOrder && isManualOrder(selectedOrder) && (
+                  {modalType === 'edit' && selectedOrder && (canUserDeleteOrder ? canUserDeleteOrder(selectedOrder) : (isAdmin && (user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com' || user?.can_delete_any_order || isManualOrder(selectedOrder)))) && (
                     <button
                       type="button"
                       onClick={() => handleRequestDeleteManualOrder(selectedOrder, selectedItem)}
                       className="btn btn-danger"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}
-                      title="Excluir este pedido manual (Apenas Administrador)"
+                      title={isManualOrder(selectedOrder) ? "Excluir este pedido manual" : "Excluir este pedido"}
                     >
                       <Trash2 size={13} />
-                      <span>Excluir Pedido Manual</span>
+                      <span>{isManualOrder(selectedOrder) ? 'Excluir Pedido Manual' : 'Excluir Pedido'}</span>
                     </button>
                   )}
                 </div>

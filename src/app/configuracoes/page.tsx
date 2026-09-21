@@ -145,7 +145,7 @@ export default function ConfiguracoesPage() {
   const [invitesList, setInvitesList] = useState<any[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteFullName, setInviteFullName] = useState('');
-  const [inviteRole, setInviteRole] = useState<'Administrador' | 'Produção' | 'Fábrica' | 'Vendedor'>('Vendedor');
+  const [inviteRole, setInviteRole] = useState<'Administrador' | 'Supervisão' | 'Produção' | 'Fábrica' | 'Vendedor'>('Vendedor');
   const [submittingInvite, setSubmittingInvite] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -1039,10 +1039,14 @@ export default function ConfiguracoesPage() {
       // Atualiza o perfil no modal reativamente
       const updatedOp = profilesList.find(p => p.id === profileId);
       if (updatedOp) {
+        const defaultModules = updatedOp?.allowed_modules && updatedOp.allowed_modules.length > 0 
+          ? updatedOp.allowed_modules 
+          : ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard'];
         setSelectedOperatorForPermissions({
           ...updatedOp,
           role: isFactory ? 'Fábrica' : newRole,
-          is_factory_account: isFactory
+          is_factory_account: isFactory,
+          allowed_modules: defaultModules
         });
       }
 
@@ -2140,6 +2144,10 @@ export default function ConfiguracoesPage() {
                           bg = 'rgba(59, 130, 246, 0.12)';
                           color = '#1d4ed8';
                           borderColor = 'rgba(59, 130, 246, 0.35)';
+                        } else if (currentRole === 'Supervisão') {
+                          bg = 'rgba(14, 165, 233, 0.12)';
+                          color = '#0284c7';
+                          borderColor = 'rgba(14, 165, 233, 0.35)';
                         } else if (currentRole === 'Vendedor') {
                           bg = 'rgba(168, 85, 247, 0.12)';
                           color = '#7e22ce';
@@ -2168,6 +2176,7 @@ export default function ConfiguracoesPage() {
                             }}
                           >
                             <option value="Administrador">Administrador</option>
+                            <option value="Supervisão">Supervisão</option>
                             <option value="Produção">Produção</option>
                             <option value="Fábrica">Terminal de Fábrica</option>
                             <option value="Vendedor">Vendedor</option>
@@ -2329,6 +2338,7 @@ export default function ConfiguracoesPage() {
                 style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}
               >
                 <option value="Administrador">Administrador (Acesso total)</option>
+                <option value="Supervisão">Supervisão (Autonomia modular por áreas)</option>
                 <option value="Produção">Produção (Operador individual)</option>
                 <option value="Fábrica">Terminal de Fábrica (Apenas Kanban & necessita PIN de operador)</option>
                 <option value="Vendedor">Vendedor (Visualização de Pedidos e Produtos)</option>
@@ -2337,6 +2347,177 @@ export default function ConfiguracoesPage() {
                 Definir como "Terminal de Fábrica" bloqueia esta conta na visualização do Kanban de produção, exigindo PIN de um operador para qualquer movimento.
               </span>
             </div>
+
+            {/* PERMISSÃO ESPECIAL DE EXCLUSÃO DE PEDIDOS (Exclusivo para junior.8350i@gmail.com) */}
+            {user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com' && (
+              <div style={{ 
+                marginBottom: '1.5rem', 
+                backgroundColor: activeOp!.can_delete_any_order ? 'rgba(239, 68, 68, 0.06)' : 'var(--surface-subtle)', 
+                padding: '1rem', 
+                borderRadius: 'var(--radius-md)', 
+                border: `1px solid ${activeOp!.can_delete_any_order ? 'rgba(239, 68, 68, 0.35)' : 'var(--border)'}`,
+                transition: 'all 0.2s ease'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '220px' }}>
+                    <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.25rem 0', display: 'flex', alignItems: 'center', gap: '0.4rem', color: activeOp!.can_delete_any_order ? 'var(--danger)' : 'var(--text)' }}>
+                      <Trash2 size={16} />
+                      <span>Permissão Especial: Exclusão Total de Pedidos</span>
+                    </h4>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 0.5rem 0', lineHeight: 1.4 }}>
+                      Permite que este usuário exclua qualquer pedido do sistema (manual ou Conta Azul, em qualquer etapa do fluxo), com a mesma autonomia total do administrador geral.
+                    </p>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic', display: 'block' }}>
+                      Visível e configurável exclusivamente por junior.8350i@gmail.com. Por padrão vem desativado.
+                    </span>
+                  </div>
+                  <div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', userSelect: 'none', backgroundColor: 'var(--surface)', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                      <input 
+                        type="checkbox"
+                        checked={!!activeOp!.can_delete_any_order}
+                        onChange={async (e) => {
+                          const val = e.target.checked;
+                          setSelectedOperatorForPermissions({ ...selectedOperatorForPermissions, can_delete_any_order: val });
+                          setProfilesList(prev => prev.map(p => p.id === activeOp!.id ? { ...p, can_delete_any_order: val } : p));
+                          try {
+                            const res = await authenticatedFetch('/api/operators', {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ id: activeOp!.id, can_delete_any_order: val })
+                            });
+                            const json = await res.json();
+                            if (!res.ok) throw new Error(json.error || 'Erro ao atualizar.');
+                          } catch (err: any) {
+                            alert('Erro ao atualizar permissão de exclusão: ' + err.message);
+                          }
+                        }}
+                        style={{ transform: 'scale(1.25)', cursor: 'pointer' }}
+                      />
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: activeOp!.can_delete_any_order ? 'var(--danger)' : 'var(--text)' }}>
+                        {activeOp!.can_delete_any_order ? 'Liberado' : 'Bloqueado'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CONFIGURAÇÃO MODULAR DE MÓDULOS DE SUPERVISÃO */}
+            {activeOp!.role === 'Supervisão' && !activeOp!.is_factory_account && (() => {
+              const currentModules: string[] = activeOp!.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard'];
+
+              const allAvailableModules = [
+                { id: 'dashboard', label: 'Dashboard', desc: 'Acesso a métricas gerais, indicadores e painéis executivos' },
+                { id: 'pedidos', label: 'Pedidos & Kanban', desc: 'Acompanhamento de pedidos e movimentação no fluxo de produção' },
+                { id: 'produtos', label: 'Estoque & Produtos', desc: 'Visualização da listagem de produtos e ajustes de estoque' },
+                { id: 'financeiro', label: 'Financeiro & Saldos', desc: 'Acesso aos saldos e créditos, valores em dinheiro e parcelas' },
+                { id: 'clientes', label: 'Clientes', desc: 'Visualização e gestão da carteira de clientes' },
+                { id: 'relatorios', label: 'Relatórios', desc: 'Acesso aos relatórios operacionais, gargalos e tempos médios' },
+              ];
+
+              const handleToggleModule = async (moduleId: string) => {
+                let updated: string[];
+                if (currentModules.includes(moduleId)) {
+                  updated = currentModules.filter(m => m !== moduleId);
+                } else {
+                  updated = [...currentModules, moduleId];
+                }
+                setSelectedOperatorForPermissions({ ...selectedOperatorForPermissions, allowed_modules: updated });
+                setProfilesList(prev => prev.map(p => p.id === activeOp!.id ? { ...p, allowed_modules: updated } : p));
+                try {
+                  await authenticatedFetch('/api/operators', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: activeOp!.id, allowed_modules: updated })
+                  });
+                } catch (err: any) {
+                  console.error('Erro ao salvar módulos do supervisor:', err);
+                }
+              };
+
+              const handleSetAllModules = async (enableAll: boolean) => {
+                const updated = enableAll ? allAvailableModules.map(m => m.id) : [];
+                setSelectedOperatorForPermissions({ ...selectedOperatorForPermissions, allowed_modules: updated });
+                setProfilesList(prev => prev.map(p => p.id === activeOp!.id ? { ...p, allowed_modules: updated } : p));
+                try {
+                  await authenticatedFetch('/api/operators', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: activeOp!.id, allowed_modules: updated })
+                  });
+                } catch (err: any) {
+                  console.error('Erro ao salvar módulos do supervisor:', err);
+                }
+              };
+
+              return (
+                <div style={{ marginBottom: '1.5rem', backgroundColor: 'var(--surface-subtle)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary)' }}>
+                        <Sliders size={16} />
+                        <span>Módulos Autorizados para Supervisão</span>
+                      </h4>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Defina quais módulos este supervisor pode acessar. Pode supervisionar tudo ou apenas áreas específicas.
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                        onClick={() => handleSetAllModules(true)}
+                      >
+                        Marcar Todos
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                        onClick={() => handleSetAllModules(false)}
+                      >
+                        Desmarcar Todos
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.6rem', marginTop: '0.75rem' }}>
+                    {allAvailableModules.map(mod => {
+                      const isChecked = currentModules.includes(mod.id);
+                      return (
+                        <label 
+                          key={mod.id} 
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'flex-start', 
+                            gap: '0.5rem', 
+                            padding: '0.6rem 0.75rem', 
+                            borderRadius: 'var(--radius-sm)', 
+                            border: `1px solid ${isChecked ? 'var(--primary)' : 'var(--border)'}`, 
+                            backgroundColor: isChecked ? 'rgba(var(--primary-rgb), 0.05)' : 'var(--surface)', 
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <input 
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleModule(mod.id)}
+                            style={{ marginTop: '0.15rem', transform: 'scale(1.15)', cursor: 'pointer' }}
+                          />
+                          <div>
+                            <strong style={{ fontSize: '0.825rem', color: 'var(--text)', display: 'block' }}>{mod.label}</strong>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: '1.25', display: 'block' }}>{mod.desc}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* CONFIGURAÇÃO DE CARTEIRA DE VENDEDOR E PERMISSÕES (Exclusivo para perfis de Vendedor/Comercial) */}
             {(activeOp!.role === 'Vendedor' || activeOp!.role === 'Comercial') && !activeOp!.is_factory_account && (() => {
@@ -2466,7 +2647,11 @@ export default function ConfiguracoesPage() {
             {/* TABELA DE PERMISSÕES DE ETAPAS */}
             {activeOp!.role === 'Administrador' && !activeOp!.is_factory_account ? (
               <div style={{ backgroundColor: 'rgba(var(--primary-rgb), 0.05)', color: 'var(--primary)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.85rem', fontWeight: 500 }}>
-                💡 Administradores têm permissão irrestrita de leitura e escrita em todas as etapas da fábrica por padrão.
+                Administradores têm permissão irrestrita de leitura e escrita em todas as etapas da fábrica por padrão.
+              </div>
+            ) : activeOp!.role === 'Supervisão' && !(activeOp!.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard']).includes('pedidos') ? (
+              <div style={{ backgroundColor: 'var(--surface-subtle)', color: 'var(--text-muted)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '0.825rem' }}>
+                O módulo "Pedidos & Kanban" está desmarcado para este supervisor. Habilite o módulo acima para configurar as permissões de etapas de produção.
               </div>
             ) : (
               <div style={{ marginTop: '0.5rem' }}>
@@ -2476,7 +2661,7 @@ export default function ConfiguracoesPage() {
                       Etapas Autorizadas no Kanban (Entrada e Saída)
                     </h4>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Marque para quais colunas do processo este {activeOp!.role === 'Vendedor' ? 'vendedor' : 'operador'} pode colocar (Entrada) ou retirar (Saída) pedidos.
+                      Marque para quais colunas do processo este {activeOp!.role === 'Vendedor' ? 'vendedor' : activeOp!.role === 'Supervisão' ? 'supervisor' : 'operador'} pode colocar (Entrada) ou retirar (Saída) pedidos.
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: '0.35rem' }}>
@@ -2926,6 +3111,7 @@ export default function ConfiguracoesPage() {
                     style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '0.9rem' }}
                   >
                     <option value="Administrador">Outros Administradores</option>
+                    <option value="Supervisão">Supervisão</option>
                     <option value="Produção">Produção</option>
                     <option value="Fábrica">Fábrica</option>
                     <option value="Vendedor">Vendedor</option>

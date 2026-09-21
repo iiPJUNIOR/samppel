@@ -8,6 +8,7 @@ export interface DeleteConfirmModalProps {
     customerName: string;
     artName: string;
     printRun?: string | number;
+    isManual?: boolean;
   } | null;
   onClose: () => void;
   onConfirm: () => void;
@@ -61,10 +62,10 @@ export function DeleteConfirmModal({
           </div>
           <div>
             <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--danger)' }}>
-              Confirmar Exclusão de Pedido Manual
+              {orderToDelete.isManual !== false ? 'Confirmar Exclusão de Pedido Manual' : 'Confirmar Exclusão de Pedido'}
             </h3>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Ação restrita exclusivamente a Administradores
+              {orderToDelete.isManual !== false ? 'Ação restrita exclusivamente a Administradores' : 'Ação com permissão especial de exclusão'}
             </span>
           </div>
         </div>
@@ -84,7 +85,7 @@ export function DeleteConfirmModal({
               ATENÇÃO: ESTA AÇÃO É DEFINITIVA E NÃO PODERÁ SER DESFEITA!
             </div>
             <p style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4, color: 'var(--text-muted)' }}>
-              Esta operação excluirá permanentemente o pedido manual, seus itens vinculados e todo o histórico associado do banco de dados. <strong>Não haverá como recuperar esses dados após a confirmação.</strong>
+              Esta operação excluirá permanentemente o pedido{orderToDelete.isManual !== false ? ' manual' : ''}, seus itens vinculados e todo o histórico associado do banco de dados. <strong>Não haverá como recuperar esses dados após a confirmação.</strong>
             </p>
           </div>
 

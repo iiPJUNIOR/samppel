@@ -90,7 +90,7 @@ export default function RelatoriosPage() {
   const dataFetchedRef = React.useRef(false);
 
   useEffect(() => {
-    if (user && !['Administrador', 'Comercial'].includes(user.role)) {
+    if (user && !['Administrador', 'Supervisão', 'Comercial'].includes(user.role)) {
       router.push('/dashboard');
     }
   }, [user, router]);

@@ -159,6 +159,18 @@ export default function Sidebar() {
     if (user.is_factory_account) {
       return item.path === '/pedidos';
     }
+    if (user.role === 'Supervisão') {
+      if (item.path === '/configuracoes') return false; // Sem acesso a configurações
+      if (item.path === '/operador-perfil') return true;
+      const modules = user.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard'];
+      if (item.path === '/dashboard') return modules.includes('dashboard');
+      if (item.path === '/pedidos') return modules.includes('pedidos');
+      if (item.path === '/pedidos/saldos') return modules.includes('financeiro');
+      if (item.path === '/produtos') return modules.includes('produtos');
+      if (item.path === '/clientes') return modules.includes('clientes');
+      if (item.path === '/relatorios') return modules.includes('relatorios');
+      return false;
+    }
     return item.allowedRoles.includes(user.role);
   });
 

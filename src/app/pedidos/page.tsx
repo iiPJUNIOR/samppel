@@ -396,7 +396,15 @@ export default function PedidosPage() {
     return true;
   };
 
-  // Modal de Confirmação de Exclusão de Pedido Manual (Apenas Admin)
+  const canUserDeleteOrder = (order: any): boolean => {
+    if (!user) return false;
+    const email = user.email?.toLowerCase().trim();
+    if (email === 'junior.8350i@gmail.com') return true;
+    if (user.can_delete_any_order) return true;
+    return Boolean(isAdmin && isManualOrder(order));
+  };
+
+  // Modal de Confirmação de Exclusão de Pedido (Apenas Admin para manuais, ou permissão especial)
   const [isDeleteConfirmModalOpen, setIsDeleteConfirmModalOpen] = useState(false);
   const [orderToDelete, setOrderToDelete] = useState<{
     orderId: string;
@@ -405,6 +413,7 @@ export default function PedidosPage() {
     artName: string;
     measure?: string;
     printRun?: number;
+    isManual?: boolean;
   } | null>(null);
   const [isDeletingManualOrder, setIsDeletingManualOrder] = useState(false);
 
@@ -487,12 +496,6 @@ export default function PedidosPage() {
     if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_stage') || '';
     return '';
   });
-  // Filtro de Tamanho / Medidas
-  const [filterSize, setFilterSize] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_size') || '';
-    return '';
-  });
-
   const [pullOrderNumber, setPullOrderNumber] = useState('');
   const [syncingOrderNumber, setSyncingOrderNumber] = useState('');
 
@@ -505,8 +508,7 @@ export default function PedidosPage() {
     localStorage.setItem('pedidos_filter_conta_azul', filterContaAzulStatus);
     localStorage.setItem('pedidos_filter_release', filterPedidosRelease);
     localStorage.setItem('pedidos_filter_stage', filterStage);
-    localStorage.setItem('pedidos_filter_size', filterSize);
-  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage, filterSize]);
+  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage]);
 
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
@@ -1994,10 +1996,10 @@ export default function PedidosPage() {
         }
       }
 
-      // 3. Expedição (Apenas eles, Admin ou Supervisor Comercial podem concluir)
+      // 3. Expedição (Apenas eles, Admin ou Supervisor podem concluir)
       if (targetStage.name === 'Concluído') {
-        if (user.role !== 'Expedição' && !isSupervisor) {
-          alert('Permissão Negada: Apenas operadores da Expedição ou Supervisor de Vendas podem mover cards para Concluído.');
+        if (user.role !== 'Expedição' && user.role !== 'Supervisão' && !isSupervisor) {
+          alert('Permissão Negada: Apenas operadores da Expedição ou Supervisor podem mover cards para Concluído.');
           return;
         }
       }
@@ -3604,28 +3606,33 @@ export default function PedidosPage() {
   };
 
   const handleRequestDeleteManualOrder = (order: any, item?: any) => {
-    if (!isAdmin) {
-      alert('Apenas usuários com perfil de Administrador têm permissão para excluir pedidos manuais.');
+    const targetOrder = order?.order || order || (item?.order_id ? orders.find(o => o.id === item.order_id) : null);
+    if (!canUserDeleteOrder(targetOrder)) {
+      alert('Você não tem permissão para excluir este pedido.');
       return;
     }
-    const pvNumber = order?.pv_number || (order?.id ? `ID: ${order.id.slice(0, 8)}` : 'Manual');
-    const customerName = order?.customer?.name || (customers.find(c => c.id === order?.customer_id)?.name) || 'Cliente não identificado';
-    const artName = item?.name || order?.art_name || 'Arte/Produto';
-    const measure = item?.measure || order?.measure || '';
-    const printRun = item?.print_run || order?.print_run || 0;
+    const isManual = isManualOrder(targetOrder);
+    const pvNumber = targetOrder?.pv_number || (targetOrder?.id ? `ID: ${targetOrder.id.slice(0, 8)}` : (isManual ? 'Manual' : 'Pedido'));
+    const customerName = targetOrder?.customer?.name || (customers.find(c => c.id === targetOrder?.customer_id)?.name) || 'Cliente não identificado';
+    const artName = item?.name || targetOrder?.art_name || 'Arte/Produto';
+    const measure = item?.measure || targetOrder?.measure || '';
+    const printRun = item?.print_run || targetOrder?.print_run || 0;
 
     setOrderToDelete({
-      orderId: order?.id || item?.order_id,
+      orderId: targetOrder?.id || item?.order_id,
       pvNumber,
       customerName,
       artName,
       measure,
-      printRun
+      printRun,
+      isManual
     });
     setIsDeleteConfirmModalOpen(true);
   };
   const handleConfirmDeleteManualOrder = async () => {
-    if (!orderToDelete || !isAdmin) return;
+    if (!orderToDelete) return;
+    const targetOrder = orders.find(o => o.id === orderToDelete.orderId) || { id: orderToDelete.orderId };
+    if (!canUserDeleteOrder(targetOrder)) return;
     setIsDeletingManualOrder(true);
     try {
       const { error } = await deleteOrder(orderToDelete.orderId);
@@ -3641,8 +3648,8 @@ export default function PedidosPage() {
         await fetchAllData();
       }
     } catch (err: any) {
-      console.error('Erro ao excluir pedido manual:', err);
-      alert('Falha ao excluir pedido manual.');
+      console.error('Erro ao excluir pedido:', err);
+      alert('Falha ao excluir pedido.');
     } finally {
       setIsDeletingManualOrder(false);
     }
@@ -3977,9 +3984,12 @@ export default function PedidosPage() {
     }
   };
 
-  const isSupervisor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
+  const isSupervisorRole = user?.role === 'Supervisão';
+  const supervisorHasFinance = isSupervisorRole && (user?.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard']).includes('financeiro');
+  const isLegacySupervisor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
+  const isSupervisor = isSupervisorRole || isLegacySupervisor;
   const isVendedor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && !isSupervisor;
-  const hideMonetaryValues = user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isSupervisor);
+  const hideMonetaryValues = !supervisorHasFinance && user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isLegacySupervisor);
 
   const cleanPvForMatch = (pv: string) => {
     return (pv || '').split('/')[0].trim().toLowerCase();
@@ -3988,7 +3998,7 @@ export default function PedidosPage() {
   // Helper para verificar permissões de carteira de vendedor do usuário logado
   const canUserViewOrderSeller = (sellerName: string): boolean => {
     if (!user) return true;
-    if (user.role === 'Administrador') return true;
+    if (user.role === 'Administrador' || user.role === 'Supervisão') return true;
 
     if (user.role === 'Comercial' || user.role === 'Vendedor') {
       const sellerPermsMap = getSellerPermissionsMap();
@@ -4018,33 +4028,6 @@ export default function PedidosPage() {
     return true;
   };
 
-  // Lista dinâmica de todos os tamanhos/medidas presentes nos cards e pedidos
-  const availableSizes = useMemo(() => {
-    const sizesSet = new Set<string>();
-    (orderItems || []).forEach((item: any) => {
-      const m = getItemRealMeasure(item);
-      if (m && m !== '—' && m.trim().length > 0) {
-        sizesSet.add(m.trim());
-      }
-      if (item.measure && item.measure !== '—' && item.measure !== '15x10x5 cm' && item.measure.trim().length > 0) {
-        sizesSet.add(item.measure.trim());
-      }
-    });
-    (orders || []).forEach((order: any) => {
-      const m = getItemRealMeasure(order);
-      if (m && m !== '—' && m.trim().length > 0) {
-        sizesSet.add(m.trim());
-      }
-      if (order.measure && order.measure !== '—' && order.measure !== '15x10x5 cm' && order.measure.trim().length > 0) {
-        sizesSet.add(order.measure.trim());
-      }
-      if (order.size && order.size !== '—' && order.size.trim().length > 0) {
-        sizesSet.add(order.size.trim());
-      }
-    });
-    return Array.from(sizesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [orderItems, orders]);
-
   // Lógica de Filtros
   const filteredOrders = orders.filter(order => {
     if (isVendedor && user) {
@@ -4052,18 +4035,55 @@ export default function PedidosPage() {
     }
     const matchCustomer = filterCustomer ? (order.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? order.seller_name.toLowerCase().includes(filterSeller.toLowerCase()) : true;
-    const matchSearchOrder = filterSearchOrder ? (
-      cleanPvForMatch(order.pv_number || '') === `pv-${filterSearchOrder.toLowerCase()}` ||
-      cleanPvForMatch(order.pv_number || '') === filterSearchOrder.toLowerCase()
-    ) : true;
+    
+    let matchSearchOrder = true;
+    if (filterSearchOrder && filterSearchOrder.trim()) {
+      const q = filterSearchOrder.trim().toLowerCase();
+      const qNorm = q.replace(/\s+/g, '');
+      const pvClean = cleanPvForMatch(order.pv_number || '');
+      const opText = (order.op_number || '').toLowerCase();
+      const realMeasure = getItemRealMeasure(order).toLowerCase();
+      const realMeasureNorm = realMeasure.replace(/\s+/g, '');
+      const orderMeasure = (order.measure || '').toLowerCase();
+      const orderMeasureNorm = orderMeasure.replace(/\s+/g, '');
+      const orderSize = (order.size || '').toLowerCase();
+      const orderSizeNorm = orderSize.replace(/\s+/g, '');
+      const artName = (order.product_name || order.art_name || order.name || '').toLowerCase();
+
+      const orderDirectMatch = (
+        pvClean === `pv-${q}` ||
+        pvClean === q ||
+        pvClean.includes(q) ||
+        opText.includes(q) ||
+        (realMeasure && realMeasure !== '—' && (realMeasure.includes(q) || realMeasureNorm.includes(qNorm))) ||
+        (orderMeasure && (orderMeasure.includes(q) || orderMeasureNorm.includes(qNorm))) ||
+        (orderSize && (orderSize.includes(q) || orderSizeNorm.includes(qNorm))) ||
+        artName.includes(q)
+      );
+
+      const siblingItems = (orderItems || []).filter((it: any) => it.order_id === order.id);
+      const anyItemMatches = siblingItems.some((it: any) => {
+        const iRealMeasure = getItemRealMeasure(it).toLowerCase();
+        const iRealMeasureNorm = iRealMeasure.replace(/\s+/g, '');
+        const iMeasure = (it.measure || '').toLowerCase();
+        const iMeasureNorm = iMeasure.replace(/\s+/g, '');
+        const iName = ((it.name || '') + ' ' + (it.art_name || '')).toLowerCase();
+        const iFriendly = cleanPvForMatch(it.friendly_id || '');
+        const iOp = (it.op_number || '').toLowerCase();
+        return (
+          iFriendly.includes(q) ||
+          iOp.includes(q) ||
+          (iRealMeasure && iRealMeasure !== '—' && (iRealMeasure.includes(q) || iRealMeasureNorm.includes(qNorm))) ||
+          (iMeasure && (iMeasure.includes(q) || iMeasureNorm.includes(qNorm))) ||
+          iName.includes(q)
+        );
+      });
+
+      matchSearchOrder = orderDirectMatch || anyItemMatches;
+    }
+
     const matchContaAzulStatus = filterContaAzulStatus ? order.conta_azul_status === filterContaAzulStatus : true;
-    const matchSize = filterSize ? (
-      getItemRealMeasure(order).toLowerCase() === filterSize.toLowerCase() ||
-      (order.measure || '').toLowerCase() === filterSize.toLowerCase() ||
-      (order.size || '').toLowerCase() === filterSize.toLowerCase() ||
-      (order.product_name || order.art_name || order.name || '').toLowerCase().includes(filterSize.toLowerCase())
-    ) : true;
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchSize;
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
 
   // Helper para verificar se um item de pedido está configurado para ser vinculado ao primeiro item (Sem Produção)
@@ -4153,12 +4173,70 @@ export default function PedidosPage() {
 
     const matchCustomer = filterCustomer ? (parentOrder.customer?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) : true;
     const matchSeller = filterSeller ? parentOrder.seller_name?.toLowerCase().includes(filterSeller.toLowerCase()) : true;
-    const matchSearchOrder = filterSearchOrder ? (
-      cleanPvForMatch(parentOrder.pv_number || '') === `pv-${filterSearchOrder.toLowerCase()}` ||
-      cleanPvForMatch(parentOrder.pv_number || '') === filterSearchOrder.toLowerCase() ||
-      cleanPvForMatch(item.friendly_id || '') === `pv-${filterSearchOrder.toLowerCase()}` ||
-      cleanPvForMatch(item.friendly_id || '') === filterSearchOrder.toLowerCase()
-    ) : true;
+    let matchSearchOrder = true;
+    if (filterSearchOrder && filterSearchOrder.trim()) {
+      const q = filterSearchOrder.trim().toLowerCase();
+      const qNorm = q.replace(/\s+/g, '');
+
+      // 1. Busca por PV e OP (quando o usuário digita número de PV ou OP, todos os itens do pedido aparecem)
+      const parentPvClean = cleanPvForMatch(parentOrder.pv_number || '');
+      const itemFriendlyClean = cleanPvForMatch(item.friendly_id || '');
+      const opText = ((parentOrder.op_number || '') + ' ' + (item.op_number || '')).toLowerCase();
+
+      const matchPvOrOp = (
+        parentPvClean === `pv-${q}` ||
+        parentPvClean === q ||
+        parentPvClean.includes(q) ||
+        itemFriendlyClean === `pv-${q}` ||
+        itemFriendlyClean === q ||
+        itemFriendlyClean.includes(q) ||
+        opText.includes(q)
+      );
+
+      // 2. Medidas e Tamanhos do Item ESPECÍFICO deste card
+      const itemRealMeasure = getItemRealMeasure(item).toLowerCase();
+      const itemRealMeasureNorm = itemRealMeasure.replace(/\s+/g, '');
+      const itemMeasure = (item.measure || '').toLowerCase();
+      const itemMeasureNorm = itemMeasure.replace(/\s+/g, '');
+      const itemSize = (item.size || '').toLowerCase();
+      const itemSizeNorm = itemSize.replace(/\s+/g, '');
+
+      // 3. Nomes e Artes do Item ESPECÍFICO deste card
+      const itemName = (item.name || '').toLowerCase();
+      const itemArtName = (item.art_name || '').toLowerCase();
+      const itemProdName = (item.product?.name || '').toLowerCase();
+
+      // Indicadores se o item possui especificação própria
+      const hasItemMeasure = (itemRealMeasure && itemRealMeasure !== '—') || !!itemMeasure || !!itemSize;
+      const hasItemName = !!itemName || !!itemArtName || !!itemProdName;
+
+      // Fallback ao pedido pai APENAS se o item não tiver especificação própria
+      const parentRealMeasure = !hasItemMeasure ? getItemRealMeasure(parentOrder).toLowerCase() : '';
+      const parentRealMeasureNorm = parentRealMeasure.replace(/\s+/g, '');
+      const parentMeasure = !hasItemMeasure ? (parentOrder.measure || '').toLowerCase() : '';
+      const parentMeasureNorm = parentMeasure.replace(/\s+/g, '');
+      const parentSize = !hasItemMeasure ? (parentOrder.size || '').toLowerCase() : '';
+      const parentSizeNorm = parentSize.replace(/\s+/g, '');
+      const parentName = !hasItemName ? (parentOrder.product_name || parentOrder.art_name || parentOrder.name || '').toLowerCase() : '';
+
+      const matchMeasureOrSize = (
+        (itemRealMeasure && itemRealMeasure !== '—' && (itemRealMeasure.includes(q) || itemRealMeasureNorm.includes(qNorm))) ||
+        (itemMeasure && (itemMeasure.includes(q) || itemMeasureNorm.includes(qNorm))) ||
+        (itemSize && (itemSize.includes(q) || itemSizeNorm.includes(qNorm))) ||
+        (parentRealMeasure && parentRealMeasure !== '—' && (parentRealMeasure.includes(q) || parentRealMeasureNorm.includes(qNorm))) ||
+        (parentMeasure && (parentMeasure.includes(q) || parentMeasureNorm.includes(qNorm))) ||
+        (parentSize && (parentSize.includes(q) || parentSizeNorm.includes(qNorm)))
+      );
+
+      const matchName = (
+        itemName.includes(q) ||
+        itemArtName.includes(q) ||
+        itemProdName.includes(q) ||
+        parentName.includes(q)
+      );
+
+      matchSearchOrder = matchPvOrOp || matchMeasureOrSize || matchName;
+    }
     const matchContaAzulStatus = filterContaAzulStatus ? parentOrder.conta_azul_status === filterContaAzulStatus : true;
 
     // Filtro para a Fase "Pedidos" / Liberação
@@ -4177,23 +4255,7 @@ export default function PedidosPage() {
       matchStage = stageName.toLowerCase() === filterStage.toLowerCase();
     }
 
-    // Filtro de Tamanho / Medidas
-    let matchSize = true;
-    if (filterSize) {
-      const itemMeasure = getItemRealMeasure(item).toLowerCase();
-      const parentMeasure = getItemRealMeasure(parentOrder).toLowerCase();
-      const targetSize = filterSize.toLowerCase();
-      matchSize = itemMeasure === targetSize ||
-        (item.measure || '').toLowerCase() === targetSize ||
-        (item.name || '').toLowerCase().includes(targetSize) ||
-        (item.art_name || '').toLowerCase().includes(targetSize) ||
-        parentMeasure === targetSize ||
-        (parentOrder.measure || '').toLowerCase() === targetSize ||
-        (parentOrder.size || '').toLowerCase() === targetSize ||
-        (parentOrder.product_name || parentOrder.art_name || parentOrder.name || '').toLowerCase().includes(targetSize);
-    }
-
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage && matchSize;
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage;
   });
 
   const getFreightBadgeStyle = (shippingType: string, notesFreight?: string | null) => {
@@ -4240,11 +4302,11 @@ export default function PedidosPage() {
     return true;
   });
 
-  const canCreate = user?.role === 'Administrador' || user?.role === 'Comercial' || user?.role === 'Vendedor';
+  const canCreate = user?.role === 'Administrador' || user?.role === 'Supervisão' || user?.role === 'Comercial' || user?.role === 'Vendedor';
 
   const isReadOnlyForForm = (field: string) => {
     if (modalType === 'create') return false;
-    if (user?.role === 'Administrador' || user?.role === 'Comercial' || user?.role === 'Vendedor') return false;
+    if (user?.role === 'Administrador' || user?.role === 'Supervisão' || user?.role === 'Comercial' || user?.role === 'Vendedor') return false;
 
     // Se o usuário for Produção ou Fábrica:
     if (user?.role === 'Produção' || user?.role === 'Fábrica') {
@@ -4405,12 +4467,12 @@ export default function PedidosPage() {
           ═══════════════════════════════════════════════════════════════ */}
       {(() => {
         const activeFiltersCount = [
+          filterSearchOrder,
           filterCustomer,
           filterSeller,
           filterContaAzulStatus,
           filterPedidosRelease,
-          filterStage,
-          filterSize
+          filterStage
         ].filter(Boolean).length;
 
         return (
@@ -4681,15 +4743,15 @@ export default function PedidosPage() {
                   <span>Filtros:</span>
                 </div>
 
-                {/* Busca PV / OP */}
-                <div style={{ position: 'relative', flex: '1 1 150px', minWidth: '130px', maxWidth: '190px' }}>
+                {/* Busca PV / OP / Tamanho */}
+                <div style={{ position: 'relative', flex: '1 1 200px', minWidth: '160px', maxWidth: '250px' }}>
                   <div style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}>
                     <Search size={13} />
                   </div>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Pesquisar PV/OP..."
+                    placeholder="Buscar PV, OP ou Tamanho..."
                     value={filterSearchOrder}
                     onChange={(e) => setFilterSearchOrder(e.target.value)}
                     style={{ height: '30px', fontSize: '0.78rem', padding: '0.2rem 0.5rem 0.2rem 1.9rem', width: '100%', borderRadius: 'var(--radius-sm)' }}
@@ -4756,19 +4818,6 @@ export default function PedidosPage() {
                   ))}
                 </select>
 
-                {/* Tamanhos / Medidas */}
-                <select
-                  className="form-select"
-                  value={filterSize}
-                  onChange={(e) => setFilterSize(e.target.value)}
-                  style={{ height: '30px', fontSize: '0.76rem', padding: '0.2rem 0.45rem', flex: '1 1 120px', minWidth: '105px', maxWidth: '160px', borderRadius: 'var(--radius-sm)' }}
-                >
-                  <option value="">Tamanho (Todos)</option>
-                  {availableSizes.map((size: string) => (
-                    <option key={size} value={size}>{size}</option>
-                  ))}
-                </select>
-
                 {/* Limpar Filtros Button */}
                 {activeFiltersCount > 0 && (
                   <button
@@ -4787,7 +4836,6 @@ export default function PedidosPage() {
                       setFilterContaAzulStatus('');
                       setFilterPedidosRelease('');
                       setFilterStage('');
-                      setFilterSize('');
                       if (typeof window !== 'undefined') {
                         localStorage.removeItem('pedidos_filter_customer');
                         localStorage.removeItem('pedidos_filter_seller');
@@ -4839,7 +4887,7 @@ export default function PedidosPage() {
             position: 'relative'
           }}
         >
-          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSize || filterSearchOrder) && filteredOrderItems.length === 0 && (
+          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSearchOrder) && filteredOrderItems.length === 0 && (
             <div style={{
               position: 'absolute',
               top: '40%',
@@ -5970,7 +6018,7 @@ export default function PedidosPage() {
                                 })()}
 
                                 <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-                                  {isAdmin && isManualOrder(parentOrder) && (
+                                  {canUserDeleteOrder(parentOrder) && (
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -5979,7 +6027,7 @@ export default function PedidosPage() {
                                       }}
                                       className="btn btn-danger"
                                       style={{ padding: '1px 4px', fontSize: '0.625rem', display: 'flex', alignItems: 'center', gap: '1px' }}
-                                      title="Excluir este pedido manual (Apenas Administrador)"
+                                      title={isManualOrder(parentOrder) ? "Excluir este pedido manual" : "Excluir este pedido"}
                                     >
                                       <Trash2 size={10} />
                                     </button>
@@ -6273,7 +6321,7 @@ export default function PedidosPage() {
       {isAdjustmentModalOpen && <AdjustmentModal {...{ adjustmentAction, adjustmentItem, adjustmentNotes, handleAdjustmentSubmit, loading, producedQuantity, resetAllBypasses, setAdjustmentAction, setAdjustmentNotes, setIsAdjustmentModalOpen, setProducedQuantity }} />}
 
       {/* MODAL DE CRIAÇÃO E EDIÇÃO DE PEDIDOS */}
-      {isModalOpen && <DetailModal {...{ CheckCircle2, customers, factoryLocations, formArtName, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
+      {isModalOpen && <DetailModal {...{ CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
 
       {/* ========================================
           MODAL DE AUTORIZAÇÃO DE RETROCESSO
@@ -6285,7 +6333,7 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {isShippingCrudModalOpen && <ShippingCrudModal {...{ createShippingTypeConfig, deleteShippingTypeConfig, loading, newShippingTypeName, setIsShippingCrudModalOpen, setLoading, setNewShippingTypeName, setShippingTypes, shippingTypes, user }} />}
 
-      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
+      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
 
       {/* ========================================
           MODAL CRUD DE SETORES DE PRODUÇÃO
@@ -6336,7 +6384,8 @@ export default function PedidosPage() {
           pvNumber: orderToDelete.pvNumber,
           customerName: orderToDelete.customerName,
           artName: orderToDelete.artName,
-          printRun: orderToDelete.printRun
+          printRun: orderToDelete.printRun,
+          isManual: orderToDelete.isManual
         } : null}
         isDeleting={isDeletingManualOrder}
         onClose={() => {

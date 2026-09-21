@@ -11,6 +11,7 @@ import Image from 'next/image';
 
 export function DetailViewModal(props: any) {
   const {
+    canUserDeleteOrder,
     isBusinessDays,
     Copy,
     CopyButton,
@@ -1076,7 +1077,7 @@ export function DetailViewModal(props: any) {
                 </button>
 
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {isAdmin && isManualOrder(order) && (
+                  {order && (canUserDeleteOrder ? canUserDeleteOrder(order) : (isAdmin && (user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com' || user?.can_delete_any_order || isManualOrder(order)))) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1085,10 +1086,10 @@ export function DetailViewModal(props: any) {
                       }}
                       className="btn btn-danger"
                       style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                      title="Excluir este pedido manual definitivamente"
+                      title={isManualOrder(order) ? "Excluir este pedido manual definitivamente" : "Excluir este pedido definitivamente"}
                     >
                       <Trash2 size={13} />
-                      <span>Excluir Pedido Manual</span>
+                      <span>{isManualOrder(order) ? 'Excluir Pedido Manual' : 'Excluir Pedido'}</span>
                     </button>
                   )}
 
