@@ -130,20 +130,23 @@ export function DetailModal(props: any) {
   }, [formCustomer, user?.tenant_id]);
 
   const updateFormItem = (index: number, field: string, value: any) => {
-    if (!setFormItems || !formItems) return;
-    const newItems = [...formItems];
-    newItems[index] = { ...newItems[index], [field]: value };
-    setFormItems(newItems);
+    if (!setFormItems) return;
+    setFormItems((prev: any[]) => {
+      if (!prev) return prev;
+      const newItems = [...prev];
+      newItems[index] = { ...newItems[index], [field]: value };
+      return newItems;
+    });
   };
 
   const addFormItem = () => {
-    if (!setFormItems || !formItems) return;
-    setFormItems([...formItems, { id: Date.now(), artName: '', productId: '', selectedStock: null, measure: '', printRun: '', machineId: '', sector: '' }]);
+    if (!setFormItems) return;
+    setFormItems((prev: any[]) => prev ? [...prev, { id: Date.now(), artName: '', productId: '', selectedStock: null, measure: '', printRun: '', machineId: '', sector: '' }] : []);
   };
 
   const removeFormItem = (index: number) => {
-    if (!setFormItems || !formItems) return;
-    setFormItems(formItems.filter((_, i) => i !== index));
+    if (!setFormItems) return;
+    setFormItems((prev: any[]) => prev ? prev.filter((_, i) => i !== index) : []);
   };
 
   // Fechar menu suspenso de clientes ao clicar fora
