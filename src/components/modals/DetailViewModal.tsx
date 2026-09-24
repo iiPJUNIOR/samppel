@@ -5,7 +5,7 @@ import {
   X, Search, AlertTriangle, Users, Plus, Trash2, ChevronDown, 
   Info, Package, Truck, MapPin, FileText, Calendar, DollarSign, 
   CreditCard, Check, AlertCircle, Save, CheckCircle2, Factory,
-  Clock, Printer, PenTool, TrendingUp, HelpCircle
+  Clock, Printer, PenTool, TrendingUp, HelpCircle, ArrowRightLeft
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -51,7 +51,9 @@ export function DetailViewModal(props: any) {
     showToast,
     stages,
     syncingSingleOrder,
-    user
+    user,
+    setItemToMoveStage,
+    setIsMoveStageModalOpen
   } = props;
 
         const order = detailItem.order || {};
@@ -172,6 +174,22 @@ export function DetailViewModal(props: any) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginLeft: 'auto' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailModalOpen(false);
+                      if (setItemToMoveStage && setIsMoveStageModalOpen) {
+                        setItemToMoveStage(detailItem);
+                        setIsMoveStageModalOpen(true);
+                      }
+                    }}
+                    className="btn btn-secondary"
+                    title="Mover este pedido de etapa (PIN)"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap', fontWeight: 700 }}
+                  >
+                    <ArrowRightLeft size={12} />
+                    <span>Mover Etapa</span>
+                  </button>
                   {(!user?.role || user.role !== 'Produção' || currentStage?.name === 'Em produção') && (
                     <button
                       onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}

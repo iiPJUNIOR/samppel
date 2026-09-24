@@ -11,6 +11,8 @@ import { searchCustomers } from '@/services/supabase';
 
 export function DetailModal(props: any) {
   const {
+    formItems,
+    setFormItems,
     CheckCircle2,
     canUserDeleteOrder,
     customers,
@@ -127,6 +129,23 @@ export function DetailModal(props: any) {
     return () => clearTimeout(timer);
   }, [formCustomer, user?.tenant_id]);
 
+  const updateFormItem = (index: number, field: string, value: any) => {
+    if (!setFormItems || !formItems) return;
+    const newItems = [...formItems];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setFormItems(newItems);
+  };
+
+  const addFormItem = () => {
+    if (!setFormItems || !formItems) return;
+    setFormItems([...formItems, { id: Date.now(), artName: '', productId: '', selectedStock: null, measure: '', printRun: '', machineId: '', sector: '' }]);
+  };
+
+  const removeFormItem = (index: number) => {
+    if (!setFormItems || !formItems) return;
+    setFormItems(formItems.filter((_, i) => i !== index));
+  };
+
   // Fechar menu suspenso de clientes ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -239,7 +258,11 @@ export function DetailModal(props: any) {
                 <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--border)', flexShrink: 0 }} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
-                    {modalType === 'create' ? 'Cadastrar Novo Pedido' : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
+                    {modalType === 'create-op'
+                      ? 'Cadastrar Ordem de Produção (OP)'
+                      : modalType === 'create'
+                        ? 'Cadastrar Novo Pedido'
+                        : (isReadOnlyForForm('customer') ? 'Detalhes do Pedido' : 'Editar Informações do Pedido')}
                   </h3>
                   {modalType === 'edit' && selectedOrder && (
                     !isManualOrder(selectedOrder) ? (
@@ -282,7 +305,7 @@ export function DetailModal(props: any) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
 
                 {/* Seleção do Destino Inicial */}
-                {modalType === 'create' && (
+                {(modalType === 'create' || modalType === 'create-op') && (
                   <div className="form-group" style={{ backgroundColor: 'rgba(37, 99, 235, 0.05)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
                     <label className="form-label" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.85rem', marginBottom: '0.4rem', display: 'block' }}>
                       Destino Inicial do Pedido
@@ -505,7 +528,163 @@ export function DetailModal(props: any) {
                   )}
                 </div>
 
-                {/* Produto / Arte da Embalagem (Obrigatório - Digite ou selecione do catálogo) */}
+                
+                {(modalType === 'create' || modalType === 'create-op') && formItems ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '1.5rem', marginTop: '1rem' }}>
+                    {formItems.map((item: any, index: number) => (
+                      <div key={item.id || index} style={{ padding: '1.25rem', backgroundColor: 'var(--surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px dashed var(--border)' }}>
+                          <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text)', fontWeight: 700 }}>Item {index + 1}</h4>
+                          {index > 0 && (
+                            <button type="button" onClick={() => removeFormItem(index)} style={{ color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+                              Remover Item
+                            </button>
+                          )}
+                        </div>
+                        
+{/* Produto / Arte da Embalagem (Obrigatório - Digite ou selecione do catálogo) */}
+                <div className="form-group">
+                  <label className="form-label">Produto / Arte da Embalagem *</label>
+                  <input
+                    type="text"
+                    list="products-list"
+                    className="form-input"
+                    required
+                    placeholder="Ex: SACOLA PARDA 32X24X11,5 (Digite ou selecione do catálogo)"
+                    value={item.artName}
+                    disabled={isReadOnlyForForm('art_name')}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      updateFormItem(index, 'artName', val);
+                      const valLower = val.trim().toLowerCase();
+                      const getDisplayVal = (p: any) => p.sku ? `[${p.sku}] ${p.name}` : p.name;
+                      const matched = products.find(p =>
+                        p.name.toLowerCase() === valLower ||
+                        getDisplayVal(p).toLowerCase() === valLower ||
+                        (p.sku && p.sku.toLowerCase() === valLower)
+                      );
+                      if (matched) {
+                        updateFormItem(index, 'productId', matched.id);
+                        updateFormItem(index, 'selectedStock', matched.stock_quantity);
+                        if (!item.measure) {
+                          updateFormItem(index, 'measure', getItemRealMeasure(matched));
+                        }
+                      } else {
+                        updateFormItem(index, 'productId', '');
+                        updateFormItem(index, 'selectedStock', null);
+                      }
+                    }}
+                  />
+                  <datalist id="products-list">
+                    {products.map(p => {
+                      const displayVal = p.sku ? `[${p.sku}] ${p.name}` : p.name;
+                      return (
+                        <option key={p.id} value={displayVal}>
+                          {displayVal} (Estoque: {Number(p.stock_quantity || 0).toLocaleString('pt-BR')} un)
+                        </option>
+                      );
+                    })}
+                  </datalist>
+                  {item.selectedStock !== null && (
+                    <span style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      color: item.selectedStock < item.printRun ? 'var(--danger)' : 'var(--success)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      marginTop: '2px'
+                    }}>
+                      {item.selectedStock < item.printRun ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
+                      Estoque disponível: {Number(item.selectedStock).toLocaleString('pt-BR')} un
+                    </span>
+                  )}
+                </div>
+
+                {/* Seleção de Máquina de Produção (Opcional) */}
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label className="form-label" style={{ margin: 0 }}>Máquina de Produção (Opcional)</label>
+                    {user?.role === 'Administrador' && (
+                      <button
+                        type="button"
+                        onClick={() => setIsMachineCrudModalOpen(true)}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: '20px', height: '20px', borderRadius: '4px',
+                          border: '1px solid var(--primary)', backgroundColor: 'rgba(37,99,235,0.08)',
+                          color: 'var(--primary)', cursor: 'pointer', fontSize: '0.9rem',
+                          fontWeight: 700, padding: 0, transition: 'all 0.15s ease'
+                        }}
+                        title="Gerenciar Máquinas de Produção"
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--primary)'; e.currentTarget.style.color = '#fff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(37,99,235,0.08)'; e.currentTarget.style.color = 'var(--primary)'; }}
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    className="form-select"
+                    value={item.machineId}
+                    disabled={isReadOnlyForForm('machine_id')}
+                    onChange={(e) => {
+                      const mId = e.target.value;
+                      updateFormItem(index, 'machineId', mId);
+                      const mach = productionMachines.find(m => m.id === mId);
+                      if (mach?.sector) {
+                        updateFormItem(index, 'sector', mach.sector as any);
+                      }
+                    }}
+                  >
+                    <option value="">— Nenhuma máquina vinculada —</option>
+                    {productionMachines.filter(m => m.status === 'ATIVO').map(m => (
+                      <option key={m.id} value={m.id}>{m.name} {m.sector ? `(${m.sector})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Medidas */}
+                <div className="form-group">
+                  <label className="form-label">Medidas Customizadas</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Ex: 20x15x8 cm"
+                    value={item.measure}
+                    disabled={isReadOnlyForForm('measure')}
+                    onChange={(e) => updateFormItem(index, 'measure', e.target.value)}
+                  />
+                </div>
+
+                {/* Tiragem (Opcional) */}
+                <div className="form-group">
+                  <label className="form-label">Tiragem Total (Unidades)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className="form-input"
+                    placeholder="Ex: 1000"
+                    value={item.printRun !== undefined && item.printRun !== null ? item.printRun : ''}
+                    disabled={isReadOnlyForForm('printRun')}
+                    onChange={(e) => {
+                      const cleanVal = e.target.value.replace(/\D/g, '');
+                      updateFormItem(index, 'printRun', cleanVal ? Number(cleanVal) : '');
+                    }}
+                  />
+                </div>
+
+                
+                      </div>
+                    ))}
+                    <button type="button" onClick={addFormItem} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px dashed var(--primary)', backgroundColor: 'transparent', color: 'var(--primary)', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem' }}>
+                      + Adicionar Outro Item / Produto Vinculado
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Produto / Arte da Embalagem (Obrigatório - Digite ou selecione do catálogo) */}
                 <div className="form-group">
                   <label className="form-label">Produto / Arte da Embalagem *</label>
                   <input
@@ -624,17 +803,26 @@ export function DetailModal(props: any) {
                 <div className="form-group">
                   <label className="form-label">Tiragem Total (Unidades)</label>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     className="form-input"
                     placeholder="Ex: 1000"
-                    value={formPrintRun || ''}
+                    value={formPrintRun !== undefined && formPrintRun !== null ? formPrintRun : ''}
                     disabled={isReadOnlyForForm('printRun')}
-                    onChange={(e) => setFormPrintRun(Number(e.target.value))}
+                    onChange={(e) => {
+                      const cleanVal = e.target.value.replace(/\D/g, '');
+                      setFormPrintRun(cleanVal ? Number(cleanVal) : '');
+                    }}
                   />
                 </div>
 
+                
+                  </>
+                )}
+                
                 {/* Tipo de Envio e Valor do Frete (Ocultos no cadastro de Novo Pedido, pois são fabricações para estoque) */}
-                {modalType !== 'create' && (
+                {(modalType !== 'create' && modalType !== 'create-op') && (
                   <>
                     <div className="form-group">
                       <label className="form-label">Tipo de Frete/Envio</label>
@@ -650,20 +838,6 @@ export function DetailModal(props: any) {
                         <option value="TRANSPORTADORA">Transportadora (Coleta)</option>
                       </select>
                     </div>
-
-                    {!hideMonetaryValues && (
-                      <div className="form-group">
-                        <label className="form-label">Valor do Frete (R$)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="form-input"
-                          value={formFreight}
-                          disabled={isReadOnlyForForm('freight')}
-                          onChange={(e) => setFormFreight(Number(e.target.value))}
-                        />
-                      </div>
-                    )}
                   </>
                 )}
 
@@ -767,6 +941,7 @@ export function DetailModal(props: any) {
                         className="form-input"
                         placeholder="Ex: 10 pacotes / 10 caixas"
                         value={formEmbalagem}
+                        disabled={isReadOnlyForForm('embalagem')}
                         onChange={(e) => setFormEmbalagem(e.target.value)}
                       />
                     </div>
@@ -777,6 +952,7 @@ export function DetailModal(props: any) {
                         className="form-input"
                         placeholder="Ex: 15 dias"
                         value={formPrazo}
+                        disabled={isReadOnlyForForm('prazo')}
                         onChange={(e) => setFormPrazo(e.target.value)}
                       />
                     </div>
@@ -787,6 +963,7 @@ export function DetailModal(props: any) {
                         className="form-input"
                         placeholder="Ex: Transportadora / Correio / Retira"
                         value={formFreteInfo}
+                        disabled={isReadOnlyForForm('freteInfo')}
                         onChange={(e) => setFormFreteInfo(e.target.value)}
                       />
                     </div>
@@ -797,6 +974,7 @@ export function DetailModal(props: any) {
                         className="form-input"
                         placeholder="Ex: Boleto / PIX / Cartão"
                         value={formMeioPag}
+                        disabled={isReadOnlyForForm('meioPag')}
                         onChange={(e) => setFormMeioPag(e.target.value)}
                       />
                     </div>
@@ -807,6 +985,7 @@ export function DetailModal(props: any) {
                         className="form-input"
                         placeholder="Ex: Faturado / Parcelado / À vista"
                         value={formFormaPag}
+                        disabled={isReadOnlyForForm('formaPag')}
                         onChange={(e) => setFormFormaPag(e.target.value)}
                       />
                     </div>
@@ -842,34 +1021,6 @@ export function DetailModal(props: any) {
                         onChange={(e) => setFormProductionStartDate(e.target.value)}
                       />
                     </div>
-
-                    {!hideMonetaryValues && (
-                      <>
-                        <div className="form-group">
-                          <label className="form-label">Total de Parcelas</label>
-                          <input
-                            type="number"
-                            min="1"
-                            className="form-input"
-                            value={formInstallmentsTotal}
-                            disabled={isReadOnlyForForm('installmentsTotal')}
-                            onChange={(e) => setFormInstallmentsTotal(Number(e.target.value))}
-                          />
-                        </div>
-
-                        <div className="form-group">
-                          <label className="form-label">Parcelas Pagas</label>
-                          <input
-                            type="number"
-                            min="0"
-                            className="form-input"
-                            value={formInstallmentsPaid}
-                            disabled={isReadOnlyForForm('installmentsPaid')}
-                            onChange={(e) => setFormInstallmentsPaid(Number(e.target.value))}
-                          />
-                        </div>
-                      </>
-                    )}
                   </div>
                 </div>
               )}
@@ -1115,7 +1266,7 @@ export function DetailModal(props: any) {
                   </button>
                   {(!isReadOnlyForForm('customer') || !isReadOnlyForForm('status') || !isReadOnlyForForm('machine_id')) && (
                     <button type="submit" className="btn btn-primary">
-                      {modalType === 'create' ? 'Salvar Pedido' : 'Salvar Alterações'}
+                      {modalType === 'create-op' ? 'Gerar OP' : modalType === 'create' ? 'Salvar Pedido' : 'Salvar Alterações'}
                     </button>
                   )}
                 </div>

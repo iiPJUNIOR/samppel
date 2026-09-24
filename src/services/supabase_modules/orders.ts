@@ -60,7 +60,6 @@ export async function createOrder(order: any) {
   
   if (isMockMode) {
     mockOrders.unshift(newOrder);
-    await adjustStock(newOrder.product_id, -newOrder.boxes_count, 'PEDIDO', `Pedido #${newOrder.order_number} cadastrado`, newOrder.tenant_id);
     const product = mockProducts.find(p => p.id === newOrder.product_id);
     const amount = (product ? product.price * newOrder.print_run : 0) + newOrder.freight_value;
     const customer = mockCustomers.find(c => c.id === newOrder.customer_id);
@@ -115,9 +114,6 @@ export async function createOrder(order: any) {
   
   const { data, error } = await getDbClient().from('orders').insert([orderToInsert]).select().single();
   if (!error && data) {
-    if (order.product_id) {
-      await adjustStock(data.product_id, -data.boxes_count, 'PEDIDO', `Pedido #${data.order_number} cadastrado`, data.tenant_id);
-    }
     
     const { data: prod } = await getDbClient().from('products').select('price').eq('id', data.product_id).single();
     const { data: cust } = await getDbClient().from('customers').select('name').eq('id', data.customer_id).single();

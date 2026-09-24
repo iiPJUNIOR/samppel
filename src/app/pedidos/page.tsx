@@ -535,7 +535,7 @@ export default function PedidosPage() {
 
   // Estados do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'create' | 'edit'>('create');
+  const [modalType, setModalType] = useState<'create' | 'edit' | 'create-op'>('create');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [syncingSingleOrder, setSyncingSingleOrder] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
@@ -1244,7 +1244,7 @@ export default function PedidosPage() {
   const [formCustomer, setFormCustomer] = useState('');
   const [formProduct, setFormProduct] = useState('');
   const [formMeasure, setFormMeasure] = useState('');
-  const [formPrintRun, setFormPrintRun] = useState(1000);
+  const [formPrintRun, setFormPrintRun] = useState<number | ''>(1000);
   const [formBoxes, setFormBoxes] = useState(1);
   const [formFreight, setFormFreight] = useState(0);
   const [formSeller, setFormSeller] = useState('');
@@ -1263,6 +1263,7 @@ export default function PedidosPage() {
   // Campos específicos da Kelly
   const [formPvNumber, setFormPvNumber] = useState('');
   const [formOpNumber, setFormOpNumber] = useState('');
+  const [formItems, setFormItems] = useState<any[]>([{ id: Date.now(), artName: '', productId: '', selectedStock: null, measure: '', printRun: '', machineId: '', sector: '' }]);
   const [formArtName, setFormArtName] = useState('');
   const [formPackagingType, setFormPackagingType] = useState<'CAIXA' | 'PACOTE'>('CAIXA');
   const [formShippingType, setFormShippingType] = useState<string>('SEM_FRETE');
@@ -1619,9 +1620,9 @@ export default function PedidosPage() {
     // ---------------------------------------------------------------
     // RESOLVER OPERADOR AUTENTICADO DA MOVIMENTAÇÃO CORRENTE
     // ---------------------------------------------------------------
-    const isAdmin = user?.role === 'Administrador';
-    const activeOpId = operatorId || currentOperator.current?.id || (isAdmin ? user?.id : null);
-    const activeOpName = operatorName || currentOperator.current?.name || (isAdmin ? (user?.full_name || user?.email) : null);
+    const isFactoryUser = Boolean(user?.role === 'Produção' || user?.role === 'Fábrica' || user?.is_factory_account);
+    const activeOpId = operatorId || currentOperator.current?.id || (!isFactoryUser ? user?.id : null);
+    const activeOpName = operatorName || currentOperator.current?.name || (!isFactoryUser ? (user?.full_name || user?.email) : null);
 
     // Se o operatorId veio como parâmetro direto da autenticação bem-sucedida, salvamos na ref
     if (operatorId && operatorName) {
@@ -1631,7 +1632,6 @@ export default function PedidosPage() {
     // ---------------------------------------------------------------
     // REGRA DE AUTENTICAÇÃO SECUNDÁRIA DO OPERADOR (EXIGIDO APENAS PARA FÁBRICA)
     // ---------------------------------------------------------------
-    const isFactoryUser = user?.role === 'Produção' || user?.role === 'Fábrica' || user?.is_factory_account;
     if (isFactoryUser && !activeOpId) {
       setPendingKanbanMove({ item, targetStageId });
       setIsOpAuthOpen(true);
@@ -2120,22 +2120,66 @@ export default function PedidosPage() {
           await updateOrder(item.order_id, { production_start_date: todayStr });
         }
 
-        // BAIXA AUTOMÁTICA DE ESTOQUE
-        if (isEnteringProductionOrStock && item.product_id) {
+        // BAIXA / ENTRADA AUTOMÁTICA DE ESTOQUE (COM IDEMPOTÊNCIA)
+        if (item.product_id) {
+          const friendlyId = item.friendly_id || item.order?.pv_number || item.order?.op_number || item.order_id;
+          const isOp = (friendlyId || '').toUpperCase().startsWith('OP-') || item.order?.initial_destination === 'ESTOQUE';
           const qtyRequired = item.print_run || item.quantity || 1;
           const userTenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-          try {
-            await adjustStock(
-              item.product_id,
-              -qtyRequired, // negative because it's a deduction
-              'PEDIDO',
-              `Baixa automática pelo Pedido ${item.order?.pv_number || item.order_id} - Entrou em ${targetStage.name}`,
-              userTenantId,
-              user?.id || null,
-              true // allow negative
-            );
-          } catch (stockErr) {
-            console.error('Erro ao baixar estoque automaticamente:', stockErr);
+
+          // Checa se ja houve transação de estoque gravada para este item específico
+          let hasExistingTx = false;
+          if (supabase) {
+            try {
+              const { data: existingTx } = await supabase
+                .from('stock_transactions')
+                .select('id')
+                .eq('product_id', item.product_id)
+                .ilike('description', `%[ITEM:${item.id}]%`)
+                .limit(1);
+              if (existingTx && existingTx.length > 0) {
+                hasExistingTx = true;
+              }
+            } catch (chkErr) {
+              console.warn('Aviso ao checar transacoes anteriores de estoque:', chkErr);
+            }
+          }
+
+          if (isOp) {
+            // Se for OP de Estoque e entrou na etapa Estoque ou Concluído -> SOMA ao estoque (ENTRADA)
+            const isEnteringStock = targetStage.name === 'Estoque' || targetStage.name === 'Concluído';
+            if (isEnteringStock && !hasExistingTx) {
+              try {
+                await adjustStock(
+                  item.product_id,
+                  qtyRequired, // positivo: alimenta o estoque
+                  'ENTRADA',
+                  `[ITEM:${item.id}] [OP] Entrada de Estoque - OP ${friendlyId} entrou em ${targetStage.name}`,
+                  userTenantId,
+                  activeOpId || user?.id || null,
+                  true
+                );
+              } catch (opStockErr) {
+                console.error('Erro ao dar entrada de estoque da OP:', opStockErr);
+              }
+            }
+          } else {
+            // Se for Pedido Comercial saindo da coluna inicial para Produção/Estoque -> BAIXA (apenas uma vez)
+            if (isEnteringProductionOrStock && !hasExistingTx) {
+              try {
+                await adjustStock(
+                  item.product_id,
+                  -qtyRequired, // negativo: baixa de estoque
+                  'PEDIDO',
+                  `[ITEM:${item.id}] [BAIXA] Baixa automática pelo Pedido ${friendlyId} - Entrou em ${targetStage.name}`,
+                  userTenantId,
+                  activeOpId || user?.id || null,
+                  true // allow negative
+                );
+              } catch (stockErr) {
+                console.error('Erro ao baixar estoque automaticamente:', stockErr);
+              }
+            }
           }
         }
 
@@ -3112,6 +3156,46 @@ export default function PedidosPage() {
     setFormOverShortQuantity(0);
     setFormPhysicalLocation('Salão');
     setFormProductionStartDate('');
+    setFormItems([{ id: Date.now(), artName: '', productId: '', selectedStock: null, measure: '', printRun: '', machineId: '', sector: '' }]);
+    setIsModalOpen(true);
+  };
+
+  // Abrir modal para Criação de OP (Estoque)
+  const handleOpenCreateOp = () => {
+    setModalType('create-op');
+    setSelectedOrder(null);
+    setSelectedItem(null);
+    setFormCustomer('');
+    setFormProduct('');
+    setFormMeasure('');
+    setFormPrintRun(1000);
+    setFormBoxes(1);
+    setFormFreight(0);
+    setFormSeller(user?.role === 'Comercial' ? user.full_name.split(' ')[0] : 'Fábrica');
+    setFormNotes('');
+    setFormInternalNotes('');
+    setFormInitialDestination('ESTOQUE');
+
+    const estoqueStage = stages.find(s => s.name === 'Estoque') || stages[0];
+    setFormStageId(estoqueStage?.id || '');
+    setFormStatus(estoqueStage?.name || 'Estoque');
+    setFormSector('Estoque');
+    setFormMachineId('');
+    setFormHandlingTeamId('');
+    setFormHandlingAllocations([]);
+
+    setFormPvNumber(`OP-${Date.now().toString().substring(8)}`);
+    setFormOpNumber('');
+    setFormArtName('');
+    setFormPackagingType('CAIXA');
+    setFormShippingType('SEM_FRETE');
+    setFormFirstPaymentDate('');
+    setFormInstallmentsTotal(1);
+    setFormInstallmentsPaid(0);
+    setFormOverShortQuantity(0);
+    setFormPhysicalLocation('Salão');
+    setFormProductionStartDate('');
+    setFormItems([{ id: Date.now(), artName: '', productId: '', selectedStock: null, measure: '', printRun: '', machineId: '', sector: '' }]);
     setIsModalOpen(true);
   };
 
@@ -3820,11 +3904,21 @@ export default function PedidosPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (modalType === 'create') {
-      const productNameOrArt = formArtName.trim();
+    if ((modalType === 'create' || modalType === 'create-op')) {
+      const isMulti = typeof formItems !== 'undefined' && formItems && formItems.length > 0;
+      const productNameOrArt = (isMulti && formItems[0].artName) ? formItems[0].artName.trim() : formArtName.trim();
       if (!productNameOrArt) {
         alert('Por favor, informe ou selecione o Produto / Arte da Embalagem.');
         return;
+      }
+
+      if (isMulti && formItems.length > 1) {
+        for (let i = 1; i < formItems.length; i++) {
+          if (!formItems[i].artName || !formItems[i].artName.trim()) {
+            alert(`Por favor, informe o Produto / Arte da Embalagem do Item ${i + 1}.`);
+            return;
+          }
+        }
       }
 
       // Destino Inicial Obrigatório: Produção ou Estoque (Nunca Pedidos)
@@ -3844,12 +3938,28 @@ export default function PedidosPage() {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
       const resolvedCustomerId = await resolveCustomerId(formCustomer);
 
+      let orderArtName = productNameOrArt;
+      let orderMeasure = formMeasure;
+      let orderPrintRun = Number(formPrintRun);
+      let orderProductId = formProduct;
+      let orderMachineId = formMachineId;
+      let orderSector = formSector;
+
+      if ((modalType === "create" || modalType === "create-op") && typeof formItems !== 'undefined' && formItems && formItems.length > 0) {
+        orderArtName = formItems[0].artName;
+        orderMeasure = formItems[0].measure;
+        orderPrintRun = Number(formItems[0].printRun);
+        orderProductId = formItems[0].productId;
+        orderMachineId = formItems[0].machineId;
+        orderSector = formItems[0].sector;
+      }
+
       const orderPayload = {
         tenant_id: tenantId,
         customer_id: resolvedCustomerId || null,
-        product_id: formProduct || null,
-        measure: formMeasure,
-        print_run: Number(formPrintRun),
+        product_id: orderProductId || null,
+        measure: orderMeasure,
+        print_run: orderPrintRun,
         boxes_count: Number(formBoxes),
         freight_value: 0,
         seller_name: formSeller || 'Vendas Samppel',
@@ -3857,12 +3967,12 @@ export default function PedidosPage() {
         internal_notes: formInternalNotes,
         status: targetStatus,
         stage_id: targetStage?.id || null,
-        production_sector: targetSector,
+        production_sector: orderSector || targetSector,
         order_date: new Date().toISOString(),
 
         pv_number: formPvNumber || `PV-${Date.now().toString().substring(8)}`,
         op_number: formOpNumber || null,
-        art_name: productNameOrArt,
+        art_name: orderArtName,
         packaging_type: formPackagingType,
         shipping_type: 'SEM_FRETE',
         first_payment_date: formFirstPaymentDate || null,
@@ -3877,29 +3987,37 @@ export default function PedidosPage() {
       if (error) {
         alert('Erro ao criar pedido: ' + error.message);
       } else if (newOrder) {
-        // Criar o item de pedido inicial correspondente
-        const firstItemPayload = {
-          tenant_id: newOrder.tenant_id,
-          order_id: newOrder.id,
-          product_id: newOrder.product_id,
-          item_type: 'PRODUTO' as const,
-          name: productNameOrArt,
-          measure: newOrder.measure,
-          print_run: newOrder.print_run,
-          boxes_count: newOrder.boxes_count,
-          packaging_type: newOrder.packaging_type,
-          over_short_quantity: newOrder.over_short_quantity,
-          status: newOrder.status,
-          production_sector: newOrder.production_sector,
-          stage_id: newOrder.stage_id,
-          machine_id: formMachineId || null,
-          handling_team_id: null,
-          physical_location: newOrder.physical_location,
-          notes: newOrder.notes
-        };
-        const itemRes = await createOrderItem(firstItemPayload);
-        if (itemRes.error) {
-          console.error('Erro ao criar item inicial do pedido:', itemRes.error);
+        const itemsToCreate = (modalType === 'create' || modalType === 'create-op') && typeof formItems !== 'undefined' && formItems && formItems.length > 0
+          ? formItems
+          : [{ artName: productNameOrArt, productId: newOrder.product_id, measure: newOrder.measure, printRun: newOrder.print_run, machineId: formMachineId, sector: newOrder.production_sector }];
+
+        for (let i = 0; i < itemsToCreate.length; i++) {
+          const it = itemsToCreate[i];
+          const friendlyId = itemsToCreate.length > 1 ? `${newOrder.pv_number}/${i + 1}` : null;
+          const firstItemPayload = {
+            tenant_id: newOrder.tenant_id,
+            order_id: newOrder.id,
+            product_id: it.productId || null,
+            item_type: 'PRODUTO' as const,
+            name: it.artName,
+            measure: it.measure,
+            print_run: Number(it.printRun) || 0,
+            boxes_count: newOrder.boxes_count,
+            packaging_type: newOrder.packaging_type,
+            over_short_quantity: newOrder.over_short_quantity,
+            status: newOrder.status,
+            production_sector: it.sector || newOrder.production_sector,
+            stage_id: newOrder.stage_id,
+            machine_id: it.machineId || null,
+            handling_team_id: null,
+            physical_location: newOrder.physical_location,
+            notes: newOrder.notes,
+            friendly_id: friendlyId
+          };
+          const itemRes = await createOrderItem(firstItemPayload);
+          if (itemRes.error) {
+            console.error('Erro ao criar item do pedido:', itemRes.error);
+          }
         }
         setIsModalOpen(false);
         fetchAllData();
@@ -4082,7 +4200,16 @@ export default function PedidosPage() {
       matchSearchOrder = orderDirectMatch || anyItemMatches;
     }
 
-    const matchContaAzulStatus = filterContaAzulStatus ? order.conta_azul_status === filterContaAzulStatus : true;
+    let matchContaAzulStatus = true;
+    if (filterContaAzulStatus) {
+      if (filterContaAzulStatus === 'Faturado') {
+        const orderDetails = extractOrderDetails(order.notes);
+        const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
+        matchContaAzulStatus = order.conta_azul_status === 'Faturado' || !!isFaturado;
+      } else {
+        matchContaAzulStatus = order.conta_azul_status === filterContaAzulStatus;
+      }
+    }
     return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
   });
 
@@ -4237,7 +4364,16 @@ export default function PedidosPage() {
 
       matchSearchOrder = matchPvOrOp || matchMeasureOrSize || matchName;
     }
-    const matchContaAzulStatus = filterContaAzulStatus ? parentOrder.conta_azul_status === filterContaAzulStatus : true;
+    let matchContaAzulStatus = true;
+    if (filterContaAzulStatus) {
+      if (filterContaAzulStatus === 'Faturado') {
+        const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+        const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
+        matchContaAzulStatus = parentOrder.conta_azul_status === 'Faturado' || !!isFaturado;
+      } else {
+        matchContaAzulStatus = parentOrder.conta_azul_status === filterContaAzulStatus;
+      }
+    }
 
     // Filtro para a Fase "Pedidos" / Liberação
     let matchPedidosRelease = true;
@@ -4305,7 +4441,7 @@ export default function PedidosPage() {
   const canCreate = user?.role === 'Administrador' || user?.role === 'Supervisão' || user?.role === 'Comercial' || user?.role === 'Vendedor';
 
   const isReadOnlyForForm = (field: string) => {
-    if (modalType === 'create') return false;
+    if ((modalType === 'create' || modalType === 'create-op')) return false;
     if (user?.role === 'Administrador' || user?.role === 'Supervisão' || user?.role === 'Comercial' || user?.role === 'Vendedor') return false;
 
     // Se o usuário for Produção ou Fábrica:
@@ -4512,7 +4648,7 @@ export default function PedidosPage() {
                 {/* Botão Novo Pedido */}
                 <button
                   type="button"
-                  onClick={handleOpenCreate}
+                  onClick={() => { setFormItems([{ id: Date.now(), artName: "", productId: "", selectedStock: null, measure: "", printRun: "", machineId: "", sector: "" }]); handleOpenCreate(); }}
                   className="btn btn-primary"
                   style={{
                     height: '32px', display: 'inline-flex', gap: '0.4rem', alignItems: 'center',
@@ -4520,10 +4656,25 @@ export default function PedidosPage() {
                     backgroundColor: '#10b981', borderColor: '#10b981', color: '#ffffff',
                     whiteSpace: 'nowrap', flexShrink: 0, borderRadius: 'var(--radius-md)', boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
                   }}
-                  title="Cadastrar Novo Pedido Manualmente (Produção ou Estoque)"
+                  title="Cadastrar Novo Pedido Manualmente"
                 >
                   <Plus size={16} />
                   <span>Novo Pedido</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenCreateOp}
+                  className="btn"
+                  style={{
+                    height: '32px', display: 'inline-flex', gap: '0.4rem', alignItems: 'center',
+                    padding: '0.35rem 0.85rem', fontSize: '0.78rem', fontWeight: 700,
+                    backgroundColor: 'var(--primary)', borderColor: 'var(--primary)', color: '#ffffff',
+                    whiteSpace: 'nowrap', flexShrink: 0, borderRadius: 'var(--radius-md)', boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)'
+                  }}
+                  title="Cadastrar Ordem de Produção para Estoque"
+                >
+                  <Plus size={16} />
+                  <span>Gerar OP</span>
                 </button>
 
                 {/* Card de Importação Conta Azul */}
@@ -4911,7 +5062,7 @@ export default function PedidosPage() {
           {(() => {
             const columns = [...visibleStages.map((s) => ({ ...s, isVirtual: false, originalIdx: stages.findIndex(stg => stg.id === s.id) }))];
             if (columns.length > 0) {
-              columns.push({
+              columns.unshift({
                 id: 'virtual-delayed',
                 name: 'Atrasados',
                 color: '#ef4444',
@@ -5675,7 +5826,7 @@ export default function PedidosPage() {
                               <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
                                 <span>Vend: {parentOrder.seller_name || 'Samppel'}</span>
 
-                                {/* Botão Mover de Etapa (Mobile) */}
+                                {/* Botão Mover de Etapa (Tablets e Mobile) */}
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -5686,20 +5837,25 @@ export default function PedidosPage() {
                                     }
                                   }}
                                   disabled={!canUserMoveItemStage(item)}
-                                  className="btn btn-secondary mobile-only-flex"
+                                  className="btn btn-secondary"
                                   style={{
-                                    fontSize: '0.62rem',
-                                    padding: '1px 6px',
-                                    height: '22px',
+                                    fontSize: '0.66rem',
+                                    padding: '2px 8px',
+                                    height: '24px',
+                                    display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '0.2rem',
-                                    fontWeight: 600,
+                                    gap: '0.25rem',
+                                    fontWeight: 700,
                                     opacity: canUserMoveItemStage(item) ? 1 : 0.45,
-                                    cursor: canUserMoveItemStage(item) ? 'pointer' : 'not-allowed'
+                                    cursor: canUserMoveItemStage(item) ? 'pointer' : 'not-allowed',
+                                    borderRadius: 'var(--radius-sm, 4px)',
+                                    backgroundColor: 'rgba(var(--primary-rgb), 0.08)',
+                                    color: 'var(--primary)',
+                                    borderColor: 'rgba(var(--primary-rgb), 0.25)'
                                   }}
-                                  title={canUserMoveItemStage(item) ? 'Mover este pedido de etapa' : 'Sem permissão para mover de etapa'}
+                                  title={canUserMoveItemStage(item) ? 'Mover este pedido de etapa (PIN)' : 'Sem permissão para mover de etapa'}
                                 >
-                                  <ArrowRightLeft size={10} />
+                                  <ArrowRightLeft size={11} />
                                   <span>Mover</span>
                                 </button>
                               </div>
@@ -6321,7 +6477,7 @@ export default function PedidosPage() {
       {isAdjustmentModalOpen && <AdjustmentModal {...{ adjustmentAction, adjustmentItem, adjustmentNotes, handleAdjustmentSubmit, loading, producedQuantity, resetAllBypasses, setAdjustmentAction, setAdjustmentNotes, setIsAdjustmentModalOpen, setProducedQuantity }} />}
 
       {/* MODAL DE CRIAÇÃO E EDIÇÃO DE PEDIDOS */}
-      {isModalOpen && <DetailModal {...{ CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
+      {isModalOpen && <DetailModal {...{ formItems, setFormItems,  CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
 
       {/* ========================================
           MODAL DE AUTORIZAÇÃO DE RETROCESSO
@@ -6333,7 +6489,7 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {isShippingCrudModalOpen && <ShippingCrudModal {...{ createShippingTypeConfig, deleteShippingTypeConfig, loading, newShippingTypeName, setIsShippingCrudModalOpen, setLoading, setNewShippingTypeName, setShippingTypes, shippingTypes, user }} />}
 
-      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
+      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, setIsMoveStageModalOpen, setItemToMoveStage, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
 
       {/* ========================================
           MODAL CRUD DE SETORES DE PRODUÇÃO
@@ -6360,8 +6516,8 @@ export default function PedidosPage() {
       {/* MODAL DIDÁTICO: ALERTA DE PEDIDO BLOQUEADO (AGUARDANDO PAGAMENTO / SINAL) */}
       {isBlockedPaymentModalOpen && <BlockedPaymentModal {...{ RefreshCw, blockedPaymentItem, blockedPaymentTargetStageId, blockedSyncFeedback, checkIsDelayed, handleCancelBlockedPaymentMove, handleConfirmBlockedPaymentMove, handleSyncSingleOrder, hasOverdueInstallments, importing, stages }} />}
 
-      {/* MODAL DE MOVER PEDIDO DE ETAPA (MOBILE / MANUAL) */}
-      {isMoveStageModalOpen && <MoveStageModal {...{ ArrowRightLeft, itemToMoveStage, moveOrderItemToStage, setIsMoveStageModalOpen, setItemToMoveStage, stages }} />}
+      {/* MODAL DE MOVER PEDIDO DE ETAPA (MOBILE / TABLETS / MANUAL COM PIN) */}
+      {isMoveStageModalOpen && <MoveStageModal {...{ ArrowRightLeft, itemToMoveStage, moveOrderItemToStage, setIsMoveStageModalOpen, setItemToMoveStage, stages, tenantId: user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', user }} />}
 
       {/* MODAL CRUD: GERENCIAR LOCALIZAÇÕES FÍSICAS NA FÁBRICA */}
       {isLocationCrudModalOpen && <LocationCrudModal {...{ Edit3, Loader2, editingLocation, factoryLocations, handleDeleteLocationClick, handleEditLocationClick, handleSaveLocation, locationName, locationStatus, setEditingLocation, setIsLocationCrudModalOpen, setLocationName, setLocationStatus, submittingLocation }} />}

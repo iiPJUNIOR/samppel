@@ -325,10 +325,10 @@ export function ExpeditionTransitionModal(props: any) {
                               >
                                 {diffQty > 0 ? (
                                   <>
-                                    <option value="CREDITO_PROXIMO_PEDIDO">Cortesia / Crédito para o Próximo Pedido</option>
+                                    <option value="CREDITO_PROXIMO_PEDIDO">Crédito para o Próximo Pedido</option>
                                     <option value="GUARDAR_ESTOQUE_CLIENTE">Guardar no Estoque de Personalizados (Fábrica)</option>
                                     <option value="COBRADO_ADICIONAL">Cobrar Valor Adicional do Cliente</option>
-                                    <option value="OUTRO">Outro / Tratar Manualmente</option>
+                                    <option value="OUTRO">Cortesia</option>
                                   </>
                                 ) : (
                                   <>
