@@ -1979,9 +1979,7 @@ export default function PedidosPage() {
     if (user && user.role !== 'Administrador' && !activeOpId) {
       // 1. Vendedor(a) regular
       if (isVendedor) {
-        const userFirstName = user.full_name.split(' ')[0].toLowerCase();
-        const sellerNameLower = (item.order?.seller_name || '').toLowerCase();
-        if (!sellerNameLower.includes(userFirstName)) {
+        if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
           alert('Permissão Negada: Vendedores só podem movimentar seus próprios pedidos.');
           return;
         }
@@ -4123,24 +4121,27 @@ export default function PedidosPage() {
       const userPerms = sellerPermsMap[user.id];
 
       if (!userPerms) {
-        // Fallback por primeiro nome caso não configurado ainda em Ajustes
-        const userFirstName = user.full_name.split(' ')[0].toLowerCase();
-        const sellerNameLower = (sellerName || '').toLowerCase();
-        return sellerNameLower.includes(userFirstName);
+        // Fallback: usar igualdade exata para evitar que "Lucas" veja "Lucas Silva" se forem pessoas diferentes.
+        // O administrador deve configurar corretamente em Ajustes -> Permissões de Vendedor caso os nomes não batam exatamente.
+        const userFullNameLower = (user.full_name || '').toLowerCase().trim();
+        const sellerNameLower = (sellerName || '').toLowerCase().trim();
+        if (!sellerNameLower) return false;
+        
+        return sellerNameLower === userFullNameLower;
       }
 
       const mode = userPerms.seller_access_mode || 'OWN';
       if (mode === 'ALL' || (userPerms.allowed_sellers || []).includes('*')) return true;
 
-      const primary = (userPerms.primary_seller_name || '').toLowerCase();
-      const sLower = (sellerName || '').toLowerCase();
+      const primary = (userPerms.primary_seller_name || '').toLowerCase().trim();
+      const sLower = (sellerName || '').toLowerCase().trim();
 
-      // Se coincidir com o vendedor principal vinculado
-      if (primary && (sLower.includes(primary) || primary.includes(sLower))) return true;
+      // Se coincidir EXATAMENTE com o vendedor principal vinculado
+      if (primary && primary === sLower) return true;
 
-      // Se coincidir com algum dos vendedores autorizados na lista
+      // Se coincidir EXATAMENTE com algum dos vendedores autorizados na lista
       const allowed = userPerms.allowed_sellers || [];
-      return allowed.some(a => a && (sLower.includes(a.toLowerCase()) || a.toLowerCase().includes(sLower)));
+      return allowed.some(a => a && a.toLowerCase().trim() === sLower);
     }
 
     return true;
