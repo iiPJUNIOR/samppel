@@ -170,7 +170,7 @@ export async function getProductsPaginated({
 
   let query = getDbClient()
     .from('products')
-    .select('*', { count: 'exact' })
+    .select('*, customer:customers(id, name, document)', { count: 'exact' })
     .eq('tenant_id', tenantId);
 
   // Filtro de Categoria por Aba
@@ -203,6 +203,7 @@ export async function getProductsPaginated({
 
   const mapped = (data || []).map((p: any) => ({
     ...p,
+    customer: p.customer || null,
     category: parseProductCategory(p),
     measure: parseProductMeasure(p),
     customer_id: parseProductCustomer(p),

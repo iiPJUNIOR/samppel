@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Check, ChevronDown, User, Building2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Search, X, Check, ChevronDown, Building2, Loader2 } from 'lucide-react';
+import { getCustomerById } from '@/services/supabase';
 
 export interface CustomerOption {
   id: string;
@@ -12,55 +13,191 @@ export interface CustomerOption {
 }
 
 interface SearchableCustomerSelectProps {
-  customers: CustomerOption[];
+  customers?: CustomerOption[];
+  initialCustomer?: CustomerOption | null;
   value: string;
-  onChange: (customerId: string) => void;
+  onChange: (customerId: string, customer?: CustomerOption) => void;
   placeholder?: string;
   disabled?: boolean;
   required?: boolean;
+  tenantId?: string;
 }
 
 export default function SearchableCustomerSelect({
   customers = [],
+  initialCustomer = null,
   value,
   onChange,
   placeholder = 'Buscar cliente por nome ou CNPJ/CPF...',
   disabled = false,
-  required = false
+  required = false,
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
 }: SearchableCustomerSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [remoteResults, setRemoteResults] = useState<CustomerOption[]>([]);
+  const [initialOptions, setInitialOptions] = useState<CustomerOption[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [cachedCustomer, setCachedCustomer] = useState<CustomerOption | null>(initialCustomer || null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 1. Resolução garantida do cliente selecionado pelo value
+  useEffect(() => {
+    if (!value) {
+      setCachedCustomer(null);
+      return;
+    }
+
+    // Se já está em cache
+    if (cachedCustomer && cachedCustomer.id === value) {
+      return;
+    }
+
+    // Procura nas listas locais existentes
+    const found =
+      customers.find(c => c.id === value) ||
+      remoteResults.find(c => c.id === value) ||
+      initialOptions.find(c => c.id === value);
+
+    if (found) {
+      setCachedCustomer(found);
+      return;
+    }
+
+    // Busca autoritativa pelo ID no servidor
+    let isCancelled = false;
+    getCustomerById(value, tenantId).then(res => {
+      if (!isCancelled && res.data) {
+        setCachedCustomer(res.data);
+      }
+    }).catch(err => {
+      console.warn('Erro ao resolver cliente por ID:', err);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [value, customers, remoteResults, initialOptions, cachedCustomer, tenantId]);
 
   const selectedCustomer = useMemo(() => {
-    return customers.find(c => c.id === value) || null;
-  }, [customers, value]);
+    if (!value) return null;
+    if (cachedCustomer && cachedCustomer.id === value) return cachedCustomer;
+    return (
+      customers.find(c => c.id === value) ||
+      remoteResults.find(c => c.id === value) ||
+      initialOptions.find(c => c.id === value) ||
+      null
+    );
+  }, [value, cachedCustomer, customers, remoteResults, initialOptions]);
 
-  // Normalização de texto para busca insensível a acentos e pontuação
-  const normalize = (str: string) => {
-    return (str || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]/g, '');
-  };
-
-  const filteredCustomers = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return customers;
+  // 2. Carrega opções iniciais ao abrir o dropdown caso estejam vazias
+  const fetchDefaultOptions = useCallback(async () => {
+    if (initialOptions.length > 0) return;
+    if (customers.length > 0) {
+      setInitialOptions(customers.slice(0, 30));
+      return;
     }
-    const cleanSearch = normalize(searchTerm);
-    return customers.filter(c => {
-      const nameMatch = normalize(c.name).includes(cleanSearch);
-      const docMatch = c.document && normalize(c.document).includes(cleanSearch);
-      const emailMatch = c.email && normalize(c.email).includes(cleanSearch);
-      return nameMatch || docMatch || emailMatch;
+
+    try {
+      const res = await fetch(`/api/customers/search?tenantId=${encodeURIComponent(tenantId)}&limit=30`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setInitialOptions(json.data);
+        }
+      }
+    } catch (err) {
+      console.warn('Falha ao carregar lista inicial de clientes:', err);
+    }
+  }, [initialOptions.length, customers, tenantId]);
+
+  // 3. Busca remota ultra-rápida na API Server-Side com debounce e cancelamento de requisições anteriores
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const term = searchTerm.trim();
+    if (!term) {
+      setRemoteResults([]);
+      setIsSearching(false);
+      fetchDefaultOptions();
+      return;
+    }
+
+    setIsSearching(true);
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const timer = setTimeout(async () => {
+      try {
+        const url = `/api/customers/search?q=${encodeURIComponent(term)}&tenantId=${encodeURIComponent(tenantId)}&limit=40`;
+        const res = await fetch(url, { signal: controller.signal });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            setRemoteResults(json.data);
+          }
+        }
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          console.error('Erro na pesquisa corporativa de clientes:', e);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [searchTerm, isOpen, tenantId, fetchDefaultOptions]);
+
+  // Limpa o AbortController ao desmontar
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  // 4. Lista combinada exibida no dropdown
+  const displayedCustomers = useMemo(() => {
+    const term = searchTerm.trim();
+    if (!term) {
+      const base = initialOptions.length > 0 ? initialOptions : customers.slice(0, 30);
+      if (selectedCustomer && !base.some(c => c.id === selectedCustomer.id)) {
+        return [selectedCustomer, ...base];
+      }
+      return base;
+    }
+
+    // Se houver busca remota ativa, exibe os resultados retornados pelo servidor
+    if (remoteResults.length > 0) {
+      return remoteResults;
+    }
+
+    // Se estiver aguardando busca ou sem resultados remotos, tenta filtrar itens locais
+    const cleanSearch = term.toLowerCase();
+    const localFiltered = (initialOptions.length > 0 ? initialOptions : customers).filter(c => {
+      const name = (c.name || '').toLowerCase();
+      const doc = (c.document || '').toLowerCase();
+      const email = (c.email || '').toLowerCase();
+      return name.includes(cleanSearch) || doc.includes(cleanSearch) || email.includes(cleanSearch);
     });
-  }, [customers, searchTerm]);
+
+    return localFiltered;
+  }, [searchTerm, remoteResults, initialOptions, customers, selectedCustomer]);
 
   // Fecha ao clicar fora
   useEffect(() => {
@@ -73,18 +210,20 @@ export default function SearchableCustomerSelect({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Foca no input ao abrir
+  // Foca no input e carrega dados ao abrir
   useEffect(() => {
     if (isOpen) {
       setSearchTerm('');
+      setRemoteResults([]);
       setHighlightedIndex(0);
+      fetchDefaultOptions();
       setTimeout(() => {
         inputRef.current?.focus();
       }, 50);
     }
-  }, [isOpen]);
+  }, [isOpen, fetchDefaultOptions]);
 
-  // Teclado
+  // Navegação por teclado
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isOpen) {
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
@@ -96,18 +235,20 @@ export default function SearchableCustomerSelect({
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightedIndex(prev => (prev + 1) % (filteredCustomers.length + 1));
+      setHighlightedIndex(prev => (prev + 1) % (displayedCustomers.length + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setHighlightedIndex(prev => (prev - 1 + filteredCustomers.length + 1) % (filteredCustomers.length + 1));
+      setHighlightedIndex(prev => (prev - 1 + displayedCustomers.length + 1) % (displayedCustomers.length + 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (highlightedIndex === 0) {
-        // Opção "Nenhum"
+        setCachedCustomer(null);
         onChange('');
         setIsOpen(false);
-      } else if (filteredCustomers[highlightedIndex - 1]) {
-        onChange(filteredCustomers[highlightedIndex - 1].id);
+      } else if (displayedCustomers[highlightedIndex - 1]) {
+        const chosen = displayedCustomers[highlightedIndex - 1];
+        setCachedCustomer(chosen);
+        onChange(chosen.id, chosen);
         setIsOpen(false);
       }
     } else if (e.key === 'Escape') {
@@ -168,6 +309,7 @@ export default function SearchableCustomerSelect({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                setCachedCustomer(null);
                 onChange('');
               }}
               style={{
@@ -211,7 +353,11 @@ export default function SearchableCustomerSelect({
         >
           {/* Campo de Pesquisa em Tempo Real */}
           <div style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.5rem', backgroundColor: 'var(--background)' }}>
-            <Search size={16} style={{ color: 'var(--text-muted)', marginLeft: '4px' }} />
+            {isSearching ? (
+              <Loader2 size={16} style={{ color: 'var(--primary)', marginLeft: '4px', animation: 'spin 1s linear infinite' }} />
+            ) : (
+              <Search size={16} style={{ color: 'var(--text-muted)', marginLeft: '4px' }} />
+            )}
             <input
               ref={inputRef}
               type="text"
@@ -230,7 +376,10 @@ export default function SearchableCustomerSelect({
             {searchTerm && (
               <button
                 type="button"
-                onClick={() => setSearchTerm('')}
+                onClick={() => {
+                  setSearchTerm('');
+                  setRemoteResults([]);
+                }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-muted)' }}
               >
                 <X size={14} />
@@ -250,6 +399,7 @@ export default function SearchableCustomerSelect({
             {/* Opção Desvincular / Nenhum */}
             <div
               onClick={() => {
+                setCachedCustomer(null);
                 onChange('');
                 setIsOpen(false);
               }}
@@ -269,12 +419,12 @@ export default function SearchableCustomerSelect({
               {!value && <Check size={14} style={{ color: 'var(--primary)' }} />}
             </div>
 
-            {filteredCustomers.length === 0 ? (
+            {displayedCustomers.length === 0 ? (
               <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Nenhum cliente encontrado para "{searchTerm}".
+                {isSearching ? 'Buscando clientes no banco de dados...' : `Nenhum cliente encontrado para "${searchTerm}".`}
               </div>
             ) : (
-              filteredCustomers.map((c, idx) => {
+              displayedCustomers.map((c, idx) => {
                 const isSelected = c.id === value;
                 const isHighlighted = highlightedIndex === idx + 1;
 
@@ -282,7 +432,8 @@ export default function SearchableCustomerSelect({
                   <div
                     key={c.id}
                     onClick={() => {
-                      onChange(c.id);
+                      setCachedCustomer(c);
+                      onChange(c.id, c);
                       setIsOpen(false);
                     }}
                     onMouseEnter={() => setHighlightedIndex(idx + 1)}

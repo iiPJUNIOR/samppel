@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getProducts, getProductsPaginated, getProductCategoryCounts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock, getCustomers } from '@/services/supabase';
+import { getProducts, getProductsPaginated, getProductCategoryCounts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import SearchableCustomerSelect from '@/components/SearchableCustomerSelect';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
@@ -277,7 +277,6 @@ export default function ProdutosPage() {
   const [formCategory, setFormCategory] = useState<'LISAS' | 'PERSONALIZADA' | 'COMPRA' | ''>('');
   const [formMeasure, setFormMeasure] = useState('');
   const [formCustomer, setFormCustomer] = useState('');
-  const [customers, setCustomers] = useState<any[]>([]);
 
   // Stock Adjustment Fields
   const [stockQtyChange, setStockQtyChange] = useState(100);
@@ -364,7 +363,7 @@ export default function ProdutosPage() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const [paginatedRes, countsRes, customStocksRes, customersRes] = await Promise.all([
+      const [paginatedRes, countsRes, customStocksRes] = await Promise.all([
         getProductsPaginated({
           page,
           pageSize,
@@ -373,8 +372,7 @@ export default function ProdutosPage() {
           tenantId: user?.tenant_id
         }),
         getProductCategoryCounts(user?.tenant_id),
-        getCustomerProductStock(undefined, undefined, user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'),
-        getCustomers(user?.tenant_id)
+        getCustomerProductStock(undefined, undefined, user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0')
       ]);
 
       setProducts(paginatedRes.data || []);
@@ -382,7 +380,6 @@ export default function ProdutosPage() {
       setTotalPages(paginatedRes.totalPages || 1);
       if (countsRes) setCategoryCounts(countsRes);
       setCustomStocks(customStocksRes.data || []);
-      setCustomers(customersRes.data || []);
     } catch (e) {
       console.error('Error fetching products:', e);
     } finally {
@@ -796,7 +793,7 @@ export default function ProdutosPage() {
                 </tr>
               ) : (
                 products.map((product) => {
-                  const linkedCust = customers.find(c => c.id === product.customer_id);
+                  const linkedCust = product.customer;
                   return (
                     <tr key={product.id}>
                       <td style={{ verticalAlign: 'middle', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1219,7 +1216,7 @@ export default function ProdutosPage() {
                   </label>
                   <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text)', marginTop: '0.25rem' }}>
                     {(() => {
-                      const linked = customers.find(c => c.id === detailProduct.customer_id);
+                      const linked = detailProduct.customer;
                       return linked ? `${linked.name} (${linked.document || 'Sem documento'})` : 'Nenhum cliente vinculado a este produto personalizado';
                     })()}
                   </div>
@@ -1377,9 +1374,9 @@ export default function ProdutosPage() {
                 <div className="form-group">
                   <label className="form-label">Cliente Vinculado (Opcional)</label>
                   <SearchableCustomerSelect
-                    customers={customers}
                     value={formCustomer}
                     onChange={setFormCustomer}
+                    tenantId={user?.tenant_id}
                     placeholder="Buscar cliente por nome ou CNPJ/CPF..."
                   />
                 </div>
@@ -1849,9 +1846,9 @@ export default function ProdutosPage() {
                   Selecione o Cliente Proprietário *
                 </label>
                 <SearchableCustomerSelect
-                  customers={customers}
                   value={selectedCustomerId}
                   onChange={setSelectedCustomerId}
+                  tenantId={user?.tenant_id}
                   placeholder="Buscar cliente por nome ou CNPJ/CPF..."
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
