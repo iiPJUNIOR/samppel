@@ -89,7 +89,8 @@ import {
   saveOrderItemShortage,
   resolveOrderItemShortage,
   type OrderItemShortage,
-  supabase
+  supabase,
+  getDbClient
 } from '@/services/supabase';
 import { parseDeadlineFromNotes, isCardOverdue, calculateExpeditionDate, detectScopeDays } from '@/services/deadline_service';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
@@ -2120,16 +2121,31 @@ export default function PedidosPage() {
 
         // BAIXA / ENTRADA AUTOMÁTICA DE ESTOQUE (COM IDEMPOTÊNCIA)
         if (item.product_id) {
-          const friendlyId = item.friendly_id || item.order?.pv_number || item.order?.op_number || item.order_id;
-          const isOp = (friendlyId || '').toUpperCase().startsWith('OP-') || item.order?.initial_destination === 'ESTOQUE';
+          const friendlyId = item.friendly_id || item.order?.op_number || item.order?.pv_number || item.order_id;
+          const friendlyUpper = (item.friendly_id || '').toUpperCase().trim();
+          const pvUpper = (item.order?.pv_number || '').toUpperCase().trim();
+          const opUpper = (item.order?.op_number || '').toUpperCase().trim();
+          const sellerUpper = (item.order?.seller_name || '').toUpperCase().trim();
+
+          const isOp =
+            friendlyUpper.startsWith('OP-') ||
+            friendlyUpper.startsWith('ESTOQUE') ||
+            pvUpper.startsWith('OP-') ||
+            pvUpper.startsWith('ESTOQUE') ||
+            opUpper.startsWith('OP-') ||
+            opUpper === 'ESTOQUE' ||
+            sellerUpper === 'FÁBRICA' ||
+            sellerUpper === 'FABRICA';
+
           const qtyRequired = item.print_run || item.quantity || 1;
           const userTenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
           // Checa se ja houve transação de estoque gravada para este item específico
           let hasExistingTx = false;
-          if (supabase) {
+          const dbClient = supabase || (typeof getDbClient === 'function' ? getDbClient() : null);
+          if (dbClient) {
             try {
-              const { data: existingTx } = await supabase
+              const { data: existingTx } = await dbClient
                 .from('stock_transactions')
                 .select('id')
                 .eq('product_id', item.product_id)
