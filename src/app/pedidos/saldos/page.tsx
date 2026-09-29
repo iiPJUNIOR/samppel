@@ -3,12 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { 
-  getCustomers, 
   getProducts, 
   getCustomerProductStock, 
   getCustomerStockCredits,
   getOrderBalanceAdjustments
 } from '@/services/supabase';
+import SearchableCustomerSelect from '@/components/SearchableCustomerSelect';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { 
   ShieldAlert, 
@@ -33,7 +33,6 @@ export default function SaldosCreditosPage() {
   const [credits, setCredits] = useState<any[]>([]);
   const [stocks, setStocks] = useState<any[]>([]);
   const [adjustments, setAdjustments] = useState<any[]>([]);
-  const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   
   // Controle de Estado
@@ -49,15 +48,13 @@ export default function SaldosCreditosPage() {
     setLoading(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-      const [custRes, prodRes, creditsRes, stocksRes, adjustmentsRes] = await Promise.all([
-        getCustomers(tenantId),
+      const [prodRes, creditsRes, stocksRes, adjustmentsRes] = await Promise.all([
         getProducts(tenantId),
         getCustomerStockCredits(undefined, 'ATIVO', tenantId),
         getCustomerProductStock(undefined, undefined, tenantId),
         getOrderBalanceAdjustments(undefined, undefined, tenantId)
       ]);
 
-      setCustomers(custRes.data || []);
       setProducts(prodRes.data || []);
       
       // Filtrar créditos para conter créditos de falta (PENDENCIA_ENTREGA) e cortesia (CORTESIA_SOBRA)
@@ -207,18 +204,14 @@ export default function SaldosCreditosPage() {
         </div>
 
         {/* Filtro Dropdown Cliente */}
-        <div className="form-group" style={{ flex: 1, minWidth: '180px' }}>
+        <div className="form-group" style={{ flex: 1.5, minWidth: '240px' }}>
           <label className="form-label">Filtrar por Cliente</label>
-          <select 
-            className="form-select"
+          <SearchableCustomerSelect
             value={filterCustomer}
-            onChange={(e) => setFilterCustomer(e.target.value)}
-          >
-            <option value="">Todos os Clientes</option>
-            {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+            onChange={setFilterCustomer}
+            tenantId={user?.tenant_id}
+            placeholder="Todos os Clientes (Buscar por nome/CNPJ)..."
+          />
         </div>
 
         {/* Filtro Dropdown Produto */}
