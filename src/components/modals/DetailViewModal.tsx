@@ -969,6 +969,22 @@ export function DetailViewModal(props: any) {
                                         <td style={{ padding: '0.35rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
                                           <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: '0.7rem', marginRight: '5px', whiteSpace: 'nowrap' }}>[{hCode}]</span>
                                           <span style={{ color: 'var(--primary)', whiteSpace: 'nowrap' }}>{teamName}</span>
+                                          {alloc.services && alloc.services.length > 0 && (
+                                            <div style={{ display: 'flex', gap: '3px', marginTop: '2px', flexWrap: 'wrap' }}>
+                                              {alloc.services.map((s: string) => (
+                                                <span key={s} style={{
+                                                  fontSize: '0.62rem',
+                                                  fontWeight: 800,
+                                                  padding: '0.5px 4px',
+                                                  borderRadius: '3px',
+                                                  backgroundColor: 'rgba(var(--primary-rgb), 0.12)',
+                                                  color: 'var(--primary)'
+                                                }}>
+                                                  {s}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
                                         </td>
                                         <td style={{ padding: '0.35rem 0.6rem', color: alloc.departure_date ? 'var(--text)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
                                           {alloc.departure_date ? new Date(alloc.departure_date + 'T00:00:00').toLocaleDateString('pt-BR') : 'Pendente'}

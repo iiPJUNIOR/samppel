@@ -8,6 +8,7 @@ import {
   Clock, Printer, PenTool, TrendingUp, HelpCircle
 } from 'lucide-react';
 import Image from 'next/image';
+import { HANDLING_SERVICE_OPTIONS } from '@/services/supabase_modules/orders';
 
 export function HandlingTeamModal(props: any) {
   const {
@@ -345,7 +346,8 @@ export function HandlingTeamModal(props: any) {
                             return_date: '',
                             handling_code: `MS${itemPv}/${prev.length + 1}`,
                             is_completed: false,
-                            completed_at: ''
+                            completed_at: '',
+                            services: []
                           }
                         ]);
                       }}
@@ -488,6 +490,70 @@ export function HandlingTeamModal(props: any) {
                               return_date: e.target.checked ? (a.return_date || a.completed_at || new Date().toISOString().slice(0, 10)) : a.return_date
                             } : a))}
                           />
+                        </div>
+                      </div>
+
+                      {/* TIPOS DE SERVIÇO DE MANUSEIO (SIGLAS: CA, CC, DB, RBC, RF) */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '0.4rem',
+                        padding: '0.4rem 0.65rem',
+                        backgroundColor: 'var(--surface)',
+                        borderRadius: 'var(--radius-xs)',
+                        border: '1px solid var(--border)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                            Serviços:
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          {HANDLING_SERVICE_OPTIONS.map((srv) => {
+                            const currentServices = Array.isArray(alloc.services) ? alloc.services : [];
+                            const isSelected = currentServices.includes(srv.key);
+                            return (
+                              <button
+                                key={srv.key}
+                                type="button"
+                                onClick={() => {
+                                  setHandlingTeamAllocations((prev: any[]) => prev.map((a, i) => {
+                                    if (i !== idx) return a;
+                                    const sList = Array.isArray(a.services) ? a.services : [];
+                                    const nextServices = isSelected
+                                      ? sList.filter((s: string) => s !== srv.key)
+                                      : [...sList, srv.key];
+                                    return { ...a, services: nextServices };
+                                  }));
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.3rem',
+                                  padding: '2.5px 7px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: isSelected ? 800 : 600,
+                                  cursor: 'pointer',
+                                  border: `1.5px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
+                                  backgroundColor: isSelected ? 'rgba(var(--primary-rgb), 0.12)' : 'var(--background)',
+                                  color: isSelected ? 'var(--primary)' : 'var(--text-muted)',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title={`${srv.label} (${srv.key})`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  readOnly
+                                  style={{ cursor: 'pointer', width: '13px', height: '13px', pointerEvents: 'none', margin: 0 }}
+                                />
+                                <span>{srv.key}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>

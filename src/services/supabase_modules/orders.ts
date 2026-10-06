@@ -2056,10 +2056,19 @@ export interface OrderItemHandlingTeam {
   handling_code?: string | null;
   is_completed?: boolean;
   completed_at?: string | null;
+  services?: string[];
   team?: HandlingTeam;
   created_at?: string;
   updated_at?: string;
 }
+
+export const HANDLING_SERVICE_OPTIONS = [
+  { key: 'CA', label: 'Colagem de Alça' },
+  { key: 'CC', label: 'Colocação de Cordão' },
+  { key: 'DB', label: 'Dobra de Boca' },
+  { key: 'RBC', label: 'Reforço de Boca e Colagem' },
+  { key: 'RF', label: 'Reforço de Fundo' },
+] as const;
 
 let mockOrderItemHandlingTeams: OrderItemHandlingTeam[] = [];
 const HANDLING_CACHE_KEY = 'samppel_handling_teams_v2';
@@ -2165,6 +2174,7 @@ export async function saveOrderItemHandlingTeams(
     handling_code?: string | null;
     is_completed?: boolean;
     completed_at?: string | null;
+    services?: string[];
   }[],
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
 ) {
@@ -2185,7 +2195,8 @@ export async function saveOrderItemHandlingTeams(
     return_date: t.return_date || t.completed_at || null,
     handling_code: t.handling_code || null,
     is_completed: t.is_completed || false,
-    completed_at: t.completed_at || t.return_date || null
+    completed_at: t.completed_at || t.return_date || null,
+    services: (t as any).services || []
   }));
 
   // Atualiza cache em localStorage imediatamente
@@ -2216,7 +2227,8 @@ export async function saveOrderItemHandlingTeams(
       return_date: t.return_date ? t.return_date : (t.completed_at ? t.completed_at : null),
       handling_code: t.handling_code ? t.handling_code : null,
       is_completed: t.is_completed || false,
-      completed_at: t.completed_at ? t.completed_at : (t.return_date ? t.return_date : null)
+      completed_at: t.completed_at ? t.completed_at : (t.return_date ? t.return_date : null),
+      services: t.services || []
     }));
 
     let { data, error } = await getDbClient()

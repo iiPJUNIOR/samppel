@@ -949,6 +949,7 @@ export default function PedidosPage() {
     handling_code?: string;    // Código de Manuseio (ex: MAN-1171/1)
     is_completed?: boolean;    // Conferido
     completed_at?: string;
+    services?: string[];
   }
   const [isHandlingTeamModalOpen, setIsHandlingTeamModalOpen] = useState(false);
   const [isHandlingReworkModalOpen, setIsHandlingReworkModalOpen] = useState(false);
@@ -3645,7 +3646,8 @@ export default function PedidosPage() {
           handling_team_id: a.handling_team_id,
           quantity: a.quantity,
           is_completed: a.is_completed || false,
-          completed_at: a.completed_at || ''
+          completed_at: a.completed_at || '',
+          services: a.services || []
         })));
       } else if (entity.handling_team_id) {
         setFormHandlingAllocations([
@@ -3697,7 +3699,8 @@ export default function PedidosPage() {
             handling_team_id: a.handling_team_id,
             quantity: a.quantity,
             is_completed: a.is_completed || false,
-            completed_at: a.completed_at || ''
+            completed_at: a.completed_at || '',
+            services: a.services || []
           })));
         } else if (correspondingItem.handling_team_id) {
           setFormHandlingAllocations([
@@ -6149,6 +6152,19 @@ export default function PedidosPage() {
                                               <Users size={9} />
                                               <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
                                               <span style={{ fontSize: '0.55rem', opacity: 0.85, fontWeight: 600 }}>• {hCode}</span>
+                                              {alloc.services && alloc.services.length > 0 && (
+                                                <span style={{
+                                                  fontSize: '0.55rem',
+                                                  fontWeight: 800,
+                                                  padding: '0.5px 3.5px',
+                                                  borderRadius: '3px',
+                                                  backgroundColor: 'rgba(var(--primary-rgb), 0.15)',
+                                                  color: 'var(--primary)',
+                                                  marginLeft: '2px'
+                                                }} title={`Serviços: ${alloc.services.join(', ')}`}>
+                                                  [{alloc.services.join(', ')}]
+                                                </span>
+                                              )}
                                             </div>
                                           );
                                         })}
