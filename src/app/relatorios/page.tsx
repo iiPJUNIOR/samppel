@@ -23,6 +23,7 @@ import {
   getOrderItemHandlingTeamsBulk,
   getOrderItemShortagesBulk
 } from '@/services/supabase';
+import SearchableCustomerSelect from '@/components/SearchableCustomerSelect';
 import { Skeleton, CardSkeleton, TableRowSkeleton } from '@/components/ui/Skeleton';
 import { 
   Clock, 
@@ -773,14 +774,14 @@ export default function RelatoriosPage() {
               <input type="date" className="form-input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
 
-            <div className="form-group">
-              <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cliente</label>
-              <select className="form-select" value={selectedCustomerId} onChange={(e) => setSelectedCustomerId(e.target.value)}>
-                <option value="">Todos os Clientes</option>
-                {customers.map((c: any) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+            <div className="form-group" style={{ minWidth: '220px', flex: '1 1 240px' }}>
+              <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Cliente / Empresa</label>
+              <SearchableCustomerSelect
+                value={selectedCustomerId}
+                onChange={(val) => setSelectedCustomerId(val)}
+                placeholder="Todos os Clientes (Buscar no banco)..."
+                tenantId={user?.tenant_id}
+              />
             </div>
 
             {activeTab === 'efficiency' ? (

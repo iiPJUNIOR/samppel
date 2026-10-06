@@ -215,6 +215,43 @@ const getItemRealMeasure = (item: any): string => {
   return '—';
 };
 
+// Helper para extrair componentes numéricos de uma medida (ex: "31X31X19" -> [31, 31, 19])
+const parseDimensions = (str: string): number[] => {
+  if (!str) return [];
+  const parts = str.match(/\d+(?:[.,]\d+)?/g);
+  if (!parts) return [];
+  return parts.map(p => parseFloat(p.replace(',', '.')));
+};
+
+// Helper para comparação dimensional inteligente (evita que 38x31x19 case falsamente com busca por 31x19)
+const matchDimensions = (queryStr: string, targetMeasure: string): boolean => {
+  if (!targetMeasure || targetMeasure === '—') return false;
+  const qDims = parseDimensions(queryStr);
+  const tDims = parseDimensions(targetMeasure);
+  if (qDims.length === 0 || tDims.length === 0) return false;
+
+  if (qDims.length === 2) {
+    const [q1, q2] = qDims;
+    if (tDims.length === 2) {
+      return (tDims[0] === q1 && tDims[1] === q2) || (tDims[0] === q2 && tDims[1] === q1);
+    }
+    if (tDims.length >= 3) {
+      return (
+        (tDims[0] === q1 && (tDims[1] === q2 || tDims[2] === q2)) ||
+        (tDims[0] === q2 && (tDims[1] === q1 || tDims[2] === q1)) ||
+        (tDims[1] === q1 && tDims[2] === q2 && tDims[0] === tDims[1])
+      );
+    }
+  }
+
+  if (qDims.length === 3) {
+    if (tDims.length < 3) return false;
+    return (tDims[0] === qDims[0] && tDims[1] === qDims[1] && tDims[2] === qDims[2]);
+  }
+
+  return false;
+};
+
 // Extrair quantidade de dias de prazo para cálculo de atrasos
 const extractDeadlineDays = (deadlineText: string | null): number | null => {
   if (!deadlineText) return null;
@@ -497,6 +534,11 @@ export default function PedidosPage() {
     if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_stage') || '';
     return '';
   });
+  // Filtro de Tipo de Frete / Envio
+  const [filterShipping, setFilterShipping] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('pedidos_filter_shipping') || '';
+    return '';
+  });
   const [pullOrderNumber, setPullOrderNumber] = useState('');
   const [syncingOrderNumber, setSyncingOrderNumber] = useState('');
 
@@ -509,7 +551,8 @@ export default function PedidosPage() {
     localStorage.setItem('pedidos_filter_conta_azul', filterContaAzulStatus);
     localStorage.setItem('pedidos_filter_release', filterPedidosRelease);
     localStorage.setItem('pedidos_filter_stage', filterStage);
-  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage]);
+    localStorage.setItem('pedidos_filter_shipping', filterShipping);
+  }, [filterCustomer, filterSeller, filterSearchOrder, filterContaAzulStatus, filterPedidosRelease, filterStage, filterShipping]);
 
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
@@ -4163,6 +4206,63 @@ export default function PedidosPage() {
     return true;
   };
 
+  const getFreightBadgeStyle = (shippingType: string, notesFreight?: string | null) => {
+    if (notesFreight) {
+      const nfUpper = notesFreight.toUpperCase();
+      if (nfUpper.includes('ENTREGA') && !nfUpper.includes('CORREIO') && !nfUpper.includes('SEDEX')) {
+        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: capitalizeText(notesFreight) };
+      }
+      if (nfUpper.includes('CORREIO') || nfUpper.includes('SEDEX') || nfUpper.includes('PAC') || nfUpper.includes('TRANSP')) {
+        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: capitalizeText(notesFreight) };
+      }
+      if (nfUpper.includes('LALA') || nfUpper.includes('MOTO')) {
+        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: capitalizeText(notesFreight) };
+      }
+      return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: capitalizeText(notesFreight) };
+    }
+
+    switch (shippingType) {
+      case 'LALAMOVE':
+      case 'MOTOBOY':
+        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: 'Lalamove/Moto' };
+      case 'ENTREGA_PROPRIA':
+        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: 'Carro Próprio' };
+      case 'TRANSPORTADORA':
+      case 'TRANSPORTADORA_LONGA':
+        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: 'Transportadora' };
+      case 'RETIRADA':
+      default:
+        return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: 'Retirada' };
+    }
+  };
+
+  const checkMatchShipping = (shippingFilter: string, shippingType?: string | null, carrierName?: string | null, notes?: string | null) => {
+    if (!shippingFilter) return true;
+    const sType = (shippingType || '').toUpperCase().trim();
+    const cName = (carrierName || '').toLowerCase().trim();
+    const d = extractOrderDetails(notes || null);
+    const fInfo = (d?.freteInfo || '').toLowerCase().trim();
+    const badge = getFreightBadgeStyle(shippingType || '', d?.freteInfo || null);
+    const badgeLabel = (badge?.label || '').toLowerCase().trim();
+
+    switch (shippingFilter) {
+      case 'RETIRADA':
+        return sType === 'RETIRADA' || badgeLabel.includes('retirada') || fInfo.includes('retira');
+      case 'ENTREGA_PROPRIA':
+        return sType === 'ENTREGA_PROPRIA' || badgeLabel.includes('próprio') || badgeLabel.includes('proprio') || badgeLabel.includes('carro') || badgeLabel.includes('entrega') || fInfo.includes('entrega') || fInfo.includes('proprio') || fInfo.includes('próprio');
+      case 'TRANSPORTADORA':
+        return sType.includes('TRANSP') || badgeLabel.includes('transp') || fInfo.includes('transp') || !!cName;
+      case 'LALAMOVE':
+        return sType === 'LALAMOVE' || sType === 'MOTOBOY' || badgeLabel.includes('lala') || badgeLabel.includes('moto') || fInfo.includes('lala') || fInfo.includes('moto');
+      case 'CORREIOS':
+        return badgeLabel.includes('correio') || badgeLabel.includes('sedex') || badgeLabel.includes('pac') || fInfo.includes('correio') || fInfo.includes('sedex') || fInfo.includes('pac');
+      case 'SEM_FRETE':
+        return sType === 'SEM_FRETE' || fInfo.includes('sem frete');
+      default:
+        return sType === shippingFilter.toUpperCase() || badgeLabel.includes(shippingFilter.toLowerCase()) || fInfo.includes(shippingFilter.toLowerCase());
+    }
+  };
+
   // Lógica de Filtros
   const filteredOrders = orders.filter(order => {
     if (isVendedor && user) {
@@ -4185,6 +4285,20 @@ export default function PedidosPage() {
       const orderSizeNorm = orderSize.replace(/\s+/g, '');
       const artName = (order.product_name || order.art_name || order.name || '').toLowerCase();
 
+      const orderCarrier = (order.carrier_name || '').toLowerCase();
+      const orderShippingType = (order.shipping_type || '').toLowerCase();
+      const orderNotesDetails = extractOrderDetails(order.notes);
+      const orderFreteInfo = (orderNotesDetails?.freteInfo || '').toLowerCase();
+      const orderFreightBadge = getFreightBadgeStyle(order.shipping_type, orderNotesDetails?.freteInfo);
+      const orderFreightLabel = (orderFreightBadge?.label || '').toLowerCase();
+
+      const orderFreightMatch = (
+        orderCarrier.includes(q) ||
+        orderShippingType.includes(q) ||
+        orderFreteInfo.includes(q) ||
+        orderFreightLabel.includes(q)
+      );
+
       const orderDirectMatch = (
         pvClean === `pv-${q}` ||
         pvClean === q ||
@@ -4193,7 +4307,8 @@ export default function PedidosPage() {
         (realMeasure && realMeasure !== '—' && (realMeasure.includes(q) || realMeasureNorm.includes(qNorm))) ||
         (orderMeasure && (orderMeasure.includes(q) || orderMeasureNorm.includes(qNorm))) ||
         (orderSize && (orderSize.includes(q) || orderSizeNorm.includes(qNorm))) ||
-        artName.includes(q)
+        artName.includes(q) ||
+        orderFreightMatch
       );
 
       const siblingItems = (orderItems || []).filter((it: any) => it.order_id === order.id);
@@ -4227,7 +4342,10 @@ export default function PedidosPage() {
         matchContaAzulStatus = order.conta_azul_status === filterContaAzulStatus;
       }
     }
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus;
+
+    const matchShipping = checkMatchShipping(filterShipping, order.shipping_type, order.carrier_name, order.notes);
+
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchShipping;
   });
 
   // Helper para verificar se um item de pedido está configurado para ser vinculado ao primeiro item (Sem Produção)
@@ -4320,22 +4438,11 @@ export default function PedidosPage() {
     let matchSearchOrder = true;
     if (filterSearchOrder && filterSearchOrder.trim()) {
       const q = filterSearchOrder.trim().toLowerCase();
-      const qNorm = q.replace(/\s+/g, '');
 
-      // 1. Busca por PV e OP (quando o usuário digita número de PV ou OP, todos os itens do pedido aparecem)
+      // 1. Dados de PV e OP
       const parentPvClean = cleanPvForMatch(parentOrder.pv_number || '');
       const itemFriendlyClean = cleanPvForMatch(item.friendly_id || '');
       const opText = ((parentOrder.op_number || '') + ' ' + (item.op_number || '')).toLowerCase();
-
-      const matchPvOrOp = (
-        parentPvClean === `pv-${q}` ||
-        parentPvClean === q ||
-        parentPvClean.includes(q) ||
-        itemFriendlyClean === `pv-${q}` ||
-        itemFriendlyClean === q ||
-        itemFriendlyClean.includes(q) ||
-        opText.includes(q)
-      );
 
       // 2. Medidas e Tamanhos do Item ESPECÍFICO deste card
       const itemRealMeasure = getItemRealMeasure(item).toLowerCase();
@@ -4363,23 +4470,106 @@ export default function PedidosPage() {
       const parentSizeNorm = parentSize.replace(/\s+/g, '');
       const parentName = !hasItemName ? (parentOrder.product_name || parentOrder.art_name || parentOrder.name || '').toLowerCase() : '';
 
-      const matchMeasureOrSize = (
-        (itemRealMeasure && itemRealMeasure !== '—' && (itemRealMeasure.includes(q) || itemRealMeasureNorm.includes(qNorm))) ||
-        (itemMeasure && (itemMeasure.includes(q) || itemMeasureNorm.includes(qNorm))) ||
-        (itemSize && (itemSize.includes(q) || itemSizeNorm.includes(qNorm))) ||
-        (parentRealMeasure && parentRealMeasure !== '—' && (parentRealMeasure.includes(q) || parentRealMeasureNorm.includes(qNorm))) ||
-        (parentMeasure && (parentMeasure.includes(q) || parentMeasureNorm.includes(qNorm))) ||
-        (parentSize && (parentSize.includes(q) || parentSizeNorm.includes(qNorm)))
-      );
+      // 4. Frete e Envio do Pedido
+      const parentCarrier = (parentOrder.carrier_name || '').toLowerCase();
+      const parentShipping = (parentOrder.shipping_type || '').toLowerCase();
+      const itemNotesDetails = extractOrderDetails(item.notes || parentOrder.notes);
+      const itemFreteInfo = (itemNotesDetails?.freteInfo || '').toLowerCase();
+      const itemFreightBadge = getFreightBadgeStyle(parentOrder.shipping_type, itemNotesDetails?.freteInfo);
+      const itemFreightLabel = (itemFreightBadge?.label || '').toLowerCase();
 
-      const matchName = (
-        itemName.includes(q) ||
-        itemArtName.includes(q) ||
-        itemProdName.includes(q) ||
-        parentName.includes(q)
-      );
+      // 5. Cliente (Razão Social / Nome Fantasia)
+      const customerName = (parentOrder.customer?.name || parentOrder.customer_name || '').toLowerCase();
+      const customerTrade = (parentOrder.customer?.trade_name || '').toLowerCase();
+      const customerCompany = (parentOrder.customer?.company_name || '').toLowerCase();
 
-      matchSearchOrder = matchPvOrOp || matchMeasureOrSize || matchName;
+      // 6. Vendedora
+      const seller = (parentOrder.seller_name || item.seller_name || '').toLowerCase();
+
+      // 7. Observações, Detalhes e Embalagem
+      const rawNotes = ((item.notes || '') + ' ' + (parentOrder.notes || '') + ' ' + (parentOrder.internal_notes || '')).toLowerCase();
+      const embalagemInfo = (itemNotesDetails?.embalagem || '').toLowerCase();
+      const clicheInfo = (itemNotesDetails?.cliche || '').toLowerCase();
+
+      // 8. Etapa e Status
+      const itemStage = stages.find(s => s.id === item.stage_id);
+      const stageName = (itemStage?.name || item.status || '').toLowerCase();
+      const caStatus = (parentOrder.conta_azul_status || '').toLowerCase();
+
+      const matchTerm = (term: string) => {
+        const tNorm = term.replace(/\s+/g, '');
+        const isDim = /^\d+(?:[.,]\d+)?\s*[xX]\s*\d+(?:[.,]\d+)?(?:\s*[xX]\s*\d+(?:[.,]\d+)?)?$/.test(term);
+
+        const matchPvOrOp = (
+          parentPvClean === `pv-${term}` ||
+          parentPvClean === term ||
+          parentPvClean.includes(term) ||
+          itemFriendlyClean === `pv-${term}` ||
+          itemFriendlyClean === term ||
+          itemFriendlyClean.includes(term) ||
+          opText.includes(term)
+        );
+
+        const matchMeasureOrSize = isDim
+          ? (
+              matchDimensions(term, itemRealMeasure) ||
+              matchDimensions(term, itemMeasure) ||
+              matchDimensions(term, itemSize) ||
+              matchDimensions(term, parentRealMeasure) ||
+              matchDimensions(term, parentMeasure) ||
+              matchDimensions(term, parentSize)
+            )
+          : (
+              (itemRealMeasure && itemRealMeasure !== '—' && (itemRealMeasure.includes(term) || itemRealMeasureNorm.includes(tNorm))) ||
+              (itemMeasure && (itemMeasure.includes(term) || itemMeasureNorm.includes(tNorm))) ||
+              (itemSize && (itemSize.includes(term) || itemSizeNorm.includes(tNorm))) ||
+              (parentRealMeasure && parentRealMeasure !== '—' && (parentRealMeasure.includes(term) || parentRealMeasureNorm.includes(tNorm))) ||
+              (parentMeasure && (parentMeasure.includes(term) || parentMeasureNorm.includes(tNorm))) ||
+              (parentSize && (parentSize.includes(term) || parentSizeNorm.includes(tNorm)))
+            );
+
+        const matchName = (
+          itemName.includes(term) ||
+          itemArtName.includes(term) ||
+          itemProdName.includes(term) ||
+          parentName.includes(term)
+        );
+
+        const matchFreight = (
+          parentCarrier.includes(term) ||
+          parentShipping.includes(term) ||
+          itemFreteInfo.includes(term) ||
+          itemFreightLabel.includes(term)
+        );
+
+        const matchCust = (
+          customerName.includes(term) ||
+          customerTrade.includes(term) ||
+          customerCompany.includes(term)
+        );
+
+        const matchSellerName = seller.includes(term);
+
+        const matchNotesText = (
+          rawNotes.includes(term) ||
+          embalagemInfo.includes(term) ||
+          clicheInfo.includes(term)
+        );
+
+        const matchStageName = (
+          stageName.includes(term) ||
+          caStatus.includes(term)
+        );
+
+        return matchPvOrOp || matchMeasureOrSize || matchName || matchFreight || matchCust || matchSellerName || matchNotesText || matchStageName;
+      };
+
+      const words = q.split(/\s+/).filter(Boolean);
+      if (words.length > 1) {
+        matchSearchOrder = matchTerm(q) || words.every(w => matchTerm(w));
+      } else {
+        matchSearchOrder = matchTerm(q);
+      }
     }
     let matchContaAzulStatus = true;
     if (filterContaAzulStatus) {
@@ -4408,38 +4598,11 @@ export default function PedidosPage() {
       matchStage = stageName.toLowerCase() === filterStage.toLowerCase();
     }
 
-    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage;
+    // Filtro de Tipo de Frete / Envio
+    const matchShipping = checkMatchShipping(filterShipping, parentOrder.shipping_type, parentOrder.carrier_name, item.notes || parentOrder.notes);
+
+    return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage && matchShipping;
   });
-
-  const getFreightBadgeStyle = (shippingType: string, notesFreight?: string | null) => {
-    if (notesFreight) {
-      const nfUpper = notesFreight.toUpperCase();
-      if (nfUpper.includes('ENTREGA') && !nfUpper.includes('CORREIO') && !nfUpper.includes('SEDEX')) {
-        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: capitalizeText(notesFreight) };
-      }
-      if (nfUpper.includes('CORREIO') || nfUpper.includes('SEDEX') || nfUpper.includes('PAC') || nfUpper.includes('TRANSP')) {
-        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: capitalizeText(notesFreight) };
-      }
-      if (nfUpper.includes('LALA') || nfUpper.includes('MOTO')) {
-        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: capitalizeText(notesFreight) };
-      }
-      return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: capitalizeText(notesFreight) };
-    }
-
-    switch (shippingType) {
-      case 'LALAMOVE':
-      case 'MOTOBOY':
-        return { backgroundColor: 'hsla(271, 91.2%, 65.1%, 0.15)', color: 'hsl(271, 91.2%, 65.1%)', label: 'Lalamove/Moto' };
-      case 'ENTREGA_PROPRIA':
-        return { backgroundColor: 'hsla(24, 95.8%, 53.1%, 0.15)', color: 'hsl(24, 95.8%, 53.1%)', label: 'Carro Próprio' };
-      case 'TRANSPORTADORA':
-      case 'TRANSPORTADORA_LONGA':
-        return { backgroundColor: 'hsla(221.2, 83.2%, 53.3%, 0.15)', color: 'hsl(221.2, 83.2%, 53.3%)', label: 'Transportadora' };
-      case 'RETIRADA':
-      default:
-        return { backgroundColor: 'hsla(215.4, 16.3%, 46.9%, 0.15)', color: 'hsl(215.4, 16.3%, 46.9%)', label: 'Retirada' };
-    }
-  };
 
   const visibleStages = stages.filter(stage => {
     if (!user) return true;
@@ -4625,7 +4788,8 @@ export default function PedidosPage() {
           filterSeller,
           filterContaAzulStatus,
           filterPedidosRelease,
-          filterStage
+          filterStage,
+          filterShipping
         ].filter(Boolean).length;
 
         return (
@@ -4919,7 +5083,7 @@ export default function PedidosPage() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Buscar PV, OP ou Tamanho..."
+                    placeholder="Buscar PV, OP, Medida, Frete..."
                     value={filterSearchOrder}
                     onChange={(e) => setFilterSearchOrder(e.target.value)}
                     style={{ height: '30px', fontSize: '0.78rem', padding: '0.2rem 0.5rem 0.2rem 1.9rem', width: '100%', borderRadius: 'var(--radius-sm)' }}
@@ -4973,6 +5137,22 @@ export default function PedidosPage() {
                   <option value="bloqueados">Bloqueados</option>
                 </select>
 
+                {/* Tipo de Frete / Envio */}
+                <select
+                  className="form-select"
+                  value={filterShipping}
+                  onChange={(e) => setFilterShipping(e.target.value)}
+                  style={{ height: '30px', fontSize: '0.76rem', padding: '0.2rem 0.45rem', flex: '1 1 115px', minWidth: '100px', maxWidth: '145px', borderRadius: 'var(--radius-sm)' }}
+                >
+                  <option value="">Frete (Todos)</option>
+                  <option value="RETIRADA">Retirada</option>
+                  <option value="ENTREGA_PROPRIA">Carro Próprio</option>
+                  <option value="TRANSPORTADORA">Transportadora</option>
+                  <option value="LALAMOVE">Lalamove / Moto</option>
+                  <option value="CORREIOS">Correios / Sedex</option>
+                  <option value="SEM_FRETE">Sem Frete</option>
+                </select>
+
                 {/* Etapas Kanban */}
                 <select
                   className="form-select"
@@ -5004,6 +5184,7 @@ export default function PedidosPage() {
                       setFilterContaAzulStatus('');
                       setFilterPedidosRelease('');
                       setFilterStage('');
+                      setFilterShipping('');
                       if (typeof window !== 'undefined') {
                         localStorage.removeItem('pedidos_filter_customer');
                         localStorage.removeItem('pedidos_filter_seller');
@@ -5011,6 +5192,7 @@ export default function PedidosPage() {
                         localStorage.removeItem('pedidos_filter_conta_azul');
                         localStorage.removeItem('pedidos_filter_release');
                         localStorage.removeItem('pedidos_filter_stage');
+                        localStorage.removeItem('pedidos_filter_shipping');
                         localStorage.removeItem('pedidos_filter_size');
                       }
                     }}
@@ -5055,7 +5237,7 @@ export default function PedidosPage() {
             position: 'relative'
           }}
         >
-          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSearchOrder) && filteredOrderItems.length === 0 && (
+          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSearchOrder || filterShipping) && filteredOrderItems.length === 0 && (
             <div style={{
               position: 'absolute',
               top: '40%',
@@ -6272,24 +6454,67 @@ export default function PedidosPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.length === 0 ? (
+                {filteredOrderItems.length === 0 ? (
                   <tr>
                     <td colSpan={10} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
-                      Nenhum pedido encontrado.
+                      Nenhum item ou pedido encontrado.
                     </td>
                   </tr>
                 ) : (
-                  filteredOrders.map((order) => {
-                    const isReleased = !!order.first_payment_date;
-                    const overShort = order.over_short_quantity || 0;
+                  filteredOrderItems.map((item) => {
+                    const parentOrder = item.order || orders.find(o => o.id === item.order_id) || {};
+                    const isReleased = !!parentOrder.first_payment_date;
+                    const overShort = item.over_short_quantity !== undefined && item.over_short_quantity !== null
+                      ? item.over_short_quantity
+                      : (parentOrder.over_short_quantity || 0);
+
+                    const realMeasure = getItemRealMeasure(item) || item.measure || parentOrder.measure || '—';
+                    const stage = stages.find(s => s.id === item.stage_id) || { name: item.status || 'A produzir', color: '#3b82f6' };
+                    const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+                    const artName = item.name || item.art_name || parentOrder.art_name || parentOrder.product_name || 'Arte Genérica';
+                    const customerName = parentOrder.customer?.name || parentOrder.customer_name || '—';
+                    const pvDisplay = item.friendly_id || parentOrder.pv_number || '---';
+                    const opDisplay = item.op_number || parentOrder.op_number;
+                    const printRunDisplay = (item.adjusted_production_quantity !== undefined && item.adjusted_production_quantity !== null)
+                      ? item.adjusted_production_quantity
+                      : (item.print_run || parentOrder.print_run || 0);
+
+                    const orderId = parentOrder.id || item.order_id;
+                    const config = orderDeadlineConfigMap.get(orderId);
+                    const effectiveIsBusiness = config ? config.isBusinessDays : isBusinessDays;
+                    const effectiveChosenDays = config ? config.chosenDays : orderRangeChoiceMap.get(item.order_id);
+                    const expRes = calculateExpeditionDate(item, parentOrder, { isBusinessDays: effectiveIsBusiness, chosenDays: effectiveChosenDays });
 
                     return (
-                      <tr key={order.id} style={{ backgroundColor: isReleased ? undefined : 'var(--danger-bg)' }}>
+                      <tr key={item.id} style={{ backgroundColor: isReleased ? undefined : 'var(--danger-bg)' }}>
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
-                            <span>{order.pv_number || '---'}</span>
-                            {order.conta_azul_status && (() => {
-                              const badgeStyle = getContaAzulStatusStyle(order.conta_azul_status);
+                            <span>{pvDisplay}</span>
+                            {!isReleased && (
+                              <span title="Pedido Bloqueado (Aguardando Pagamento/Sinal)" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                <AlertTriangle size={11} color="var(--danger)" style={{ flexShrink: 0 }} />
+                              </span>
+                            )}
+                            {hasOverdueInstallments(item.order_id) && (
+                              <span
+                                className="blinking-dot"
+                                style={{
+                                  width: '8px',
+                                  height: '8px',
+                                  borderRadius: '50%',
+                                  backgroundColor: '#EF4444',
+                                  display: 'inline-block',
+                                  boxShadow: '0 0 8px #EF4444',
+                                  animation: 'blinkAnimation 1.2s infinite ease-in-out',
+                                  marginLeft: '2px',
+                                  marginRight: '2px',
+                                  flexShrink: 0
+                                }}
+                                title="Atenção: Parcela em atraso no Conta Azul!"
+                              />
+                            )}
+                            {parentOrder.conta_azul_status && (() => {
+                              const badgeStyle = getContaAzulStatusStyle(parentOrder.conta_azul_status);
                               return (
                                 <span style={{
                                   fontSize: '0.55rem',
@@ -6303,14 +6528,14 @@ export default function PedidosPage() {
                                   display: 'inline-block',
                                   lineHeight: '1'
                                 }}>
-                                  {order.conta_azul_status}
+                                  {parentOrder.conta_azul_status}
                                 </span>
                               );
                             })()}
                           </div>
-                          {order.op_number ? (
+                          {opDisplay ? (
                             <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 500 }}>
-                              {order.op_number}
+                              {opDisplay}
                             </div>
                           ) : (
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sem OP (Estoque)</div>
@@ -6318,22 +6543,27 @@ export default function PedidosPage() {
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '0.95rem' }}>
-                            {order.art_name || 'Arte Genérica'}
+                            {artName}
                           </div>
                           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                            {order.customer?.name}
+                            {customerName}
                           </div>
+                          {parentOrder.seller_name && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Vend: {parentOrder.seller_name}
+                            </div>
+                          )}
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
-                          <div>{order.product?.name}</div>
+                          <div>{item.product?.name || parentOrder.product?.name || item.name || '—'}</div>
                           <div>
                             <code style={{ fontSize: '0.7rem', padding: '0.125rem 0.25rem', backgroundColor: 'var(--background)', borderRadius: '3px' }}>
-                              {order.measure}
+                              {realMeasure}
                             </code>
                           </div>
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
-                          <div style={{ fontWeight: 500 }}>{order.print_run?.toLocaleString('pt-BR')} un</div>
+                          <div style={{ fontWeight: 500 }}>{printRunDisplay?.toLocaleString('pt-BR')} un</div>
                           {overShort !== 0 && (
                             <div style={{
                               fontSize: '0.75rem',
@@ -6347,18 +6577,19 @@ export default function PedidosPage() {
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 500 }}>
                             {(() => {
-                              const d = extractOrderDetails(order.notes);
-                              if (d?.embalagem) return capitalizeText(d.embalagem);
-                              return order.boxes_count ? `${order.boxes_count} ${order.packaging_type === 'PACOTE' ? 'pacote(s)' : 'caixa(s)'}` : '—';
+                              if (orderDetails?.embalagem) return capitalizeText(orderDetails.embalagem);
+                              const bCount = item.boxes_count || parentOrder.boxes_count;
+                              const pType = item.packaging_type || parentOrder.packaging_type;
+                              return bCount ? `${bCount} ${pType === 'PACOTE' ? 'pacote(s)' : 'caixa(s)'}` : '—';
                             })()}
                           </div>
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
                           <span className="badge badge-info" style={{ textTransform: 'capitalize', display: 'block', textAlign: 'center', marginBottom: '4px' }}>
-                            {order.production_sector}
+                            {item.production_sector || parentOrder.production_sector || '—'}
                           </span>
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>
-                            {order.physical_location || 'Salão'}
+                            {item.physical_location || parentOrder.physical_location || 'Salão'}
                           </span>
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
@@ -6369,7 +6600,7 @@ export default function PedidosPage() {
                                 Liberada
                               </span>
                               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                Início: {new Date(order.production_start_date || order.first_payment_date).toLocaleDateString('pt-BR')}
+                                Início: {new Date(parentOrder.production_start_date || parentOrder.first_payment_date).toLocaleDateString('pt-BR')}
                               </div>
                             </div>
                           ) : (
@@ -6386,38 +6617,49 @@ export default function PedidosPage() {
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
                           <span className="badge" style={{
-                            backgroundColor: (order.stage?.color || '#3b82f6') + '15',
-                            color: order.stage?.color || '#3b82f6',
+                            backgroundColor: (stage.color || '#3b82f6') + '15',
+                            color: stage.color || '#3b82f6',
                             display: 'flex',
                             justifyContent: 'center'
                           }}>
-                            {order.stage?.name || order.status}
+                            {stage.name}
                           </span>
                         </td>
                         <td style={{ verticalAlign: 'top', fontSize: '0.8rem' }}>
-                          <div>Prev: {order.first_payment_date ? new Date(new Date(order.order_date).getTime() + 10 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR') : 'Sem data'}</div>
+                          <div>
+                            Prev: {expRes.expeditionDate
+                              ? expRes.expeditionDate.toLocaleDateString('pt-BR')
+                              : (parentOrder.first_payment_date
+                                ? new Date(new Date(parentOrder.order_date).getTime() + 10 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')
+                                : 'Sem data')}
+                          </div>
                           <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '2px' }}>
-                            Venda: {new Date(order.order_date).toLocaleDateString('pt-BR')}
+                            Venda: {parentOrder.order_date ? new Date(parentOrder.order_date).toLocaleDateString('pt-BR') : '—'}
                           </div>
                         </td>
                         <td style={{ verticalAlign: 'middle' }}>
-                          <button
-                            onClick={() => handleOpenEdit(order)}
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                          >
-                            {isReadOnlyForForm('customer') ? (
-                              <>
-                                <Eye size={12} />
-                                <span>Ver</span>
-                              </>
-                            ) : (
-                              <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <button
+                              onClick={() => handleOpenDetail(item)}
+                              className="btn btn-secondary"
+                              style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                              title="Ver detalhes do card (copiar resumo, dividir/desmembrar, etc.)"
+                            >
+                              <Eye size={12} />
+                              <span>Ver</span>
+                            </button>
+                            {!isReadOnlyForForm('customer') && (
+                              <button
+                                onClick={() => handleOpenEdit(item)}
+                                className="btn btn-secondary"
+                                style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                                title="Editar pedido"
+                              >
                                 <Edit3 size={12} />
                                 <span>Editar</span>
-                              </>
+                              </button>
                             )}
-                          </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -6506,7 +6748,7 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {isShippingCrudModalOpen && <ShippingCrudModal {...{ createShippingTypeConfig, deleteShippingTypeConfig, loading, newShippingTypeName, setIsShippingCrudModalOpen, setLoading, setNewShippingTypeName, setShippingTypes, shippingTypes, user }} />}
 
-      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, setIsMoveStageModalOpen, setItemToMoveStage, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
+      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, fetchAllData, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, setIsMoveStageModalOpen, setItemToMoveStage, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
 
       {/* ========================================
           MODAL CRUD DE SETORES DE PRODUÇÃO

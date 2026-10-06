@@ -8,6 +8,7 @@ import {
   CreditCard, Check, AlertCircle, Save, CheckCircle2, RefreshCw
 } from 'lucide-react';
 import { searchCustomers } from '@/services/supabase';
+import { syncAllCustomersFromContaAzul } from '@/services/customer_sync';
 
 export function DetailModal(props: any) {
   const {
@@ -106,28 +107,98 @@ export function DetailModal(props: any) {
   const [customerSyncFeedback, setCustomerSyncFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const customerDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Busca debounce de clientes direto no banco
+  const [isSyncingAllCustomers, setIsSyncingAllCustomers] = useState(false);
+  const [syncAllProgressText, setSyncAllProgressText] = useState('');
+
+  const handleSyncAllCustomers = async () => {
+    setIsSyncingAllCustomers(true);
+    setSyncAllProgressText('Iniciando sincronização...');
+    setCustomerSyncFeedback({ type: 'info', text: 'Conectando ao Conta Azul para puxar todos os clientes...' });
+
+    try {
+      const res = await syncAllCustomersFromContaAzul((step, progress) => {
+        setSyncAllProgressText(`${progress > 0 ? progress + '%' : ''} ${step}`);
+      });
+
+      if (res.success) {
+        setCustomerSyncFeedback({
+          type: 'success',
+          text: `Base de clientes atualizada no banco! (${res.imported} novos, ${res.updated} atualizados).`
+        });
+        const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+        const queryRes = await searchCustomers(formCustomer ? formCustomer.trim() : '', tenantId, 25);
+        setCustomerSuggestions(queryRes.data || []);
+      } else {
+        setCustomerSyncFeedback({
+          type: 'error',
+          text: res.error || 'Erro ao sincronizar base de clientes.'
+        });
+      }
+    } catch (err: any) {
+      setCustomerSyncFeedback({
+        type: 'error',
+        text: 'Erro de conexão: ' + (err.message || 'Falha ao sincronizar clientes')
+      });
+    } finally {
+      setIsSyncingAllCustomers(false);
+      setSyncAllProgressText('');
+      setTimeout(() => setCustomerSyncFeedback(null), 8000);
+    }
+  };
+
+  // Estado local para digitação imediata e fluida sem re-renderizar a página inteira
+  const [localCustomerInput, setLocalCustomerInput] = useState(formCustomer || '');
+
+  // Sincroniza local se formCustomer for atualizado externamente
   useEffect(() => {
-    if (!formCustomer || formCustomer.trim().length === 0) {
+    setLocalCustomerInput(formCustomer || '');
+  }, [formCustomer]);
+
+  // Busca debounce de clientes: espera o usuário terminar de digitar primeiro (600ms)
+  useEffect(() => {
+    const term = localCustomerInput.trim();
+
+    if (!term) {
       setCustomerSuggestions([]);
       return;
     }
 
     const timer = setTimeout(async () => {
       setIsSearchingCustomer(true);
+      setFormCustomer(localCustomerInput);
       try {
         const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-        const res = await searchCustomers(formCustomer.trim(), tenantId, 20);
+        const res = await searchCustomers(term, tenantId, 25);
         setCustomerSuggestions(res.data || []);
       } catch (err) {
         console.error('Erro na busca de clientes:', err);
       } finally {
         setIsSearchingCustomer(false);
       }
-    }, 250);
+    }, 600);
 
     return () => clearTimeout(timer);
-  }, [formCustomer, user?.tenant_id]);
+  }, [localCustomerInput, user?.tenant_id]);
+
+  const handleCustomerKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const term = localCustomerInput.trim();
+      setFormCustomer(localCustomerInput);
+      if (!term) return;
+      setIsSearchingCustomer(true);
+      try {
+        const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+        const res = await searchCustomers(term, tenantId, 25);
+        setCustomerSuggestions(res.data || []);
+        setIsCustomerDropdownOpen(true);
+      } catch (err) {
+        console.error('Erro na busca de clientes:', err);
+      } finally {
+        setIsSearchingCustomer(false);
+      }
+    }
+  };
 
   const updateFormItem = (index: number, field: string, value: any) => {
     if (!setFormItems) return;
@@ -161,7 +232,7 @@ export function DetailModal(props: any) {
   }, []);
 
   const handleSyncContaAzulFromModal = async () => {
-    const term = (formCustomer || '').trim();
+    const term = (localCustomerInput || formCustomer || '').trim();
     if (!term) {
       alert('Digite o nome ou CNPJ/CPF do cliente para buscar no Conta Azul.');
       return;
@@ -192,6 +263,7 @@ export function DetailModal(props: any) {
       }
 
       const c = data.customer;
+      setLocalCustomerInput(c.name || term);
       setFormCustomer(c.name || term);
       setIsCustomerDropdownOpen(false);
       setCustomerSyncFeedback({
@@ -381,29 +453,28 @@ export function DetailModal(props: any) {
                 <div className="form-group" style={{ position: 'relative' }} ref={customerDropdownRef}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                     <label className="form-label" style={{ margin: 0 }}>Cliente (Razão Social) (Opcional)</label>
-                    {formCustomer && formCustomer.trim().length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleSyncContaAzulFromModal}
-                        disabled={isSyncingContaAzulCustomer || isReadOnlyForForm('customer')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--primary)',
-                          fontSize: '0.75rem',
-                          cursor: isSyncingContaAzulCustomer ? 'wait' : 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          padding: 0,
-                          fontWeight: 500
-                        }}
-                        title="Buscar este cliente no Conta Azul e vincular"
-                      >
-                        <RefreshCw size={12} className={isSyncingContaAzulCustomer ? 'spin' : ''} />
-                        {isSyncingContaAzulCustomer ? 'Buscando...' : 'Buscar no Conta Azul'}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleSyncAllCustomers}
+                      disabled={isSyncingAllCustomers || isReadOnlyForForm('customer')}
+                      style={{
+                        background: 'rgba(var(--primary-rgb, 59, 130, 246), 0.08)',
+                        border: '1px solid rgba(var(--primary-rgb, 59, 130, 246), 0.3)',
+                        color: 'var(--primary)',
+                        fontSize: '0.72rem',
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-sm, 4px)',
+                        cursor: isSyncingAllCustomers ? 'wait' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontWeight: 600
+                      }}
+                      title="Puxar todos os clientes do Conta Azul para alimentar a base do banco"
+                    >
+                      <RefreshCw size={12} className={isSyncingAllCustomers ? 'spin' : ''} style={{ animation: isSyncingAllCustomers ? 'spin 1s linear infinite' : 'none' }} />
+                      <span>{isSyncingAllCustomers ? (syncAllProgressText || 'Sincronizando...') : 'Sincronizar do Conta Azul'}</span>
+                    </button>
                   </div>
 
                   <div style={{ position: 'relative' }}>
@@ -411,16 +482,24 @@ export function DetailModal(props: any) {
                       type="text"
                       className="form-input"
                       placeholder="Ex: Doce Vida Doceria (Digite o nome ou documento)"
-                      value={formCustomer}
+                      value={localCustomerInput}
                       disabled={isReadOnlyForForm('customer')}
                       onFocus={() => {
-                        if (customerSuggestions.length > 0 || (formCustomer && formCustomer.trim().length > 0)) {
-                          setIsCustomerDropdownOpen(true);
+                        setIsCustomerDropdownOpen(true);
+                        if (customerSuggestions.length === 0) {
+                          const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+                          searchCustomers(localCustomerInput ? localCustomerInput.trim() : '', tenantId, 25).then(res => {
+                            setCustomerSuggestions(res.data || []);
+                          });
                         }
                       }}
                       onChange={(e) => {
-                        setFormCustomer(e.target.value);
+                        setLocalCustomerInput(e.target.value);
                         setIsCustomerDropdownOpen(true);
+                      }}
+                      onKeyDown={handleCustomerKeyDown}
+                      onBlur={() => {
+                        setFormCustomer(localCustomerInput);
                       }}
                       autoComplete="off"
                     />
@@ -442,16 +521,16 @@ export function DetailModal(props: any) {
                   {/* Feedback da sincronização pontual */}
                   {customerSyncFeedback && (
                     <div style={{
-                      marginTop: '4px',
-                      fontSize: '0.75rem',
-                      color: customerSyncFeedback.type === 'error' ? '#ef4444' : customerSyncFeedback.type === 'success' ? '#10b981' : 'var(--primary)'
+                        marginTop: '4px',
+                        fontSize: '0.75rem',
+                        color: customerSyncFeedback.type === 'error' ? '#ef4444' : customerSyncFeedback.type === 'success' ? '#10b981' : 'var(--primary)'
                     }}>
                       {customerSyncFeedback.text}
                     </div>
                   )}
 
-                  {/* Dropdown de sugestões dinâmicas */}
-                  {isCustomerDropdownOpen && formCustomer && formCustomer.trim().length > 0 && (
+                  {/* Dropdown de sugestões dinâmicas direto do banco */}
+                  {isCustomerDropdownOpen && (
                     <div style={{
                       position: 'absolute',
                       top: '100%',
@@ -462,7 +541,7 @@ export function DetailModal(props: any) {
                       border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-md)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-                      maxHeight: '220px',
+                      maxHeight: '260px',
                       overflowY: 'auto',
                       marginTop: '4px'
                     }}>
@@ -470,6 +549,7 @@ export function DetailModal(props: any) {
                         <div
                           key={c.id}
                           onClick={() => {
+                            setLocalCustomerInput(c.name);
                             setFormCustomer(c.name);
                             setIsCustomerDropdownOpen(false);
                           }}
@@ -503,29 +583,55 @@ export function DetailModal(props: any) {
 
                       {customerSuggestions.length === 0 && !isSearchingCustomer && (
                         <div style={{ padding: '10px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Nenhum cliente local encontrado para "{formCustomer}".
+                          Nenhum cliente local encontrado para "{localCustomerInput}".
                         </div>
                       )}
 
-                      {/* Ação direta para buscar no Conta Azul */}
-                      <div
-                        onClick={() => handleSyncContaAzulFromModal()}
-                        style={{
-                          padding: '10px 12px',
-                          cursor: 'pointer',
-                          fontSize: '0.82rem',
-                          backgroundColor: 'rgba(59, 130, 246, 0.08)',
-                          color: 'var(--primary)',
-                          fontWeight: 500,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.16)'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.08)'}
-                      >
-                        <RefreshCw size={13} className={isSyncingContaAzulCustomer ? 'spin' : ''} />
-                        <span>Buscar e importar "{formCustomer}" direto do Conta Azul</span>
+                      {/* Rodapé de Sincronização Sob Demanda */}
+                      <div style={{
+                        padding: '8px 12px',
+                        borderTop: '1px solid var(--border)',
+                        backgroundColor: 'var(--background)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px'
+                      }}>
+                        {localCustomerInput && localCustomerInput.trim().length > 0 && (
+                          <div
+                            onClick={() => handleSyncContaAzulFromModal()}
+                            style={{
+                              cursor: 'pointer',
+                              fontSize: '0.78rem',
+                              color: 'var(--primary)',
+                              fontWeight: 500,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <RefreshCw size={12} className={isSyncingContaAzulCustomer ? 'spin' : ''} style={{ animation: isSyncingContaAzulCustomer ? 'spin 1s linear infinite' : 'none' }} />
+                            <span>Buscar "{localCustomerInput}" pontual no Conta Azul</span>
+                          </div>
+                        )}
+
+                        <div
+                          onClick={() => handleSyncAllCustomers()}
+                          style={{
+                            cursor: isSyncingAllCustomers ? 'wait' : 'pointer',
+                            fontSize: '0.78rem',
+                            color: 'var(--primary)',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}
+                        >
+                          <span style={{ color: 'var(--text-muted)' }}>Não encontrou na lista?</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <RefreshCw size={12} className={isSyncingAllCustomers ? 'spin' : ''} style={{ animation: isSyncingAllCustomers ? 'spin 1s linear infinite' : 'none' }} />
+                            <span>{isSyncingAllCustomers ? (syncAllProgressText || 'Sincronizando...') : 'Sincronizar Todos do Conta Azul'}</span>
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}

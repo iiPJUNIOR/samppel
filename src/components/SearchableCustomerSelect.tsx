@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, X, Check, ChevronDown, Building2, Loader2 } from 'lucide-react';
+import { Search, X, Check, ChevronDown, Building2, Loader2, RefreshCw } from 'lucide-react';
 import { getCustomerById } from '@/services/supabase';
+import { syncAllCustomersFromContaAzul } from '@/services/customer_sync';
 
 export interface CustomerOption {
   id: string;
@@ -40,11 +41,55 @@ export default function SearchableCustomerSelect({
   const [initialOptions, setInitialOptions] = useState<CustomerOption[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [cachedCustomer, setCachedCustomer] = useState<CustomerOption | null>(initialCustomer || null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleSyncContaAzul = async () => {
+    setIsSyncing(true);
+    setSyncStatus('Iniciando sincronização...');
+    try {
+      const res = await syncAllCustomersFromContaAzul((step, progress) => {
+        setSyncStatus(`${progress > 0 ? progress + '%' : ''} ${step}`);
+      });
+      if (res.success) {
+        setSyncStatus(`Sucesso! ${res.imported} novos, ${res.updated} atualizados.`);
+        try {
+          const freshRes = await fetch(`/api/customers/search?tenantId=${encodeURIComponent(tenantId)}&limit=30`);
+          if (freshRes.ok) {
+            const json = await freshRes.json();
+            if (json.success && Array.isArray(json.data)) {
+              setInitialOptions(json.data);
+            }
+          }
+        } catch { }
+        if (searchTerm.trim()) {
+          try {
+            const searchRes = await fetch(`/api/customers/search?q=${encodeURIComponent(searchTerm.trim())}&tenantId=${encodeURIComponent(tenantId)}&limit=40`);
+            if (searchRes.ok) {
+              const json = await searchRes.json();
+              if (json.success && Array.isArray(json.data)) {
+                setRemoteResults(json.data);
+              }
+            }
+          } catch { }
+        }
+      } else {
+        setSyncStatus(res.error || 'Erro na sincronização');
+      }
+    } catch (e: any) {
+      setSyncStatus(e.message || 'Erro ao sincronizar');
+    } finally {
+      setTimeout(() => {
+        setIsSyncing(false);
+        setSyncStatus('');
+      }, 5000);
+    }
+  };
 
   // 1. Resolução garantida do cliente selecionado pelo value
   useEffect(() => {
@@ -155,7 +200,7 @@ export default function SearchableCustomerSelect({
           setIsSearching(false);
         }
       }
-    }, 220);
+    }, 550);
 
     return () => {
       clearTimeout(timer);
@@ -471,6 +516,48 @@ export default function SearchableCustomerSelect({
                 );
               })
             )}
+          </div>
+
+          {/* Rodapé: Sincronização Sob Demanda do Conta Azul */}
+          <div style={{
+            padding: '0.45rem 0.75rem',
+            borderTop: '1px solid var(--border)',
+            backgroundColor: 'var(--background)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '0.72rem',
+            gap: '0.5rem'
+          }}>
+            <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {isSyncing ? syncStatus : (displayedCustomers.length === 0 ? 'Não encontrou a empresa?' : 'Precisa de novos clientes?')}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSyncContaAzul();
+              }}
+              disabled={isSyncing}
+              style={{
+                background: 'rgba(var(--primary-rgb, 59, 130, 246), 0.1)',
+                border: '1px solid rgba(var(--primary-rgb, 59, 130, 246), 0.25)',
+                color: 'var(--primary)',
+                fontWeight: 600,
+                fontSize: '0.72rem',
+                cursor: isSyncing ? 'wait' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-sm)',
+                whiteSpace: 'nowrap'
+              }}
+              title="Puxar todos os clientes do Conta Azul para alimentar o banco de dados"
+            >
+              <RefreshCw size={11} className={isSyncing ? 'spin' : ''} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
+              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar do Conta Azul'}</span>
+            </button>
           </div>
         </div>
       )}

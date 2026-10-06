@@ -553,6 +553,160 @@ export async function updateOrderItem(id: string, updates: Partial<OrderItem>) {
   return { data, error };
 }
 
+export interface SplitOrderItemParams {
+  originalItem: any;
+  advanceQuantity: number;
+  targetStageId: string;
+  targetBoxesCount?: number;
+  remainingBoxesCount?: number;
+  userId?: string;
+  tenantId?: string;
+}
+
+export async function splitOrderItem(params: SplitOrderItemParams) {
+  const {
+    originalItem,
+    advanceQuantity,
+    targetStageId,
+    targetBoxesCount,
+    remainingBoxesCount,
+    userId,
+    tenantId = originalItem?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+  } = params;
+
+  const originalPrintRun = Number(originalItem.print_run || 0);
+  if (advanceQuantity <= 0 || advanceQuantity >= originalPrintRun) {
+    return { data: null, error: new Error(`Quantidade inválida. Deve ser maior que 0 e menor que ${originalPrintRun}.`) };
+  }
+
+  const remainingQuantity = originalPrintRun - advanceQuantity;
+
+  // Identificadores com sufixos .1 e .2 recursivos
+  const baseId = (
+    originalItem.friendly_id || 
+    originalItem.order?.pv_number || 
+    originalItem.order?.op_number || 
+    'CARD'
+  ).trim();
+
+  const part1FriendlyId = `${baseId}.1`;
+  const part2FriendlyId = `${baseId}.2`;
+
+  const totalBoxes = Number(originalItem.boxes_count || 1);
+  const part1Boxes = targetBoxesCount ?? Math.max(1, Math.round(totalBoxes * (advanceQuantity / originalPrintRun)));
+  const part2Boxes = remainingBoxesCount ?? Math.max(1, totalBoxes - part1Boxes);
+
+  const nowIso = new Date().toISOString();
+
+  if (isMockMode) {
+    mockOrderItems = mockOrderItems.map(item => {
+      if (item.id === originalItem.id) {
+        return {
+          ...item,
+          friendly_id: part2FriendlyId,
+          print_run: remainingQuantity,
+          boxes_count: part2Boxes,
+          updated_at: nowIso
+        };
+      }
+      return item;
+    });
+
+    const newMockItem: any = {
+      ...originalItem,
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+      friendly_id: part1FriendlyId,
+      print_run: advanceQuantity,
+      boxes_count: part1Boxes,
+      stage_id: targetStageId,
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    mockOrderItems.push(newMockItem);
+
+    const updatedCard2 = mockOrderItems.find(i => i.id === originalItem.id);
+    return {
+      data: {
+        card1: newMockItem,
+        card2: updatedCard2
+      },
+      error: null
+    };
+  }
+
+  // 1. Atualiza o card original (Card 2 - Permanece na etapa atual)
+  const card2Updates = {
+    friendly_id: part2FriendlyId,
+    print_run: remainingQuantity,
+    boxes_count: part2Boxes,
+    split_at: nowIso,
+    split_by_user_id: userId || null,
+    notes: originalItem.notes 
+      ? `${originalItem.notes}\n[Desmembrado: Saldo restante de ${baseId}]`
+      : `Saldo restante de ${baseId}`,
+    updated_at: nowIso
+  };
+
+  const { data: updatedCard2, error: errUpdate } = await getDbClient()
+    .from('order_items')
+    .update(card2Updates)
+    .eq('id', originalItem.id)
+    .select('*, product:products(*), stage:order_stages(*)')
+    .single();
+
+  if (errUpdate) {
+    console.error('Erro ao atualizar card remanescente no desmembramento:', errUpdate);
+    return { data: null, error: errUpdate };
+  }
+
+  // 2. Insere o novo card (Card 1 - Avança para a etapa de destino)
+  const card1Payload = {
+    tenant_id: tenantId,
+    order_id: originalItem.order_id,
+    product_id: originalItem.product_id || null,
+    item_type: originalItem.item_type || 'PRODUTO',
+    name: originalItem.name,
+    friendly_id: part1FriendlyId,
+    measure: originalItem.measure || null,
+    print_run: advanceQuantity,
+    boxes_count: part1Boxes,
+    packaging_type: originalItem.packaging_type || 'CAIXA',
+    over_short_quantity: 0,
+    status: 'A produzir',
+    stage_id: targetStageId,
+    production_sector: originalItem.production_sector || 'Impressão',
+    physical_location: originalItem.physical_location || null,
+    machine_id: originalItem.machine_id || null,
+    notes: originalItem.notes 
+      ? `${originalItem.notes}\n[Desmembrado de ${baseId}]`
+      : `Desmembrado de ${baseId}`,
+    split_from_item_id: originalItem.id,
+    split_at: nowIso,
+    split_by_user_id: userId || null,
+    created_at: nowIso,
+    updated_at: nowIso
+  };
+
+  const { data: insertedCard1, error: errInsert } = await getDbClient()
+    .from('order_items')
+    .insert([card1Payload])
+    .select('*, product:products(*), stage:order_stages(*)')
+    .single();
+
+  if (errInsert) {
+    console.error('Erro ao inserir novo card desmembrado:', errInsert);
+    return { data: null, error: errInsert };
+  }
+
+  return {
+    data: {
+      card1: insertedCard1,
+      card2: updatedCard2
+    },
+    error: null
+  };
+}
+
 export async function getPendingAdjustment(tenantId: string, customerId: string, productId: string | null) {
   if (!customerId || !productId) return { data: null, error: null };
   

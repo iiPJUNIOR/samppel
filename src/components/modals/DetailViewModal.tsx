@@ -1,13 +1,15 @@
 // @ts-nocheck
 
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   X, Search, AlertTriangle, Users, Plus, Trash2, ChevronDown, 
   Info, Package, Truck, MapPin, FileText, Calendar, DollarSign, 
   CreditCard, Check, AlertCircle, Save, CheckCircle2, Factory,
-  Clock, Printer, PenTool, TrendingUp, HelpCircle, ArrowRightLeft
+  Clock, Printer, PenTool, TrendingUp, HelpCircle, ArrowRightLeft,
+  Split
 } from 'lucide-react';
 import Image from 'next/image';
+import { SplitCardModal } from './SplitCardModal';
 
 export function DetailViewModal(props: any) {
   const {
@@ -56,7 +58,9 @@ export function DetailViewModal(props: any) {
     setIsMoveStageModalOpen
   } = props;
 
-        const order = detailItem.order || {};
+  const [isSplitCardModalOpen, setIsSplitCardModalOpen] = useState(false);
+
+  const order = detailItem.order || {};
         const customer = order.customer || {};
         const currentStage = stages.find(s => s.id === detailItem.stage_id);
         const itemAdjs = adjustments.filter(a => a.order_item_id === detailItem.id);
@@ -1081,18 +1085,41 @@ export function DetailViewModal(props: any) {
                 gap: '0.5rem',
                 backgroundColor: 'var(--surface-subtle, transparent)'
               }}>
-                <button
-                  onClick={() => {
-                    const text = `PV: ${order.pv_number || '—'}\nCliente: ${customer.name || '—'}\nArte: ${detailItem.name}\nTiragem: ${detailItem.print_run} un`;
-                    navigator.clipboard.writeText(text);
-                    showToast('Resumo copiado para a área de transferência!');
-                  }}
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                >
-                  <Copy size={13} />
-                  <span>Copiar Resumo</span>
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => {
+                      const text = `PV: ${order.pv_number || '—'}\nCliente: ${customer.name || '—'}\nArte: ${detailItem.name}\nTiragem: ${detailItem.print_run} un`;
+                      navigator.clipboard.writeText(text);
+                      showToast('Resumo copiado para a área de transferência!');
+                    }}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                  >
+                    <Copy size={13} />
+                    <span>Copiar Resumo</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsSplitCardModalOpen(true)}
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.4rem 0.85rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      borderColor: 'var(--primary)',
+                      color: 'var(--primary)',
+                      fontWeight: 600,
+                      backgroundColor: 'rgba(var(--primary-rgb, 59, 130, 246), 0.06)'
+                    }}
+                    title="Dividir / Desmembrar este card em duas partes (.1 e .2)"
+                  >
+                    <Split size={14} />
+                    <span>Dividir</span>
+                  </button>
+                </div>
 
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   {order && (canUserDeleteOrder ? canUserDeleteOrder(order) : (isAdmin && (user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com' || user?.can_delete_any_order || isManualOrder(order)))) && (
@@ -1146,7 +1173,25 @@ export function DetailViewModal(props: any) {
               </div>
 
             </div>
-          </div>
 
+            {/* Modal de Divisão / Desmembramento */}
+            {isSplitCardModalOpen && (
+              <SplitCardModal
+                isOpen={isSplitCardModalOpen}
+                onClose={() => setIsSplitCardModalOpen(false)}
+                item={detailItem}
+                stages={stages}
+                user={user}
+                showToast={showToast}
+                onSuccess={() => {
+                  setIsSplitCardModalOpen(false);
+                  setIsDetailModalOpen(false);
+                  if (typeof props.fetchAllData === 'function') {
+                    props.fetchAllData();
+                  }
+                }}
+              />
+            )}
+          </div>
         );
 }
