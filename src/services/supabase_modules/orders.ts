@@ -2057,10 +2057,14 @@ export interface OrderItemHandlingTeam {
   is_completed?: boolean;
   completed_at?: string | null;
   services?: string[];
+  parent_allocation_id?: string | null;
+  status?: string;
+  notes?: string | null;
   team?: HandlingTeam;
   created_at?: string;
   updated_at?: string;
 }
+
 
 export const HANDLING_SERVICE_OPTIONS = [
   { key: 'CA', label: 'Colagem de Alça' },
@@ -2196,7 +2200,10 @@ export async function saveOrderItemHandlingTeams(
     handling_code: t.handling_code || null,
     is_completed: t.is_completed || false,
     completed_at: t.completed_at || t.return_date || null,
-    services: (t as any).services || []
+    services: (t as any).services || [],
+    parent_allocation_id: (t as any).parent_allocation_id || null,
+    status: (t as any).status || (t.is_completed ? 'CONCLUIDO' : 'PENDENTE'),
+    notes: (t as any).notes || null
   }));
 
   // Atualiza cache em localStorage imediatamente
@@ -2217,19 +2224,30 @@ export async function saveOrderItemHandlingTeams(
       .delete()
       .eq('order_item_id', orderItemId);
 
-    const payload = newAllocations.map(t => ({
-      tenant_id: tenantId,
-      order_item_id: orderItemId,
-      handling_team_id: t.handling_team_id,
-      quantity: Number(t.quantity),
-      departure_date: t.departure_date ? t.departure_date : null,
-      return_quantity: t.return_quantity ? Number(t.return_quantity) : 0,
-      return_date: t.return_date ? t.return_date : (t.completed_at ? t.completed_at : null),
-      handling_code: t.handling_code ? t.handling_code : null,
-      is_completed: t.is_completed || false,
-      completed_at: t.completed_at ? t.completed_at : (t.return_date ? t.return_date : null),
-      services: t.services || []
-    }));
+    const isUuid = (val?: string | null) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+    const payload = newAllocations.map(t => {
+      const obj: any = {
+        tenant_id: tenantId,
+        order_item_id: orderItemId,
+        handling_team_id: t.handling_team_id,
+        quantity: Number(t.quantity),
+        departure_date: t.departure_date ? t.departure_date : null,
+        return_quantity: t.return_quantity ? Number(t.return_quantity) : 0,
+        return_date: t.return_date ? t.return_date : (t.completed_at ? t.completed_at : null),
+        handling_code: t.handling_code ? t.handling_code : null,
+        is_completed: t.is_completed || false,
+        completed_at: t.completed_at ? t.completed_at : (t.return_date ? t.return_date : null),
+        services: t.services || [],
+        parent_allocation_id: isUuid(t.parent_allocation_id) ? t.parent_allocation_id : null,
+        status: t.status || (t.is_completed ? 'CONCLUIDO' : 'PENDENTE'),
+        notes: t.notes || null
+      };
+      if (isUuid(t.id)) {
+        obj.id = t.id;
+      }
+      return obj;
+    });
 
     let { data, error } = await getDbClient()
       .from('order_item_handling_teams')
@@ -2267,6 +2285,121 @@ export async function saveOrderItemHandlingTeams(
 
   return { data: newAllocations, error: null };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// DIVERGÊNCIAS E AUDITORIA DE RETORNO DE MANUSEIO (FALTA / EXCESSO)
+// ─────────────────────────────────────────────────────────────────
+
+export interface HandlingDivergenceRecord {
+  id: string;
+  tenant_id: string;
+  order_item_id: string;
+  order_id?: string | null;
+  handling_team_id?: string | null;
+  handling_allocation_id?: string | null;
+  handling_code?: string | null;
+  type: 'FALTA' | 'EXCESSO';
+  divergence_quantity: number;
+  withdrawn_quantity: number;
+  returned_quantity: number;
+  event_date: string;
+  formatted_message: string;
+  reported_by_operator_id?: string | null;
+  reported_by_name?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  team?: HandlingTeam;
+}
+
+const HANDLING_DIVERGENCES_CACHE_KEY = 'samppel_handling_divergences_v1';
+
+export async function saveHandlingDivergence(
+  divergence: Partial<HandlingDivergenceRecord>,
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+) {
+  const newRecord: HandlingDivergenceRecord = {
+    id: divergence.id || `div-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    tenant_id: tenantId,
+    order_item_id: divergence.order_item_id || '',
+    order_id: divergence.order_id || null,
+    handling_team_id: divergence.handling_team_id || null,
+    handling_allocation_id: divergence.handling_allocation_id || null,
+    handling_code: divergence.handling_code || null,
+    type: divergence.type || 'FALTA',
+    divergence_quantity: Number(divergence.divergence_quantity || 0),
+    withdrawn_quantity: Number(divergence.withdrawn_quantity || 0),
+    returned_quantity: Number(divergence.returned_quantity || 0),
+    event_date: divergence.event_date || new Date().toISOString().slice(0, 10),
+    formatted_message: divergence.formatted_message || '',
+    reported_by_operator_id: divergence.reported_by_operator_id || null,
+    reported_by_name: divergence.reported_by_name || 'Operador',
+    notes: divergence.notes || null,
+    created_at: new Date().toISOString()
+  };
+
+  // Salva no cache local
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(HANDLING_DIVERGENCES_CACHE_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      list.push(newRecord);
+      localStorage.setItem(HANDLING_DIVERGENCES_CACHE_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('Erro ao salvar divergência no cache local:', e);
+    }
+  }
+
+  if (isMockMode) {
+    return { data: newRecord, error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_handling_divergences')
+      .insert([newRecord])
+      .select('*, team:handling_teams(*)')
+      .single();
+
+    if (error) {
+      console.warn('Erro ao gravar divergência de manuseio no Supabase:', error.message);
+      return { data: newRecord, error: null };
+    }
+    return { data, error: null };
+  } catch (err: any) {
+    console.warn('Falha na requisição de divergência:', err);
+    return { data: newRecord, error: null };
+  }
+}
+
+export async function getHandlingDivergencesForItem(orderItemId: string) {
+  let localList: HandlingDivergenceRecord[] = [];
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(HANDLING_DIVERGENCES_CACHE_KEY);
+      if (raw) localList = JSON.parse(raw);
+    } catch (e) {}
+  }
+
+  if (isMockMode) {
+    return { data: localList.filter(d => d.order_item_id === orderItemId), error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_handling_divergences')
+      .select('*, team:handling_teams(*)')
+      .eq('order_item_id', orderItemId)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      return { data: localList.filter(d => d.order_item_id === orderItemId), error: null };
+    }
+    return { data, error: null };
+  } catch (err) {
+    return { data: localList.filter(d => d.order_item_id === orderItemId), error: null };
+  }
+}
+
 
 // ─────────────────────────────────────────────────────────────────
 // OPERAÇÕES: LOCALIZAÇÕES FÍSICAS NA FÁBRICA
