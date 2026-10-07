@@ -411,6 +411,8 @@ export default function PedidosPage() {
     user?.email?.toLowerCase().includes('admin') ||
     user?.email?.toLowerCase() === 'admin@samppel.com.br';
 
+  const isJunior = user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com';
+
   const isManualOrder = (order: any): boolean => {
     if (!order) return true;
     const target = order.order || order;
@@ -1493,6 +1495,10 @@ export default function PedidosPage() {
   };
 
   const handleImportOrders = async () => {
+    if (!isJunior) {
+      alert('Acesso restrito: apenas junior.8350i@gmail.com pode executar sincronização por período.');
+      return;
+    }
     setIsSyncingSingle(false);
     setImporting(true);
     setIsSyncModalOpen(true);
@@ -4686,57 +4692,61 @@ export default function PedidosPage() {
         {viewMode !== 'kanban' && !['Produção', 'Fábrica'].includes(user?.role || '') && (
           <div className="page-header-actions">
             <div className="import-action-bar">
-              {/* Opção 1: Importar por Período */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem', whiteSpace: 'nowrap' }}>Importar Período:</span>
-                <input
-                  type="date"
-                  value={importStartDate}
-                  min="2026-09-01"
-                  onChange={(e) => setImportStartDate(e.target.value)}
-                  disabled={importing}
-                  style={{
-                    padding: '0.25rem 0.4rem',
-                    fontSize: '0.75rem',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-sm)',
-                    backgroundColor: 'var(--surface)',
-                    color: 'var(--text)',
-                    outline: 'none',
-                    width: '110px'
-                  }}
-                />
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
-                <input
-                  type="date"
-                  value={importEndDate}
-                  min="2026-09-01"
-                  onChange={(e) => setImportEndDate(e.target.value)}
-                  disabled={importing}
-                  style={{
-                    padding: '0.25rem 0.4rem',
-                    fontSize: '0.75rem',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-sm)',
-                    backgroundColor: 'var(--surface)',
-                    color: 'var(--text)',
-                    outline: 'none',
-                    width: '110px'
-                  }}
-                />
-                <button
-                  onClick={handleImportOrders}
-                  disabled={importing}
-                  className="btn btn-secondary"
-                  style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-                >
-                  <RefreshCw size={12} className={importing ? 'spinner' : ''} />
-                  <span>{importing ? 'Sincronizando...' : 'Sincronizar'}</span>
-                </button>
-              </div>
+              {/* Opção 1: Importar por Período (Apenas junior.8350i@gmail.com) */}
+              {isJunior && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', paddingLeft: '0.25rem', whiteSpace: 'nowrap' }}>Importar Período:</span>
+                    <input
+                      type="date"
+                      value={importStartDate}
+                      min="2026-09-01"
+                      onChange={(e) => setImportStartDate(e.target.value)}
+                      disabled={importing}
+                      style={{
+                        padding: '0.25rem 0.4rem',
+                        fontSize: '0.75rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: 'var(--surface)',
+                        color: 'var(--text)',
+                        outline: 'none',
+                        width: '110px'
+                      }}
+                    />
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>a</span>
+                    <input
+                      type="date"
+                      value={importEndDate}
+                      min="2026-09-01"
+                      onChange={(e) => setImportEndDate(e.target.value)}
+                      disabled={importing}
+                      style={{
+                        padding: '0.25rem 0.4rem',
+                        fontSize: '0.75rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: 'var(--surface)',
+                        color: 'var(--text)',
+                        outline: 'none',
+                        width: '110px'
+                      }}
+                    />
+                    <button
+                      onClick={handleImportOrders}
+                      disabled={importing}
+                      className="btn btn-secondary"
+                      style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', padding: '0.3rem 0.6rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                    >
+                      <RefreshCw size={12} className={importing ? 'spinner' : ''} />
+                      <span>{importing ? 'Sincronizando...' : 'Sincronizar'}</span>
+                    </button>
+                  </div>
 
-              {/* Divisor Vertical */}
-              <div className="import-divider-vertical" style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)', alignSelf: 'center' }} />
+                  {/* Divisor Vertical */}
+                  <div className="import-divider-vertical" style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)', alignSelf: 'center' }} />
+                </>
+              )}
 
               {/* Opção 2: Importar Pedido por Número */}
               <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -4874,48 +4884,52 @@ export default function PedidosPage() {
                     </span>
                     <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)' }} />
 
-                    {/* Importar por Período */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                      <input
-                        type="date"
-                        value={importStartDate}
-                        min="2026-09-01"
-                        onChange={(e) => setImportStartDate(e.target.value)}
-                        disabled={importing}
-                        style={{
-                          height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem',
-                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                          backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '110px'
-                        }}
-                      />
-                      <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>→</span>
-                      <input
-                        type="date"
-                        value={importEndDate}
-                        onChange={(e) => setImportEndDate(e.target.value)}
-                        disabled={importing}
-                        style={{
-                          height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem',
-                          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                          backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '110px'
-                        }}
-                      />
-                      <button
-                        onClick={handleImportOrders}
-                        disabled={importing}
-                        className="btn btn-primary"
-                        style={{
-                          height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center',
-                          padding: '0.18rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0,
-                          borderRadius: 'var(--radius-sm)'
-                        }}
-                      >
-                        <RefreshCw size={11} className={importing ? 'spinner' : ''} />
-                        <span>{importing ? 'Sincronizando...' : 'Por Período'}</span>
-                      </button>
-                    </div>
+                    {/* Importar por Período (Apenas junior.8350i@gmail.com) */}
+                    {isJunior && (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                          <input
+                            type="date"
+                            value={importStartDate}
+                            min="2026-09-01"
+                            onChange={(e) => setImportStartDate(e.target.value)}
+                            disabled={importing}
+                            style={{
+                              height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem',
+                              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                              backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '110px'
+                            }}
+                          />
+                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>→</span>
+                          <input
+                            type="date"
+                            value={importEndDate}
+                            onChange={(e) => setImportEndDate(e.target.value)}
+                            disabled={importing}
+                            style={{
+                              height: '26px', padding: '0.15rem 0.35rem', fontSize: '0.72rem',
+                              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                              backgroundColor: 'var(--surface)', color: 'var(--text)', outline: 'none', width: '110px'
+                            }}
+                          />
+                          <button
+                            onClick={handleImportOrders}
+                            disabled={importing}
+                            className="btn btn-primary"
+                            style={{
+                              height: '26px', display: 'flex', gap: '0.3rem', alignItems: 'center',
+                              padding: '0.18rem 0.6rem', fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0,
+                              borderRadius: 'var(--radius-sm)'
+                            }}
+                          >
+                            <RefreshCw size={11} className={importing ? 'spinner' : ''} />
+                            <span>{importing ? 'Sincronizando...' : 'Por Período'}</span>
+                          </button>
+                        </div>
 
-                    <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)' }} />
+                        <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border)' }} />
+                      </>
+                    )}
 
                     {/* Importar por Pedido Nº */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
