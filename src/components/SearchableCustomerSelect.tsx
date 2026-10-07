@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, X, Check, ChevronDown, Building2, Loader2, RefreshCw } from 'lucide-react';
-import { getCustomerById } from '@/services/supabase';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Search, X, Check, Building2, Loader2, RefreshCw } from 'lucide-react';
+import { searchCustomers, getCustomerById } from '@/services/supabase';
 import { syncAllCustomersFromContaAzul } from '@/services/customer_sync';
 
 export interface CustomerOption {
@@ -11,17 +11,19 @@ export interface CustomerOption {
   document?: string | null;
   email?: string | null;
   phone?: string | null;
+  company_name?: string | null;
 }
 
 interface SearchableCustomerSelectProps {
   customers?: CustomerOption[];
   initialCustomer?: CustomerOption | null;
   value: string;
-  onChange: (customerId: string, customer?: CustomerOption) => void;
+  onChange: (customerId: string, customer?: CustomerOption | null) => void;
   placeholder?: string;
   disabled?: boolean;
   required?: boolean;
   tenantId?: string;
+  className?: string;
 }
 
 export default function SearchableCustomerSelect({
@@ -29,95 +31,67 @@ export default function SearchableCustomerSelect({
   initialCustomer = null,
   value,
   onChange,
-  placeholder = 'Buscar cliente por nome ou CNPJ/CPF...',
+  placeholder = 'Ex: Doce Vida Doceria (Digite o nome ou documento)',
   disabled = false,
   required = false,
-  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+  className = ''
 }: SearchableCustomerSelectProps) {
+  const [displayInput, setDisplayInput] = useState('');
   const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [remoteResults, setRemoteResults] = useState<CustomerOption[]>([]);
-  const [initialOptions, setInitialOptions] = useState<CustomerOption[]>([]);
+  const [suggestions, setSuggestions] = useState<CustomerOption[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [cachedCustomer, setCachedCustomer] = useState<CustomerOption | null>(initialCustomer || null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  // Estados de Sincronização com Conta Azul
+  const [isSyncingContaAzulSingle, setIsSyncingContaAzulSingle] = useState(false);
+  const [isSyncingContaAzulAll, setIsSyncingContaAzulAll] = useState(false);
+  const [syncAllProgressText, setSyncAllProgressText] = useState('');
+  const [customerSyncFeedback, setCustomerSyncFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const isTypingRef = useRef(false);
 
-  const handleSyncContaAzul = async () => {
-    setIsSyncing(true);
-    setSyncStatus('Iniciando sincronização...');
-    try {
-      const res = await syncAllCustomersFromContaAzul((step, progress) => {
-        setSyncStatus(`${progress > 0 ? progress + '%' : ''} ${step}`);
-      });
-      if (res.success) {
-        setSyncStatus(`Sucesso! ${res.imported} novos, ${res.updated} atualizados.`);
-        try {
-          const freshRes = await fetch(`/api/customers/search?tenantId=${encodeURIComponent(tenantId)}&limit=30`);
-          if (freshRes.ok) {
-            const json = await freshRes.json();
-            if (json.success && Array.isArray(json.data)) {
-              setInitialOptions(json.data);
-            }
-          }
-        } catch { }
-        if (searchTerm.trim()) {
-          try {
-            const searchRes = await fetch(`/api/customers/search?q=${encodeURIComponent(searchTerm.trim())}&tenantId=${encodeURIComponent(tenantId)}&limit=40`);
-            if (searchRes.ok) {
-              const json = await searchRes.json();
-              if (json.success && Array.isArray(json.data)) {
-                setRemoteResults(json.data);
-              }
-            }
-          } catch { }
-        }
-      } else {
-        setSyncStatus(res.error || 'Erro na sincronização');
-      }
-    } catch (e: any) {
-      setSyncStatus(e.message || 'Erro ao sincronizar');
-    } finally {
-      setTimeout(() => {
-        setIsSyncing(false);
-        setSyncStatus('');
-      }, 5000);
-    }
-  };
-
-  // 1. Resolução garantida do cliente selecionado pelo value
+  // 1. Sincroniza o valor de exibição com base na prop value
   useEffect(() => {
     if (!value) {
+      if (!isTypingRef.current) {
+        setDisplayInput('');
+      }
       setCachedCustomer(null);
       return;
     }
 
-    // Se já está em cache
+    // Se já temos em initialCustomer e bate com o id
+    if (initialCustomer && initialCustomer.id === value) {
+      setDisplayInput(initialCustomer.name);
+      setCachedCustomer(initialCustomer);
+      return;
+    }
+
+    // Se já está em cachedCustomer
     if (cachedCustomer && cachedCustomer.id === value) {
+      if (!isTypingRef.current) {
+        setDisplayInput(cachedCustomer.name);
+      }
       return;
     }
 
-    // Procura nas listas locais existentes
-    const found =
-      customers.find(c => c.id === value) ||
-      remoteResults.find(c => c.id === value) ||
-      initialOptions.find(c => c.id === value);
-
-    if (found) {
-      setCachedCustomer(found);
+    // Procura na lista local de clientes se foi passada
+    const foundLocal = customers.find(c => c.id === value);
+    if (foundLocal) {
+      setDisplayInput(foundLocal.name);
+      setCachedCustomer(foundLocal);
       return;
     }
 
-    // Busca autoritativa pelo ID no servidor
+    // Busca autoritativa pelo ID no banco
     let isCancelled = false;
     getCustomerById(value, tenantId).then(res => {
       if (!isCancelled && res.data) {
+        setDisplayInput(res.data.name);
         setCachedCustomer(res.data);
       }
     }).catch(err => {
@@ -127,174 +101,79 @@ export default function SearchableCustomerSelect({
     return () => {
       isCancelled = true;
     };
-  }, [value, customers, remoteResults, initialOptions, cachedCustomer, tenantId]);
+  }, [value, initialCustomer, tenantId]);
 
-  const selectedCustomer = useMemo(() => {
-    if (!value) return null;
-    if (cachedCustomer && cachedCustomer.id === value) return cachedCustomer;
-    return (
-      customers.find(c => c.id === value) ||
-      remoteResults.find(c => c.id === value) ||
-      initialOptions.find(c => c.id === value) ||
-      null
-    );
-  }, [value, cachedCustomer, customers, remoteResults, initialOptions]);
-
-  // 2. Carrega opções iniciais ao abrir o dropdown caso estejam vazias
-  const fetchDefaultOptions = useCallback(async () => {
-    if (initialOptions.length > 0) return;
-    if (customers.length > 0) {
-      setInitialOptions(customers.slice(0, 30));
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/customers/search?tenantId=${encodeURIComponent(tenantId)}&limit=30`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
-          setInitialOptions(json.data);
-        }
-      }
-    } catch (err) {
-      console.warn('Falha ao carregar lista inicial de clientes:', err);
-    }
-  }, [initialOptions.length, customers, tenantId]);
-
-  // 3. Busca remota ultra-rápida na API Server-Side com debounce e cancelamento de requisições anteriores
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const term = searchTerm.trim();
-    if (!term) {
-      setRemoteResults([]);
-      setIsSearching(false);
-      fetchDefaultOptions();
-      return;
-    }
-
+  // 2. Executa a busca com a mesma lógica do Novo Pedido (searchCustomers)
+  const triggerSearch = useCallback(async (term: string) => {
     setIsSearching(true);
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    try {
+      const res = await searchCustomers(term, tenantId, 25);
+      const list = res.data || [];
+      setSuggestions(list);
+      setHighlightedIndex(-1);
+    } catch (err) {
+      console.error('Erro na pesquisa de clientes:', err);
+    } finally {
+      setIsSearching(false);
     }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  }, [tenantId]);
 
-    const timer = setTimeout(async () => {
-      try {
-        const url = `/api/customers/search?q=${encodeURIComponent(term)}&tenantId=${encodeURIComponent(tenantId)}&limit=40`;
-        const res = await fetch(url, { signal: controller.signal });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.data)) {
-            setRemoteResults(json.data);
-          }
-        }
-      } catch (e: any) {
-        if (e.name !== 'AbortError') {
-          console.error('Erro na pesquisa corporativa de clientes:', e);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsSearching(false);
-        }
-      }
-    }, 550);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [searchTerm, isOpen, tenantId, fetchDefaultOptions]);
-
-  // Limpa o AbortController ao desmontar
+  // 3. Debounce para digitação imediata no campo
   useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
+    if (!isOpen && !isTypingRef.current) return;
 
-  // 4. Lista combinada exibida no dropdown
-  const displayedCustomers = useMemo(() => {
-    const term = searchTerm.trim();
-    if (!term) {
-      const base = initialOptions.length > 0 ? initialOptions : customers.slice(0, 30);
-      if (selectedCustomer && !base.some(c => c.id === selectedCustomer.id)) {
-        return [selectedCustomer, ...base];
-      }
-      return base;
-    }
+    const term = displayInput.trim();
 
-    // Se houver busca remota ativa, exibe os resultados retornados pelo servidor
-    if (remoteResults.length > 0) {
-      return remoteResults;
-    }
+    const timer = setTimeout(() => {
+      triggerSearch(term);
+      isTypingRef.current = false;
+    }, 450);
 
-    // Se estiver aguardando busca ou sem resultados remotos, tenta filtrar itens locais
-    const cleanSearch = term.toLowerCase();
-    const localFiltered = (initialOptions.length > 0 ? initialOptions : customers).filter(c => {
-      const name = (c.name || '').toLowerCase();
-      const doc = (c.document || '').toLowerCase();
-      const email = (c.email || '').toLowerCase();
-      return name.includes(cleanSearch) || doc.includes(cleanSearch) || email.includes(cleanSearch);
-    });
+    return () => clearTimeout(timer);
+  }, [displayInput, isOpen, triggerSearch]);
 
-    return localFiltered;
-  }, [searchTerm, remoteResults, initialOptions, customers, selectedCustomer]);
-
-  // Fecha ao clicar fora
+  // 4. Fechar dropdown ao clicar fora do componente
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        isTypingRef.current = false;
+
+        // Se o usuário digitou mas não selecionou nenhum cliente, restaura o nome do cliente ativo ou limpa
+        if (cachedCustomer && cachedCustomer.id === value) {
+          setDisplayInput(cachedCustomer.name);
+        } else if (!value) {
+          setDisplayInput('');
+        }
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [cachedCustomer, value]);
 
-  // Foca no input e carrega dados ao abrir
-  useEffect(() => {
-    if (isOpen) {
-      setSearchTerm('');
-      setRemoteResults([]);
-      setHighlightedIndex(0);
-      fetchDefaultOptions();
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-    }
-  }, [isOpen, fetchDefaultOptions]);
-
-  // Navegação por teclado
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  // 5. Navegação e Seleção por Teclado
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!isOpen) {
-      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-        e.preventDefault();
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
         setIsOpen(true);
+        triggerSearch(displayInput.trim());
       }
       return;
     }
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightedIndex(prev => (prev + 1) % (displayedCustomers.length + 1));
+      setHighlightedIndex(prev => (prev + 1 < suggestions.length ? prev + 1 : 0));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setHighlightedIndex(prev => (prev - 1 + displayedCustomers.length + 1) % (displayedCustomers.length + 1));
+      setHighlightedIndex(prev => (prev - 1 >= 0 ? prev - 1 : suggestions.length - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (highlightedIndex === 0) {
-        setCachedCustomer(null);
-        onChange('');
-        setIsOpen(false);
-      } else if (displayedCustomers[highlightedIndex - 1]) {
-        const chosen = displayedCustomers[highlightedIndex - 1];
-        setCachedCustomer(chosen);
-        onChange(chosen.id, chosen);
-        setIsOpen(false);
+      if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+        const selected = suggestions[highlightedIndex];
+        handleSelectCustomer(selected);
+      } else {
+        triggerSearch(displayInput.trim());
       }
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -302,262 +181,346 @@ export default function SearchableCustomerSelect({
     }
   };
 
-  return (
-    <div 
-      ref={containerRef} 
-      style={{ position: 'relative', width: '100%' }}
-      onKeyDown={handleKeyDown}
-    >
-      {/* Botão Gatilho / Visualização do Selecionado */}
-      <div
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0.625rem 0.75rem',
-          backgroundColor: 'var(--surface)',
-          border: isOpen ? '1px solid var(--primary)' : '1px solid var(--border)',
-          borderRadius: 'var(--radius-sm)',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.6 : 1,
-          minHeight: '42px',
-          boxShadow: isOpen ? '0 0 0 2px rgba(var(--primary-rgb, 59, 130, 246), 0.2)' : 'none',
-          transition: 'all 0.15s ease'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, overflow: 'hidden' }}>
-          {selectedCustomer ? (
-            <>
-              <Building2 size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-              <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {selectedCustomer.name}
-                </span>
-                {selectedCustomer.document && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    CNPJ/CPF: {selectedCustomer.document}
-                  </span>
-                )}
-              </div>
-            </>
-          ) : (
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              {placeholder}
-            </span>
-          )}
-        </div>
+  // 6. Seleciona cliente da lista
+  const handleSelectCustomer = (customer: CustomerOption) => {
+    isTypingRef.current = false;
+    setDisplayInput(customer.name);
+    setCachedCustomer(customer);
+    onChange(customer.id, customer);
+    setIsOpen(false);
+    setSuggestions([]);
+  };
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-          {selectedCustomer && !disabled && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setCachedCustomer(null);
-                onChange('');
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px',
-                color: 'var(--text-muted)',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center'
-              }}
-              title="Desvincular cliente"
-            >
-              <X size={14} />
-            </button>
-          )}
-          <ChevronDown size={16} style={{ color: 'var(--text-muted)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }} />
-        </div>
+  // 7. Limpa a seleção
+  const handleClear = () => {
+    isTypingRef.current = false;
+    setDisplayInput('');
+    setCachedCustomer(null);
+    setSuggestions([]);
+    onChange('', null);
+    inputRef.current?.focus();
+  };
+
+  // 8. Busca pontual no Conta Azul (igual ao Novo Pedido)
+  const handleSyncContaAzulSingle = async () => {
+    const term = displayInput.trim();
+    if (!term) {
+      alert('Digite o nome ou CNPJ/CPF do cliente para buscar no Conta Azul.');
+      return;
+    }
+
+    setIsSyncingContaAzulSingle(true);
+    setCustomerSyncFeedback({ type: 'info', text: 'Buscando cliente na Conta Azul...' });
+
+    try {
+      const cleanDoc = term.replace(/\D/g, '');
+      const params = new URLSearchParams();
+      if (cleanDoc && (cleanDoc.length === 11 || cleanDoc.length === 14)) {
+        params.append('document', cleanDoc);
+      } else {
+        params.append('name', term);
+      }
+      params.append('sync', 'true');
+
+      const res = await fetch(`/api/sync/search-customer?${params.toString()}`);
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.found) {
+        setCustomerSyncFeedback({
+          type: 'error',
+          text: data.message || data.error || 'Cliente não encontrado no Conta Azul.'
+        });
+        return;
+      }
+
+      const c = data.customer;
+      handleSelectCustomer(c);
+      setCustomerSyncFeedback({
+        type: 'success',
+        text: `Cliente "${c.name}" sincronizado do Conta Azul com sucesso!`
+      });
+
+      setTimeout(() => setCustomerSyncFeedback(null), 5000);
+    } catch (err: any) {
+      console.error(err);
+      setCustomerSyncFeedback({
+        type: 'error',
+        text: 'Erro ao conectar com Conta Azul: ' + (err.message || 'Falha na requisição')
+      });
+    } finally {
+      setIsSyncingContaAzulSingle(false);
+    }
+  };
+
+  // 9. Sincronização Completa de Todos os Clientes do Conta Azul (igual ao Novo Pedido)
+  const handleSyncContaAzulAll = async () => {
+    setIsSyncingContaAzulAll(true);
+    setSyncAllProgressText('Iniciando sincronização...');
+    setCustomerSyncFeedback({ type: 'info', text: 'Conectando ao Conta Azul para puxar todos os clientes...' });
+
+    try {
+      const res = await syncAllCustomersFromContaAzul((step, progress) => {
+        setSyncAllProgressText(`${progress > 0 ? progress + '%' : ''} ${step}`);
+      });
+
+      if (res.success) {
+        setCustomerSyncFeedback({
+          type: 'success',
+          text: `Base de clientes atualizada no banco! (${res.imported} novos, ${res.updated} atualizados).`
+        });
+        triggerSearch(displayInput.trim());
+      } else {
+        setCustomerSyncFeedback({
+          type: 'error',
+          text: res.error || 'Erro ao sincronizar base de clientes.'
+        });
+      }
+    } catch (err: any) {
+      setCustomerSyncFeedback({
+        type: 'error',
+        text: 'Erro de conexão: ' + (err.message || 'Falha ao sincronizar clientes')
+      });
+    } finally {
+      setIsSyncingContaAzulAll(false);
+      setSyncAllProgressText('');
+      setTimeout(() => setCustomerSyncFeedback(null), 8000);
+    }
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+      {/* Input de Digitação Direta (Idêntico ao Novo Pedido) */}
+      <div style={{ position: 'relative' }}>
+        <input
+          ref={inputRef}
+          type="text"
+          className={`form-input ${className}`}
+          placeholder={placeholder}
+          value={displayInput}
+          disabled={disabled}
+          required={required}
+          onFocus={() => {
+            setIsOpen(true);
+            if (suggestions.length === 0) {
+              triggerSearch(displayInput.trim());
+            }
+          }}
+          onChange={(e) => {
+            isTypingRef.current = true;
+            setDisplayInput(e.target.value);
+            setIsOpen(true);
+            if (!e.target.value) {
+              onChange('', null);
+              setCachedCustomer(null);
+            }
+          }}
+          onKeyDown={handleKeyDown}
+          autoComplete="off"
+          style={{
+            paddingRight: displayInput ? '34px' : '12px',
+            width: '100%'
+          }}
+        />
+
+        {/* Indicador de Busca */}
+        {isSearching && (
+          <span style={{
+            position: 'absolute',
+            right: displayInput && !disabled ? '30px' : '10px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            fontSize: '0.72rem',
+            color: 'var(--text-muted)',
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}>
+            <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Buscando...</span>
+          </span>
+        )}
+
+        {/* Botão de Limpar Seleção (X) */}
+        {displayInput && !disabled && !isSearching && (
+          <button
+            type="button"
+            onClick={handleClear}
+            style={{
+              position: 'absolute',
+              right: '8px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: '4px'
+            }}
+            title="Limpar cliente selecionado"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
-      {/* Dropdown com Campo de Busca */}
+      {/* Feedback de Sincronização com Conta Azul */}
+      {customerSyncFeedback && (
+        <div style={{
+          marginTop: '4px',
+          fontSize: '0.75rem',
+          fontWeight: 500,
+          color: customerSyncFeedback.type === 'error' ? '#ef4444' : customerSyncFeedback.type === 'success' ? '#10b981' : 'var(--primary)'
+        }}>
+          {customerSyncFeedback.text}
+        </div>
+      )}
+
+      {/* Dropdown de Sugestões Dinâmicas (Idêntico ao Novo Pedido) */}
       {isOpen && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            left: 0,
-            right: 0,
-            zIndex: 100,
-            backgroundColor: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-md)',
-            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            maxHeight: '320px',
-            animation: 'fadeIn 0.15s ease'
-          }}
-        >
-          {/* Campo de Pesquisa em Tempo Real */}
-          <div style={{ padding: '0.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.5rem', backgroundColor: 'var(--background)' }}>
-            {isSearching ? (
-              <Loader2 size={16} style={{ color: 'var(--primary)', marginLeft: '4px', animation: 'spin 1s linear infinite' }} />
-            ) : (
-              <Search size={16} style={{ color: 'var(--text-muted)', marginLeft: '4px' }} />
-            )}
-            <input
-              ref={inputRef}
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Digite o nome ou CNPJ para filtrar..."
-              style={{
-                width: '100%',
-                border: 'none',
-                outline: 'none',
-                backgroundColor: 'transparent',
-                fontSize: '0.85rem',
-                color: 'var(--text)'
-              }}
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchTerm('');
-                  setRemoteResults([]);
-                }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-muted)' }}
-              >
-                <X size={14} />
-              </button>
-            )}
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          zIndex: 1050,
+          backgroundColor: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-md, 6px)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
+          maxHeight: '280px',
+          overflowY: 'auto',
+          marginTop: '4px',
+          animation: 'fadeIn 0.15s ease'
+        }}>
+          {/* Opção Desvincular / Nenhum */}
+          <div
+            onClick={() => {
+              handleClear();
+              setIsOpen(false);
+            }}
+            style={{
+              padding: '8px 12px',
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+              color: 'var(--text-muted)',
+              borderBottom: '1px solid var(--border)',
+              backgroundColor: !value ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.08)' : 'transparent',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--surface-hover)'}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = !value ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.08)' : 'transparent'}
+          >
+            <span>— Nenhum (Desvincular Cliente) —</span>
+            {!value && <Check size={14} style={{ color: 'var(--primary)' }} />}
           </div>
 
-          {/* Lista de Clientes */}
-          <div 
-            ref={listRef} 
-            style={{ 
-              overflowY: 'auto', 
-              maxHeight: '260px',
-              padding: '0.25rem' 
-            }}
-          >
-            {/* Opção Desvincular / Nenhum */}
+          {/* Lista de Resultados */}
+          {suggestions.map((c, idx) => {
+            const isSelected = c.id === value;
+            const isHighlighted = highlightedIndex === idx;
+
+            return (
+              <div
+                key={c.id}
+                onClick={() => handleSelectCustomer(c)}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  borderBottom: '1px solid var(--border)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  backgroundColor: isHighlighted ? 'var(--surface-hover)' : (isSelected ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.08)' : 'transparent'),
+                  transition: 'background-color 0.1s ease'
+                }}
+                onMouseEnter={(e) => {
+                  setHighlightedIndex(idx);
+                  e.currentTarget.style.backgroundColor = 'var(--surface-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = isSelected ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.08)' : 'transparent';
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, color: isSelected ? 'var(--primary)' : 'var(--text)' }}>
+                    {c.name}
+                  </div>
+                  {c.document && (
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                      Doc: {c.document}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {c.company_name && c.company_name !== c.name && (
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                      {c.company_name}
+                    </span>
+                  )}
+                  {isSelected && <Check size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />}
+                </div>
+              </div>
+            );
+          })}
+
+          {suggestions.length === 0 && !isSearching && (
+            <div style={{ padding: '10px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              Nenhum cliente local encontrado para "{displayInput}".
+            </div>
+          )}
+
+          {/* Rodapé de Sincronização Sob Demanda (Idêntico ao Novo Pedido) */}
+          <div style={{
+            padding: '8px 12px',
+            borderTop: '1px solid var(--border)',
+            backgroundColor: 'var(--background)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px'
+          }}>
+            {displayInput && displayInput.trim().length > 0 && (
+              <div
+                onClick={handleSyncContaAzulSingle}
+                style={{
+                  cursor: isSyncingContaAzulSingle ? 'wait' : 'pointer',
+                  fontSize: '0.78rem',
+                  color: 'var(--primary)',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <RefreshCw size={12} className={isSyncingContaAzulSingle ? 'spin' : ''} style={{ animation: isSyncingContaAzulSingle ? 'spin 1s linear infinite' : 'none' }} />
+                <span>Buscar "{displayInput}" pontual no Conta Azul</span>
+              </div>
+            )}
+
             <div
-              onClick={() => {
-                setCachedCustomer(null);
-                onChange('');
-                setIsOpen(false);
-              }}
+              onClick={handleSyncContaAzulAll}
               style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '0.85rem',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                backgroundColor: highlightedIndex === 0 ? 'var(--background)' : 'transparent',
+                cursor: isSyncingContaAzulAll ? 'wait' : 'pointer',
+                fontSize: '0.78rem',
+                color: 'var(--primary)',
+                fontWeight: 600,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between'
               }}
             >
-              <span>— Nenhum (Desvincular Cliente) —</span>
-              {!value && <Check size={14} style={{ color: 'var(--primary)' }} />}
+              <span style={{ color: 'var(--text-muted)' }}>Não encontrou na lista?</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <RefreshCw size={12} className={isSyncingContaAzulAll ? 'spin' : ''} style={{ animation: isSyncingContaAzulAll ? 'spin 1s linear infinite' : 'none' }} />
+                <span>{isSyncingContaAzulAll ? (syncAllProgressText || 'Sincronizando...') : 'Sincronizar Todos do Conta Azul'}</span>
+              </span>
             </div>
-
-            {displayedCustomers.length === 0 ? (
-              <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                {isSearching ? 'Buscando clientes no banco de dados...' : `Nenhum cliente encontrado para "${searchTerm}".`}
-              </div>
-            ) : (
-              displayedCustomers.map((c, idx) => {
-                const isSelected = c.id === value;
-                const isHighlighted = highlightedIndex === idx + 1;
-
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => {
-                      setCachedCustomer(c);
-                      onChange(c.id, c);
-                      setIsOpen(false);
-                    }}
-                    onMouseEnter={() => setHighlightedIndex(idx + 1)}
-                    style={{
-                      padding: '0.5rem 0.75rem',
-                      borderRadius: 'var(--radius-sm)',
-                      cursor: 'pointer',
-                      backgroundColor: isHighlighted ? 'var(--background)' : (isSelected ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.08)' : 'transparent'),
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '0.5rem',
-                      transition: 'background-color 0.1s ease'
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                      <span style={{ 
-                        fontSize: '0.85rem', 
-                        fontWeight: isSelected ? 700 : 500,
-                        color: isSelected ? 'var(--primary)' : 'var(--text)',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
-                      }}>
-                        {c.name}
-                      </span>
-                      {c.document && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          CNPJ/CPF: {c.document}
-                        </span>
-                      )}
-                    </div>
-                    {isSelected && <Check size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />}
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Rodapé: Sincronização Sob Demanda do Conta Azul */}
-          <div style={{
-            padding: '0.45rem 0.75rem',
-            borderTop: '1px solid var(--border)',
-            backgroundColor: 'var(--background)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: '0.72rem',
-            gap: '0.5rem'
-          }}>
-            <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {isSyncing ? syncStatus : (displayedCustomers.length === 0 ? 'Não encontrou a empresa?' : 'Precisa de novos clientes?')}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSyncContaAzul();
-              }}
-              disabled={isSyncing}
-              style={{
-                background: 'rgba(var(--primary-rgb, 59, 130, 246), 0.1)',
-                border: '1px solid rgba(var(--primary-rgb, 59, 130, 246), 0.25)',
-                color: 'var(--primary)',
-                fontWeight: 600,
-                fontSize: '0.72rem',
-                cursor: isSyncing ? 'wait' : 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '2px 8px',
-                borderRadius: 'var(--radius-sm)',
-                whiteSpace: 'nowrap'
-              }}
-              title="Puxar todos os clientes do Conta Azul para alimentar o banco de dados"
-            >
-              <RefreshCw size={11} className={isSyncing ? 'spin' : ''} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
-              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar do Conta Azul'}</span>
-            </button>
           </div>
         </div>
       )}

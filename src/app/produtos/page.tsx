@@ -454,7 +454,7 @@ export default function ProdutosPage() {
     setFormBindRequiresHandling(!!product.bind_requires_handling);
     setFormCategory(product.category || '');
     setFormMeasure(product.measure || '');
-    setFormCustomer(product.customer_id || '');
+    setFormCustomer(product.customer?.id || product.customer_id || '');
     setIsFormModalOpen(true);
   };
 
@@ -478,7 +478,7 @@ export default function ProdutosPage() {
       bind_requires_handling: formBindToFirstItem ? formBindRequiresHandling : false,
       category: formCategory || null,
       measure: formMeasure || null,
-      customer_id: formCategory === 'PERSONALIZADA' ? (formCustomer || null) : null,
+      customer_id: (formCategory === 'PERSONALIZADA' || !!formCustomer) ? (formCustomer || null) : null,
       stock_quantity: modalType === 'create' ? Number(formStock) : undefined
     };
 
@@ -1370,14 +1370,15 @@ export default function ProdutosPage() {
                 />
               </div>
 
-              {formCategory === 'PERSONALIZADA' && (
-                <div className="form-group">
+              {(formCategory === 'PERSONALIZADA' || !!formCustomer) && (
+                <div className="form-group" style={{ position: 'relative' }}>
                   <label className="form-label">Cliente Vinculado (Opcional)</label>
                   <SearchableCustomerSelect
                     value={formCustomer}
+                    initialCustomer={selectedProduct?.customer}
                     onChange={setFormCustomer}
                     tenantId={user?.tenant_id}
-                    placeholder="Buscar cliente por nome ou CNPJ/CPF..."
+                    placeholder="Ex: Doce Vida Doceria (Digite o nome ou documento)"
                   />
                 </div>
               )}
@@ -1841,15 +1842,16 @@ export default function ProdutosPage() {
                 </div>
               </div>
 
-              <div className="form-group">
+              <div className="form-group" style={{ position: 'relative' }}>
                 <label className="form-label" style={{ fontWeight: 600 }}>
                   Selecione o Cliente Proprietário *
                 </label>
                 <SearchableCustomerSelect
                   value={selectedCustomerId}
+                  initialCustomer={customerModalProduct?.customer}
                   onChange={setSelectedCustomerId}
                   tenantId={user?.tenant_id}
-                  placeholder="Buscar cliente por nome ou CNPJ/CPF..."
+                  placeholder="Ex: Doce Vida Doceria (Digite o nome ou documento)"
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
                   Ao salvar, este produto personalizado ficará associado a este cliente na fábrica e nas consultas de saldo.
