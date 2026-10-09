@@ -1161,7 +1161,12 @@ export function DetailModal(props: any) {
                 {/* Gestão Multi-Equipe de Manuseio (Frações / Lotes) */}
                 {(formSector === 'Manuseio' || stages.find(s => s.id === formStageId)?.name === 'Manuseio') && (() => {
                   const targetPrintRun = Number(formPrintRun) || 0;
-                  const totalAllocated = formHandlingAllocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+                  const totalAllocated = formHandlingAllocations.reduce((sum, a) => {
+                    if (a.status === 'PARCIALMENTE_CONCLUIDO') {
+                      return sum + (Number(a.return_quantity) || 0);
+                    }
+                    return sum + (Number(a.quantity) || 0);
+                  }, 0);
 
                   return (
                     <div className="form-group" style={{

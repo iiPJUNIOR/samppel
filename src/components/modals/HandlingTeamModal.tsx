@@ -68,7 +68,12 @@ export function HandlingTeamModal(props: any) {
   const parentOrder = orders.find(o => o.id === handlingTeamModalItem.order_id) || handlingTeamModalItem.order;
   const allSiblingItems = orderItems.filter(i => i.order_id === handlingTeamModalItem.order_id);
   const totalItemQty = Number(handlingTeamModalItem.print_run || handlingTeamModalItem.quantity || 0);
-  const totalAllocated = handlingTeamAllocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+  const totalAllocated = handlingTeamAllocations.reduce((sum, a) => {
+    if (a.status === 'PARCIALMENTE_CONCLUIDO') {
+      return sum + (Number(a.return_quantity) || 0);
+    }
+    return sum + (Number(a.quantity) || 0);
+  }, 0);
   const isTargetManuseio = handlingTeamModalTargetStageId && stages.find(s => s.id === handlingTeamModalTargetStageId)?.name === 'Manuseio';
   const isCurrentManuseio = stages.find(s => s.id === handlingTeamModalItem.stage_id)?.name === 'Manuseio';
   const showConferenceChecks = isCurrentManuseio || isTargetManuseio;
@@ -824,6 +829,8 @@ export function HandlingTeamModal(props: any) {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem',
                       backgroundColor: 'var(--surface)',
                       border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-xs)',
@@ -837,26 +844,65 @@ export function HandlingTeamModal(props: any) {
                         </span>
                       </div>
 
+                      {status === 'PARCIALMENTE_CONCLUIDO' && (
+                        <>
+                          <div style={{ height: '14px', width: '1px', backgroundColor: 'var(--border)' }} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Devolvido:</span>
+                            <span style={{ fontWeight: 800, color: 'hsl(142, 71%, 35%)' }}>
+                              {(Number(alloc.return_quantity) || 0).toLocaleString('pt-BR')} un
+                            </span>
+                          </div>
+                        </>
+                      )}
+
                       <div style={{ height: '14px', width: '1px', backgroundColor: 'var(--border)' }} />
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Saldo Atual Pendente:</span>
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Saldo Atual:</span>
                         <span style={{
                           fontWeight: 800,
                           padding: '2px 8px',
                           borderRadius: '4px',
-                          backgroundColor: isCompleted 
-                            ? 'hsla(142, 71%, 45%, 0.12)' 
-                            : 'hsla(45, 93%, 47%, 0.15)',
-                          color: isCompleted 
-                            ? 'hsl(142, 71%, 35%)' 
-                            : 'hsl(45, 93%, 35%)',
-                          border: `1px solid ${isCompleted ? 'hsla(142, 71%, 45%, 0.25)' : 'hsla(45, 93%, 47%, 0.3)'}`
+                          backgroundColor: status === 'PARCIALMENTE_CONCLUIDO'
+                            ? 'hsla(217, 91%, 60%, 0.12)'
+                            : status === 'CONCLUIDO_COM_FALTA'
+                              ? 'hsla(0, 84%, 60%, 0.12)'
+                              : isCompleted 
+                                ? 'hsla(142, 71%, 45%, 0.12)' 
+                                : 'hsla(45, 93%, 47%, 0.15)',
+                          color: status === 'PARCIALMENTE_CONCLUIDO'
+                            ? 'hsl(217, 91%, 45%)'
+                            : status === 'CONCLUIDO_COM_FALTA'
+                              ? 'hsl(0, 84%, 45%)'
+                              : isCompleted 
+                                ? 'hsl(142, 71%, 35%)' 
+                                : 'hsl(45, 93%, 35%)',
+                          border: `1px solid ${
+                            status === 'PARCIALMENTE_CONCLUIDO'
+                              ? 'hsla(217, 91%, 60%, 0.25)'
+                              : status === 'CONCLUIDO_COM_FALTA'
+                                ? 'hsla(0, 84%, 60%, 0.25)'
+                                : isCompleted 
+                                  ? 'hsla(142, 71%, 45%, 0.25)' 
+                                  : 'hsla(45, 93%, 47%, 0.3)'
+                          }`
                         }}>
-                          {isCompleted ? '0 un (Conferido)' : `${allocQty.toLocaleString('pt-BR')} un`}
+                          {status === 'PARCIALMENTE_CONCLUIDO' 
+                            ? `0 un (${(allocQty - (Number(alloc.return_quantity) || 0)).toLocaleString('pt-BR')} un desdobradas)` 
+                            : status === 'CONCLUIDO_COM_FALTA'
+                              ? `0 un (Falta de ${(allocQty - (Number(alloc.return_quantity) || 0)).toLocaleString('pt-BR')} un)`
+                              : isCompleted 
+                                ? '0 un (Conferido Integral)' 
+                                : `${allocQty.toLocaleString('pt-BR')} un (Pendente)`}
                         </span>
                       </div>
                     </div>
+                    {alloc.notes && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic', paddingLeft: '0.25rem' }}>
+                        Nota: {alloc.notes}
+                      </div>
+                    )}
 
                     {/* GRID DE ENTRADA: DATA SAÍDA | QTD SAÍDA | DATA RETORNO + [HOJE] | QTD RETORNO | AÇÃO CONFERIDO */}
                     <div style={{

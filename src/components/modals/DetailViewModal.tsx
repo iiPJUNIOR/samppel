@@ -690,8 +690,18 @@ export function DetailViewModal(props: any) {
                       }
 
                       const totalItemQty = Number(i.print_run || i.quantity || 0);
-                      const totalSaida = handlingAllocations.reduce((sum, a) => sum + Number(a.quantity || 0), 0);
-                      const totalRetorno = handlingAllocations.reduce((sum, a) => sum + Number(a.return_quantity || 0), 0);
+                      const totalSaida = handlingAllocations.reduce((sum, a) => {
+                        if (a.status === 'PARCIALMENTE_CONCLUIDO') {
+                          return sum + Number(a.return_quantity || 0);
+                        }
+                        return sum + Number(a.quantity || 0);
+                      }, 0);
+                      const totalRetorno = handlingAllocations.reduce((sum, a) => {
+                        if (a.is_completed) {
+                          return sum + Number(a.return_quantity || 0);
+                        }
+                        return sum;
+                      }, 0);
                       const faltamAlocar = Math.max(0, totalItemQty - totalSaida);
                       const faltamRetornar = Math.max(0, totalSaida - totalRetorno);
                       const isRetornoConferido = handlingAllocations.length > 0 && totalRetorno >= totalSaida && handlingAllocations.every(a => a.is_completed);
@@ -1008,12 +1018,53 @@ export function DetailViewModal(props: any) {
                                             alignItems: "center",
                                             justifyContent: "center",
                                             gap: "0.3rem",
-                                            backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(45, 93%, 47%, 0.12)",
-                                            color: alloc.is_completed ? "hsl(142, 71%, 32%)" : "hsl(45, 93%, 32%)",
-                                            border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(45, 93%, 47%, 0.3)"}`,
+                                            backgroundColor: alloc.status === 'PARCIALMENTE_CONCLUIDO'
+                                              ? "hsla(217, 91%, 60%, 0.12)"
+                                              : alloc.status === 'CONCLUIDO_COM_FALTA'
+                                                ? "hsla(0, 84%, 60%, 0.12)"
+                                                : alloc.status === 'CONCLUIDO_COM_EXCESSO'
+                                                  ? "hsla(271, 91%, 65%, 0.12)"
+                                                  : alloc.is_completed 
+                                                    ? "hsla(142, 71%, 45%, 0.12)" 
+                                                    : "hsla(45, 93%, 47%, 0.12)",
+                                            color: alloc.status === 'PARCIALMENTE_CONCLUIDO'
+                                              ? "hsl(217, 91%, 45%)"
+                                              : alloc.status === 'CONCLUIDO_COM_FALTA'
+                                                ? "hsl(0, 84%, 45%)"
+                                                : alloc.status === 'CONCLUIDO_COM_EXCESSO'
+                                                  ? "hsl(271, 91%, 45%)"
+                                                  : alloc.is_completed 
+                                                    ? "hsl(142, 71%, 32%)" 
+                                                    : "hsl(45, 93%, 32%)",
+                                            border: `1px solid ${
+                                              alloc.status === 'PARCIALMENTE_CONCLUIDO'
+                                                ? "hsla(217, 91%, 60%, 0.3)"
+                                                : alloc.status === 'CONCLUIDO_COM_FALTA'
+                                                  ? "hsla(0, 84%, 60%, 0.3)"
+                                                  : alloc.status === 'CONCLUIDO_COM_EXCESSO'
+                                                    ? "hsla(271, 91%, 65%, 0.3)"
+                                                    : alloc.is_completed 
+                                                      ? "hsla(142, 71%, 45%, 0.3)" 
+                                                      : "hsla(45, 93%, 47%, 0.3)"
+                                            }`,
                                             whiteSpace: "nowrap"
                                           }}>
-                                            {alloc.is_completed ? (
+                                            {alloc.status === 'PARCIALMENTE_CONCLUIDO' ? (
+                                              <>
+                                                <CheckCircle2 size={12} />
+                                                <span>Devolução Parcial</span>
+                                              </>
+                                            ) : alloc.status === 'CONCLUIDO_COM_FALTA' ? (
+                                              <>
+                                                <CheckCircle2 size={12} />
+                                                <span>Finalizado com Falta</span>
+                                              </>
+                                            ) : alloc.status === 'CONCLUIDO_COM_EXCESSO' ? (
+                                              <>
+                                                <CheckCircle2 size={12} />
+                                                <span>Finalizado com Excesso</span>
+                                              </>
+                                            ) : alloc.is_completed ? (
                                               <>
                                                 <CheckCircle2 size={12} />
                                                 <span>Conferido</span>

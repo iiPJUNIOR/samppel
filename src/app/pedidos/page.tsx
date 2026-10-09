@@ -1061,7 +1061,11 @@ export default function PedidosPage() {
           return_date: d.return_date || d.completed_at || '',
           handling_code: (d.handling_code || `MS${itemPv}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS'),
           is_completed: d.is_completed || false,
-          completed_at: d.completed_at || d.return_date || ''
+          completed_at: d.completed_at || d.return_date || '',
+          status: d.status,
+          notes: d.notes,
+          services: d.services || [],
+          parent_allocation_id: d.parent_allocation_id
         })));
       } else {
         const defaultTeam = item.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
@@ -1121,17 +1125,25 @@ export default function PedidosPage() {
     setHandlingTeamModalItem(newItem);
     const totalQty = Number(newItem.print_run || newItem.quantity || 1000);
     const defaultDate = new Date().toISOString().slice(0, 10);
+    const rawPv = newItem.friendly_id || newItem.order?.pv_number || (newItem.order_id ? newItem.order_id.slice(0, 6) : '262/1');
+    const itemPv = rawPv.replace(/^PV-?/i, '');
     try {
       const { data } = await getOrderItemHandlingTeams(newItem.id);
       if (data && data.length > 0) {
-        setHandlingTeamAllocations(data.map(d => ({
+        setHandlingTeamAllocations(data.map((d, idx) => ({
+          id: d.id,
           handling_team_id: d.handling_team_id,
           quantity: d.quantity,
           departure_date: d.departure_date || defaultDate,
           return_quantity: d.return_quantity || 0,
           return_date: d.return_date || d.completed_at || '',
+          handling_code: (d.handling_code || `MS${itemPv}/${idx + 1}`).replace(/^(MAN-?PV-?|MAN-?|MS-?)/gi, 'MS'),
           is_completed: d.is_completed || false,
-          completed_at: d.completed_at || d.return_date || ''
+          completed_at: d.completed_at || d.return_date || '',
+          status: d.status,
+          notes: d.notes,
+          services: d.services || [],
+          parent_allocation_id: d.parent_allocation_id
         })));
       } else {
         const defaultTeam = newItem.handling_team_id || (handlingTeams.find(t => t.status === 'ATIVO')?.id || '');
@@ -6121,7 +6133,12 @@ export default function PedidosPage() {
                                   }];
                                 }
 
-                                const totalAllocated = itemAllocations.reduce((sum, a) => sum + Number(a.quantity || 0), 0);
+                                const totalAllocated = itemAllocations.reduce((sum, a) => {
+                                  if (a.status === 'PARCIALMENTE_CONCLUIDO') {
+                                    return sum + Number(a.return_quantity || 0);
+                                  }
+                                  return sum + Number(a.quantity || 0);
+                                }, 0);
                                 const remainingQty = Math.max(0, totalPrintRun - totalAllocated);
                                 const isAllConferido = itemAllocations.length > 0 && totalAllocated >= totalPrintRun && itemAllocations.every(a => a.is_completed);
                                 const rawPv = item.friendly_id || item.order?.pv_number || (item.order_id ? item.order_id.slice(0, 6) : '262/1');
@@ -6154,17 +6171,21 @@ export default function PedidosPage() {
                                                 gap: "0.2rem",
                                                 padding: "1px 5px",
                                                 borderRadius: "4px",
-                                                backgroundColor: alloc.is_completed ? "hsla(142, 71%, 45%, 0.12)" : "hsla(271, 91.2%, 65.1%, 0.12)",
-                                                border: `1px solid ${alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(271, 91.2%, 65.1%, 0.3)"}`,
+                                                backgroundColor: alloc.status === 'PARCIALMENTE_CONCLUIDO'
+                                                  ? "hsla(217, 91%, 60%, 0.12)"
+                                                  : alloc.is_completed
+                                                    ? "hsla(142, 71%, 45%, 0.12)"
+                                                    : "hsla(271, 91.2%, 65.1%, 0.12)",
+                                                border: `1px solid ${alloc.status === 'PARCIALMENTE_CONCLUIDO' ? "hsla(217, 91%, 60%, 0.3)" : alloc.is_completed ? "hsla(142, 71%, 45%, 0.3)" : "hsla(271, 91.2%, 65.1%, 0.3)"}`,
                                                 fontSize: "0.6rem",
                                                 fontWeight: 700,
-                                                color: alloc.is_completed ? "hsl(142, 71%, 35%)" : "hsl(271, 91.2%, 55%)",
+                                                color: alloc.status === 'PARCIALMENTE_CONCLUIDO' ? "hsl(217, 91%, 45%)" : alloc.is_completed ? "hsl(142, 71%, 35%)" : "hsl(271, 91.2%, 55%)",
                                                 cursor: "pointer"
                                               }}
                                               title={`Clique para editar a equipe ${teamName} (${hCode})`}
                                             >
                                               <Users size={9} />
-                                              <span>{teamName} ({alloc.quantity.toLocaleString('pt-BR')})</span>
+                                              <span>{teamName} ({alloc.status === 'PARCIALMENTE_CONCLUIDO' ? `${Number(alloc.return_quantity || 0).toLocaleString('pt-BR')} un dev.` : `${alloc.quantity.toLocaleString('pt-BR')}`})</span>
                                               <span style={{ fontSize: '0.55rem', opacity: 0.85, fontWeight: 600 }}>• {hCode}</span>
                                               {alloc.services && alloc.services.length > 0 && (
                                                 <span style={{
