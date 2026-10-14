@@ -694,6 +694,10 @@ export function DetailViewModal(props: any) {
                         if (a.status === 'PARCIALMENTE_CONCLUIDO') {
                           return sum + Number(a.return_quantity || 0);
                         }
+                        const hasChild = handlingAllocations.some(other => other.parent_allocation_id === a.id);
+                        if (hasChild && Number(a.return_quantity) > 0) {
+                          return sum + Number(a.return_quantity || 0);
+                        }
                         return sum + Number(a.quantity || 0);
                       }, 0);
                       const totalRetorno = handlingAllocations.reduce((sum, a) => {

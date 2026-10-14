@@ -1165,6 +1165,10 @@ export function DetailModal(props: any) {
                     if (a.status === 'PARCIALMENTE_CONCLUIDO') {
                       return sum + (Number(a.return_quantity) || 0);
                     }
+                    const hasChild = formHandlingAllocations.some(other => other.parent_allocation_id === a.id);
+                    if (hasChild && Number(a.return_quantity) > 0) {
+                      return sum + (Number(a.return_quantity) || 0);
+                    }
                     return sum + (Number(a.quantity) || 0);
                   }, 0);
 

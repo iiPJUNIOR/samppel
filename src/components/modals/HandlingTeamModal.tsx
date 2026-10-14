@@ -72,6 +72,10 @@ export function HandlingTeamModal(props: any) {
     if (a.status === 'PARCIALMENTE_CONCLUIDO') {
       return sum + (Number(a.return_quantity) || 0);
     }
+    const hasChild = handlingTeamAllocations.some(other => other.parent_allocation_id === a.id);
+    if (hasChild && Number(a.return_quantity) > 0) {
+      return sum + (Number(a.return_quantity) || 0);
+    }
     return sum + (Number(a.quantity) || 0);
   }, 0);
   const isTargetManuseio = handlingTeamModalTargetStageId && stages.find(s => s.id === handlingTeamModalTargetStageId)?.name === 'Manuseio';
@@ -260,30 +264,43 @@ export function HandlingTeamModal(props: any) {
           notes: reconciliationNotes ? `Devolução parcial de ${returnedQty.toLocaleString('pt-BR')} un. ${reconciliationNotes}` : `Devolução parcial de ${returnedQty.toLocaleString('pt-BR')} un.`
         };
 
-        // 2. Calcula próximo código de manuseio (ex: MS1798/1/2)
-        const currentCode = allocation.handling_code || `MS${(handlingTeamModalItem?.friendly_id || '262/1').replace(/^PV-?/i, '')}/1`;
-        const baseCodePrefix = currentCode.replace(/\/\d+$/, '');
-        const nextIndex = updatedAllocations.length + 1;
-        const nextCode = `${baseCodePrefix}/${nextIndex}`;
+        // 2. Verifica se já existe uma linha subsequente criada pelo usuário para este saldo restante
+        const existingNextRowIdx = updatedAllocations.findIndex((a, i) => i > allocationIndex && !a.is_completed && Number(a.quantity) === difference);
 
-        // 3. Cria automaticamente uma nova linha de entrega com o saldo restante (a diferença)
-        const newPendingRow: any = {
-          id: `h-pend-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          parent_allocation_id: allocation.id || null,
-          handling_team_id: allocation.handling_team_id,
-          quantity: difference,
-          departure_date: returnDate,
-          return_quantity: difference,
-          return_date: '',
-          handling_code: nextCode,
-          is_completed: false,
-          completed_at: '',
-          status: 'PENDENTE',
-          services: Array.isArray(allocation.services) ? [...allocation.services] : [],
-          notes: `Saldo pendente desdobrado da remessa ${allocation.handling_code || ''}.`
-        };
+        if (existingNextRowIdx !== -1) {
+          // Reutiliza a linha existente vinculando o parent_allocation_id para não duplicar
+          updatedAllocations[existingNextRowIdx] = {
+            ...updatedAllocations[existingNextRowIdx],
+            parent_allocation_id: allocation.id || updatedAllocations[allocationIndex].id || null,
+            notes: updatedAllocations[existingNextRowIdx].notes || `Saldo pendente desdobrado da remessa ${allocation.handling_code || ''}.`
+          };
+        } else {
+          // Calcula próximo código de manuseio (ex: MS1798/1/2)
+          const currentCode = allocation.handling_code || `MS${(handlingTeamModalItem?.friendly_id || '262/1').replace(/^PV-?/i, '')}/1`;
+          const baseCodePrefix = currentCode.replace(/\/\d+$/, '');
+          const nextIndex = updatedAllocations.length + 1;
+          const nextCode = `${baseCodePrefix}/${nextIndex}`;
 
-        updatedAllocations.push(newPendingRow);
+          // Cria automaticamente uma nova linha de entrega com o saldo restante (a diferença)
+          const newPendingRow: any = {
+            id: `h-pend-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            parent_allocation_id: allocation.id || null,
+            handling_team_id: allocation.handling_team_id,
+            quantity: difference,
+            departure_date: returnDate,
+            return_quantity: difference,
+            return_date: '',
+            handling_code: nextCode,
+            is_completed: false,
+            completed_at: '',
+            status: 'PENDENTE',
+            services: Array.isArray(allocation.services) ? [...allocation.services] : [],
+            notes: `Saldo pendente desdobrado da remessa ${allocation.handling_code || ''}.`
+          };
+
+          updatedAllocations.push(newPendingRow);
+        }
+
         setHandlingTeamAllocations(updatedAllocations);
         setIsReconciliationModalOpen(false);
         setReconciliationData(null);
@@ -844,7 +861,7 @@ export function HandlingTeamModal(props: any) {
                         </span>
                       </div>
 
-                      {status === 'PARCIALMENTE_CONCLUIDO' && (
+                      {(status === 'PARCIALMENTE_CONCLUIDO' || (Number(alloc.return_quantity) > 0 && !isCompleted)) && (
                         <>
                           <div style={{ height: '14px', width: '1px', backgroundColor: 'var(--border)' }} />
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
@@ -894,7 +911,9 @@ export function HandlingTeamModal(props: any) {
                               ? `0 un (Falta de ${(allocQty - (Number(alloc.return_quantity) || 0)).toLocaleString('pt-BR')} un)`
                               : isCompleted 
                                 ? '0 un (Conferido Integral)' 
-                                : `${allocQty.toLocaleString('pt-BR')} un (Pendente)`}
+                                : Number(alloc.return_quantity) > 0
+                                  ? `${Math.max(0, allocQty - Number(alloc.return_quantity)).toLocaleString('pt-BR')} un (Pendente)`
+                                  : `${allocQty.toLocaleString('pt-BR')} un (Pendente)`}
                         </span>
                       </div>
                     </div>
@@ -1038,7 +1057,7 @@ export function HandlingTeamModal(props: any) {
                           ) : (
                             <>
                               <CheckCircle2 size={13} strokeWidth={2.5} />
-                              <span>Conferido</span>
+                              <span>Conferir</span>
                             </>
                           )}
                         </button>
@@ -1145,13 +1164,33 @@ export function HandlingTeamModal(props: any) {
                   return;
                 }
 
+                // Auto-detecção de devoluções parciais desdobradas ao salvar:
+                const adjustedAllocations = handlingTeamAllocations.map((alloc, idx) => {
+                  const qty = Number(alloc.quantity) || 0;
+                  const retQty = Number(alloc.return_quantity) || 0;
+                  if (qty > 0 && retQty > 0 && retQty < qty && !alloc.is_completed && alloc.status !== 'PARCIALMENTE_CONCLUIDO') {
+                    const diff = qty - retQty;
+                    const nextAllocations = handlingTeamAllocations.filter((_, i) => i > idx);
+                    const nextSum = nextAllocations.reduce((s, a) => s + (Number(a.quantity) || 0), 0);
+                    if (nextSum >= diff || nextAllocations.some(a => Number(a.quantity) === diff)) {
+                      return {
+                        ...alloc,
+                        is_completed: true,
+                        status: 'PARCIALMENTE_CONCLUIDO',
+                        notes: alloc.notes || `Devolução parcial de ${retQty.toLocaleString('pt-BR')} un.`
+                      };
+                    }
+                  }
+                  return alloc;
+                });
+
                 const fullExistingList = itemHandlingTeamsMap.get(handlingTeamModalItem.id) || [];
-                const editingIds = new Set(handlingTeamAllocations.map(a => a.id).filter(Boolean));
+                const editingIds = new Set(adjustedAllocations.map(a => a.id).filter(Boolean));
                 const uneditedAllocations = fullExistingList.filter((a: any) => !editingIds.has(a.id));
 
                 const mergedPayload = [
                   ...uneditedAllocations,
-                  ...handlingTeamAllocations
+                  ...adjustedAllocations
                 ];
 
                 const teamCounts = new Map<string, number>();

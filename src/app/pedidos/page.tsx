@@ -6137,6 +6137,10 @@ export default function PedidosPage() {
                                   if (a.status === 'PARCIALMENTE_CONCLUIDO') {
                                     return sum + Number(a.return_quantity || 0);
                                   }
+                                  const hasChild = itemAllocations.some(other => other.parent_allocation_id === a.id);
+                                  if (hasChild && Number(a.return_quantity) > 0) {
+                                    return sum + Number(a.return_quantity || 0);
+                                  }
                                   return sum + Number(a.quantity || 0);
                                 }, 0);
                                 const remainingQty = Math.max(0, totalPrintRun - totalAllocated);

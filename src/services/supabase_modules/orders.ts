@@ -2249,9 +2249,15 @@ export async function saveOrderItemHandlingTeams(
       return obj;
     });
 
+    const sortedPayload = [...payload].sort((a, b) => {
+      if (!a.parent_allocation_id && b.parent_allocation_id) return -1;
+      if (a.parent_allocation_id && !b.parent_allocation_id) return 1;
+      return 0;
+    });
+
     let { data, error } = await getDbClient()
       .from('order_item_handling_teams')
-      .insert(payload)
+      .insert(sortedPayload)
       .select('*, team:handling_teams(*)');
 
     if (error || !data || data.length < validTeams.length) {
