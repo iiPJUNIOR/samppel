@@ -1320,17 +1320,18 @@ export class ContaAzulService {
       }
     }
 
-    // 3. Se não achou por conta_azul_id e já temos cleanDoc, busca pontual por CPF/CNPJ limpo
+    // 3. Se não achou por conta_azul_id e já temos cleanDoc, busca pontual por CPF/CNPJ limpo ou formatado
     if (!existingCust && cleanDoc) {
-      const { data: custByDoc, error: docErr } = await dbClient
+      const core = cleanDoc.slice(0, 8);
+      const { data: candidates } = await dbClient
         .from('customers')
         .select('id, name, conta_azul_id, document, email, phone, address')
         .eq('tenant_id', this.tenantId)
-        .eq('document', cleanDoc)
-        .maybeSingle();
+        .or(`document.eq.${cleanDoc},document.eq.${rawDoc},document.ilike.%${core}%`);
 
-      if (!docErr && custByDoc?.id) {
-        existingCust = custByDoc;
+      const matched = candidates?.find((c: any) => (c.document || '').replace(/\D/g, '') === cleanDoc);
+      if (matched) {
+        existingCust = matched;
         if (clientUuid && !existingCust.conta_azul_id) {
           await dbClient
             .from('customers')
@@ -1367,15 +1368,16 @@ export class ContaAzulService {
 
     // Se encontramos o documento no detalhe da pessoa e ainda não tínhamos achado o cliente no banco, tenta buscar pelo documento
     if (!existingCust && cleanDoc) {
-      const { data: custByDoc2 } = await dbClient
+      const core = cleanDoc.slice(0, 8);
+      const { data: candidates2 } = await dbClient
         .from('customers')
         .select('id, name, conta_azul_id, document, email, phone, address')
         .eq('tenant_id', this.tenantId)
-        .eq('document', cleanDoc)
-        .maybeSingle();
+        .or(`document.eq.${cleanDoc},document.ilike.%${core}%`);
 
-      if (custByDoc2?.id) {
-        existingCust = custByDoc2;
+      const matched2 = candidates2?.find((c: any) => (c.document || '').replace(/\D/g, '') === cleanDoc);
+      if (matched2) {
+        existingCust = matched2;
         if (clientUuid && !existingCust.conta_azul_id) {
           await dbClient
             .from('customers')
@@ -1394,6 +1396,32 @@ export class ContaAzulService {
     if (custDetails?.enderecos?.[0]) {
       const addr = custDetails.enderecos[0];
       addrVal = `${addr.logradouro || ''}, ${addr.numero || ''} ${addr.complemento ? '(' + addr.complemento + ')' : ''} - ${addr.bairro || ''}, ${addr.cidade || ''}/${addr.estado || ''}`;
+    }
+
+    // Se ainda não localizou por id/documento, busca por nome normalizado (evita duplicar cliente sem documento ou com grafia idêntica)
+    if (!existingCust && nameVal && nameVal.trim() && nameVal.trim().toLowerCase() !== 'cliente importado') {
+      const trimmedName = nameVal.trim();
+      const { data: custByName } = await dbClient
+        .from('customers')
+        .select('id, name, conta_azul_id, document, email, phone, address')
+        .eq('tenant_id', this.tenantId)
+        .ilike('name', trimmedName)
+        .maybeSingle();
+
+      if (custByName?.id) {
+        existingCust = custByName;
+        const toUpdate: any = {};
+        if (clientUuid && !existingCust.conta_azul_id) toUpdate.conta_azul_id = clientUuid;
+        if (docVal && !existingCust.document) toUpdate.document = docVal;
+        if (emailVal && !existingCust.email) toUpdate.email = emailVal;
+        if (phoneVal && !existingCust.phone) toUpdate.phone = phoneVal;
+        if (addrVal && !existingCust.address) toUpdate.address = addrVal;
+
+        if (Object.keys(toUpdate).length > 0) {
+          await dbClient.from('customers').update(toUpdate).eq('id', existingCust.id);
+          Object.assign(existingCust, toUpdate);
+        }
+      }
     }
 
     // 5. Cliente existente localizado: atualiza dados se necessário e salva em cache
@@ -1447,15 +1475,34 @@ export class ContaAzulService {
 
       if (custErr) {
         console.warn('Conflito ou erro ao inserir novo cliente no Supabase, tentando recuperação pontual:', custErr.message);
-        let retryQuery = dbClient.from('customers').select('id, name, conta_azul_id').eq('tenant_id', this.tenantId);
-        if (clientUuid && cleanDoc) {
-          retryQuery = retryQuery.or(`conta_azul_id.eq.${clientUuid},document.eq.${cleanDoc}`);
-        } else if (clientUuid) {
-          retryQuery = retryQuery.eq('conta_azul_id', clientUuid);
-        } else if (cleanDoc) {
-          retryQuery = retryQuery.eq('document', cleanDoc);
+        let recoveredCust: any = null;
+        if (cleanDoc) {
+          const core = cleanDoc.slice(0, 8);
+          const { data: candidates } = await dbClient
+            .from('customers')
+            .select('id, name, conta_azul_id, document, email, phone, address')
+            .eq('tenant_id', this.tenantId)
+            .or(`document.eq.${cleanDoc},document.ilike.%${core}%`);
+          recoveredCust = candidates?.find((c: any) => (c.document || '').replace(/\D/g, '') === cleanDoc);
         }
-        const { data: recoveredCust } = await retryQuery.maybeSingle();
+        if (!recoveredCust && clientUuid) {
+          const { data: byCa } = await dbClient
+            .from('customers')
+            .select('id, name, conta_azul_id, document, email, phone, address')
+            .eq('tenant_id', this.tenantId)
+            .eq('conta_azul_id', clientUuid)
+            .maybeSingle();
+          recoveredCust = byCa;
+        }
+        if (!recoveredCust && nameVal && nameVal.trim() && nameVal.trim().toLowerCase() !== 'cliente importado') {
+          const { data: byName } = await dbClient
+            .from('customers')
+            .select('id, name, conta_azul_id, document, email, phone, address')
+            .eq('tenant_id', this.tenantId)
+            .ilike('name', nameVal.trim())
+            .maybeSingle();
+          recoveredCust = byName;
+        }
         if (recoveredCust?.id) {
           if (clientUuid) customersCache.set(clientUuid, recoveredCust);
           if (cleanDoc) customersCache.set(cleanDoc, recoveredCust);

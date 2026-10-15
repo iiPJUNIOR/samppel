@@ -42,6 +42,7 @@ export default function ClientesPage() {
   const [syncingSingle, setSyncingSingle] = useState(false);
   const [specificSyncTerm, setSpecificSyncTerm] = useState('');
   const [syncingSpecific, setSyncingSpecific] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Sync Modal State (similar to order sync)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -356,31 +357,57 @@ export default function ClientesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const payload = {
-      name: formName,
-      document: formDocument,
-      email: formEmail,
-      phone: formPhone,
-      address: formAddress
-    };
+    if (submitting) return;
 
-    if (modalType === 'create') {
-      const { error } = await createCustomer(payload);
-      if (error) {
-        alert('Erro ao cadastrar cliente: ' + error.message);
-      } else {
-        setIsModalOpen(false);
-        fetchCustomers();
+    const cleanDoc = (formDocument || '').replace(/\D/g, '');
+    if (cleanDoc) {
+      const duplicate = customers.find(c => {
+        const otherClean = (c.document || '').replace(/\D/g, '');
+        return otherClean === cleanDoc && c.id !== selectedCustomer?.id;
+      });
+      if (duplicate) {
+        alert('Ja existe um cliente cadastrado com este CPF/CNPJ: ' + duplicate.name);
+        return;
       }
-    } else {
-      const { error } = await updateCustomer(selectedCustomer.id, payload);
-      if (error) {
-        alert('Erro ao atualizar cliente: ' + error.message);
+    }
+
+    setSubmitting(true);
+    try {
+      const payload = {
+        name: formName.trim(),
+        document: formDocument.trim(),
+        email: formEmail.trim(),
+        phone: formPhone.trim(),
+        address: formAddress.trim()
+      };
+
+      if (modalType === 'create') {
+        const { error } = await createCustomer(payload);
+        if (error) {
+          if (error.code === '23505' || error.message?.includes('unique') || error.message?.includes('idx_customers_unique_clean_doc')) {
+            alert('Ja existe um cliente com este CPF/CNPJ cadastrado no sistema.');
+          } else {
+            alert('Erro ao cadastrar cliente: ' + error.message);
+          }
+        } else {
+          setIsModalOpen(false);
+          fetchCustomers();
+        }
       } else {
-        setIsModalOpen(false);
-        fetchCustomers();
+        const { error } = await updateCustomer(selectedCustomer.id, payload);
+        if (error) {
+          if (error.code === '23505' || error.message?.includes('unique') || error.message?.includes('idx_customers_unique_clean_doc')) {
+            alert('Ja existe outro cliente com este CPF/CNPJ cadastrado no sistema.');
+          } else {
+            alert('Erro ao atualizar cliente: ' + error.message);
+          }
+        } else {
+          setIsModalOpen(false);
+          fetchCustomers();
+        }
       }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -1044,11 +1071,12 @@ export default function ClientesPage() {
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-secondary">
+                  <button type="button" onClick={() => setIsModalOpen(false)} disabled={submitting} className="btn btn-secondary">
                     Cancelar
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    {modalType === 'create' ? 'Salvar Cliente' : 'Salvar Alterações'}
+                  <button type="submit" disabled={submitting} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {submitting && <RefreshCw size={14} className="spinner" />}
+                    {submitting ? 'Salvando...' : (modalType === 'create' ? 'Salvar Cliente' : 'Salvar Alterações')}
                   </button>
                 </div>
               </footer>

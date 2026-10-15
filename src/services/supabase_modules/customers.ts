@@ -169,25 +169,88 @@ export async function getCustomers(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff9
 }
 
 export async function createCustomer(customer: any) {
-  const newCust = {
-    id: customer.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
-    tenant_id: customer.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    created_at: new Date().toISOString(),
-    ...customer
-  };
-  
+  const tenantId = customer.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+  const cleanDoc = (customer.document || '').replace(/\D/g, '');
+
   if (isMockMode) {
+    if (cleanDoc) {
+      const existing = mockCustomers.find(c => c.tenant_id === tenantId && (c.document || '').replace(/\D/g, '') === cleanDoc);
+      if (existing) {
+        return { data: existing, error: null };
+      }
+    }
+    const newCust = {
+      id: customer.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
+      tenant_id: tenantId,
+      created_at: new Date().toISOString(),
+      ...customer
+    };
     const updatedMocks = [newCust, ...mockCustomers];
     setMockCustomers(updatedMocks);
     await enqueueSync(newCust.tenant_id, 'CUSTOMER', newCust.id, 'CREATE');
     return { data: newCust, error: null };
   }
-  
+
+  // Pre-check for duplicate clean document before insert
+  if (cleanDoc) {
+    const core = cleanDoc.slice(0, 8);
+    const { data: candidates } = await getDbClient()
+      .from('customers')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .or(`document.eq.${customer.document},document.eq.${cleanDoc},document.ilike.%${core}%`);
+
+    const existing = candidates?.find((c: any) => (c.document || '').replace(/\D/g, '') === cleanDoc);
+    if (existing) {
+      // Update any missing fields
+      const toUpdate: any = {};
+      if (!existing.email && customer.email) toUpdate.email = customer.email;
+      if (!existing.phone && customer.phone) toUpdate.phone = customer.phone;
+      if (!existing.address && customer.address) toUpdate.address = customer.address;
+      if (!existing.conta_azul_id && customer.conta_azul_id) toUpdate.conta_azul_id = customer.conta_azul_id;
+
+      if (Object.keys(toUpdate).length > 0) {
+        const { data: updated } = await getDbClient()
+          .from('customers')
+          .update(toUpdate)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        return { data: updated || existing, error: null };
+      }
+      return { data: existing, error: null };
+    }
+  }
+
+  const newCust = {
+    id: customer.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
+    tenant_id: tenantId,
+    created_at: new Date().toISOString(),
+    ...customer
+  };
+
   const { data, error } = await getDbClient().from('customers').insert([newCust]).select().single();
-  if (!error && data) {
+  if (error) {
+    // Graceful recovery if unique constraint violation occurs concurrently
+    if ((error.code === '23505' || error.message?.includes('unique') || error.message?.includes('idx_customers_unique_clean_doc')) && cleanDoc) {
+      const core = cleanDoc.slice(0, 8);
+      const { data: candidates } = await getDbClient()
+        .from('customers')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .or(`document.eq.${customer.document},document.eq.${cleanDoc},document.ilike.%${core}%`);
+      const existing = candidates?.find((c: any) => (c.document || '').replace(/\D/g, '') === cleanDoc);
+      if (existing) {
+        return { data: existing, error: null };
+      }
+    }
+    return { data: null, error };
+  }
+
+  if (data) {
     await enqueueSync(data.tenant_id, 'CUSTOMER', data.id, 'CREATE');
   }
-  return { data, error };
+  return { data, error: null };
 }
 
 export async function updateCustomer(id: string, updates: any) {
