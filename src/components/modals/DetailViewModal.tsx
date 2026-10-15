@@ -6,10 +6,11 @@ import {
   Info, Package, Truck, MapPin, FileText, Calendar, DollarSign, 
   CreditCard, Check, AlertCircle, Save, CheckCircle2, Factory,
   Clock, Printer, PenTool, TrendingUp, HelpCircle, ArrowRightLeft,
-  Split
+  Split, Undo2
 } from 'lucide-react';
 import Image from 'next/image';
 import { SplitCardModal } from './SplitCardModal';
+import { RevertSplitModal } from './RevertSplitModal';
 
 export function DetailViewModal(props: any) {
   const {
@@ -59,6 +60,11 @@ export function DetailViewModal(props: any) {
   } = props;
 
   const [isSplitCardModalOpen, setIsSplitCardModalOpen] = useState(false);
+  const [isRevertSplitModalOpen, setIsRevertSplitModalOpen] = useState(false);
+
+  const isSplitChild = !!detailItem?.split_from_item_id || (detailItem?.friendly_id && detailItem.friendly_id.endsWith('.1'));
+  const isSplitParent = !!detailItem?.split_at || (detailItem?.friendly_id && detailItem.friendly_id.endsWith('.2'));
+  const isCardSplit = isSplitChild || isSplitParent;
 
   const order = detailItem.order || {};
         const customer = order.customer || {};
@@ -125,6 +131,32 @@ export function DetailViewModal(props: any) {
                       <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)', wordBreak: 'break-all' }}>
                         {detailItem.friendly_id || order.pv_number || '---'}
                       </span>
+                      {isSplitChild && (
+                        <span style={{
+                          fontSize: '0.68rem', fontWeight: 700,
+                          backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                          color: 'var(--primary)',
+                          padding: '2px 8px', borderRadius: '4px',
+                          border: '1px solid rgba(59, 130, 246, 0.3)',
+                          display: 'inline-flex', alignItems: 'center', gap: '4px'
+                        }} title="Este card é fruto de um desmembramento (.1)">
+                          <Split size={12} />
+                          <span>Desmembrado (.1)</span>
+                        </span>
+                      )}
+                      {isSplitParent && (
+                        <span style={{
+                          fontSize: '0.68rem', fontWeight: 700,
+                          backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                          color: '#d97706',
+                          padding: '2px 8px', borderRadius: '4px',
+                          border: '1px solid rgba(245, 158, 11, 0.3)',
+                          display: 'inline-flex', alignItems: 'center', gap: '4px'
+                        }} title="Este card possui divisão ativa (.2)">
+                          <Split size={12} />
+                          <span>Saldo Remanescente (.2)</span>
+                        </span>
+                      )}
                       {currentStage && (
                         <span style={{
                           fontSize: '0.7rem', fontWeight: 700,
@@ -1190,6 +1222,29 @@ export function DetailViewModal(props: any) {
                     <Split size={14} />
                     <span>Dividir</span>
                   </button>
+
+                  {isCardSplit && (
+                    <button
+                      type="button"
+                      onClick={() => setIsRevertSplitModalOpen(true)}
+                      className="btn btn-secondary"
+                      style={{
+                        fontSize: '0.8rem',
+                        padding: '0.4rem 0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        borderColor: '#f59e0b',
+                        color: '#d97706',
+                        fontWeight: 600,
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)'
+                      }}
+                      title="Reverter desmembramento e reunificar este card com sua outra metade"
+                    >
+                      <Undo2 size={14} />
+                      <span>Reverter Divisão</span>
+                    </button>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1256,6 +1311,25 @@ export function DetailViewModal(props: any) {
                 showToast={showToast}
                 onSuccess={() => {
                   setIsSplitCardModalOpen(false);
+                  setIsDetailModalOpen(false);
+                  if (typeof props.fetchAllData === 'function') {
+                    props.fetchAllData();
+                  }
+                }}
+              />
+            )}
+
+            {/* Modal de Reversão / Reunificação de Desmembramento */}
+            {isRevertSplitModalOpen && (
+              <RevertSplitModal
+                isOpen={isRevertSplitModalOpen}
+                onClose={() => setIsRevertSplitModalOpen(false)}
+                item={detailItem}
+                stages={stages}
+                user={user}
+                showToast={showToast}
+                onSuccess={() => {
+                  setIsRevertSplitModalOpen(false);
                   setIsDetailModalOpen(false);
                   if (typeof props.fetchAllData === 'function') {
                     props.fetchAllData();

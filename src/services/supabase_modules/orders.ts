@@ -707,6 +707,413 @@ export async function splitOrderItem(params: SplitOrderItemParams) {
   };
 }
 
+export interface SplitInfoResult {
+  isSplit: boolean;
+  role: 'parent' | 'child' | 'none';
+  parentItem: any | null;
+  childItems: any[];
+  partnerItem: any | null;
+  canRevert: boolean;
+  reasonCannotRevert?: string;
+  suggestedFriendlyId?: string;
+  totalPrintRun?: number;
+  totalBoxes?: number;
+}
+
+export async function getCardSplitInfo(itemId: string, tenantId?: string): Promise<{ data: SplitInfoResult | null; error: any }> {
+  if (!itemId) return { data: null, error: new Error('ID do item é obrigatório.') };
+
+  try {
+    if (isMockMode) {
+      const current = mockOrderItems.find(i => i.id === itemId);
+      if (!current) return { data: null, error: new Error('Item não encontrado.') };
+
+      // Se é filho (tem split_from_item_id)
+      if (current.split_from_item_id) {
+        const parent = mockOrderItems.find(i => i.id === current.split_from_item_id);
+        const subChildren = mockOrderItems.filter(i => i.split_from_item_id === current.id);
+        const hasSub = subChildren.length > 0;
+        const totalQty = (parent ? Number(parent.print_run || 0) : 0) + Number(current.print_run || 0);
+        const totalBx = (parent ? Number(parent.boxes_count || 1) : 1) + Number(current.boxes_count || 0);
+        const restoredId = (parent?.friendly_id || current.friendly_id || '').replace(/\.[12]$/, '');
+
+        return {
+          data: {
+            isSplit: true,
+            role: 'child',
+            parentItem: parent || null,
+            childItems: [current],
+            partnerItem: parent || null,
+            canRevert: !hasSub && !!parent,
+            reasonCannotRevert: hasSub ? 'Este card possui subdivisões ativas. Reverta a divisão mais recente primeiro.' : (!parent ? 'Card pai não encontrado.' : undefined),
+            suggestedFriendlyId: restoredId,
+            totalPrintRun: totalQty,
+            totalBoxes: totalBx
+          },
+          error: null
+        };
+      }
+
+      // Se é pai (outros apontam para ele)
+      const children = mockOrderItems.filter(i => i.split_from_item_id === current.id);
+      if (children.length > 0) {
+        const primaryChild = children[0];
+        const subChildren = mockOrderItems.filter(i => i.split_from_item_id === primaryChild.id);
+        const hasSub = subChildren.length > 0;
+        const totalQty = Number(current.print_run || 0) + Number(primaryChild.print_run || 0);
+        const totalBx = Number(current.boxes_count || 1) + Number(primaryChild.boxes_count || 0);
+        const restoredId = (current.friendly_id || '').replace(/\.2$/, '');
+
+        return {
+          data: {
+            isSplit: true,
+            role: 'parent',
+            parentItem: current,
+            childItems: children,
+            partnerItem: primaryChild,
+            canRevert: !hasSub,
+            reasonCannotRevert: hasSub ? 'O card filho possui subdivisões ativas. Reverta a divisão mais recente primeiro.' : undefined,
+            suggestedFriendlyId: restoredId,
+            totalPrintRun: totalQty,
+            totalBoxes: totalBx
+          },
+          error: null
+        };
+      }
+
+      return {
+        data: {
+          isSplit: false,
+          role: 'none',
+          parentItem: null,
+          childItems: [],
+          partnerItem: null,
+          canRevert: false
+        },
+        error: null
+      };
+    }
+
+    // Modo Banco de Dados Real (Supabase)
+    const { data: current, error: curErr } = await getDbClient()
+      .from('order_items')
+      .select('*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))')
+      .eq('id', itemId)
+      .single();
+
+    if (curErr || !current) {
+      return { data: null, error: curErr || new Error('Item não encontrado.') };
+    }
+
+    // Cenário 1: O item atual é o FILHO (possui split_from_item_id)
+    if (current.split_from_item_id) {
+      const { data: parent } = await getDbClient()
+        .from('order_items')
+        .select('*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))')
+        .eq('id', current.split_from_item_id)
+        .maybeSingle();
+
+      const { data: subChildren } = await getDbClient()
+        .from('order_items')
+        .select('id, friendly_id')
+        .eq('split_from_item_id', current.id);
+
+      const hasSubChildren = !!(subChildren && subChildren.length > 0);
+      const isCompleted = current.stage?.name === 'Concluído';
+      const totalQty = (parent ? Number(parent.print_run || 0) : 0) + Number(current.print_run || 0);
+      const totalBx = (parent ? Number(parent.boxes_count || 1) : 1) + Number(current.boxes_count || 0);
+      const restoredId = (parent?.friendly_id || current.friendly_id || '').replace(/\.[12]$/, '');
+
+      let reasonCannotRevert: string | undefined;
+      if (hasSubChildren) {
+        reasonCannotRevert = 'Este card possui subdivisões ativas (.1.1). Reverta primeiro a divisão mais profunda.';
+      } else if (!parent) {
+        reasonCannotRevert = 'O card original de onde este foi dividido não foi encontrado no sistema.';
+      } else if (isCompleted) {
+        reasonCannotRevert = 'Este card já foi concluído/expedido e não pode mais ser reunificado.';
+      }
+
+      return {
+        data: {
+          isSplit: true,
+          role: 'child',
+          parentItem: parent || null,
+          childItems: [current],
+          partnerItem: parent || null,
+          canRevert: !hasSubChildren && !!parent && !isCompleted,
+          reasonCannotRevert,
+          suggestedFriendlyId: restoredId,
+          totalPrintRun: totalQty,
+          totalBoxes: totalBx
+        },
+        error: null
+      };
+    }
+
+    // Cenário 2: O item atual é o PAI (existem outros itens com split_from_item_id = current.id)
+    const { data: children } = await getDbClient()
+      .from('order_items')
+      .select('*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))')
+      .eq('split_from_item_id', current.id)
+      .order('created_at', { ascending: false });
+
+    if (children && children.length > 0) {
+      const primaryChild = children[0];
+      const { data: subChildren } = await getDbClient()
+        .from('order_items')
+        .select('id, friendly_id')
+        .eq('split_from_item_id', primaryChild.id);
+
+      const hasSubChildren = !!(subChildren && subChildren.length > 0);
+      const isChildCompleted = primaryChild.stage?.name === 'Concluído';
+      const totalQty = Number(current.print_run || 0) + Number(primaryChild.print_run || 0);
+      const totalBx = Number(current.boxes_count || 1) + Number(primaryChild.boxes_count || 0);
+      const restoredId = (current.friendly_id || '').replace(/\.2$/, '');
+
+      let reasonCannotRevert: string | undefined;
+      if (hasSubChildren) {
+        reasonCannotRevert = `O card filho (${primaryChild.friendly_id}) possui subdivisões ativas. Reverta-as primeiro.`;
+      } else if (isChildCompleted) {
+        reasonCannotRevert = `O card filho (${primaryChild.friendly_id}) já foi concluído/expedido e não pode ser reunificado.`;
+      }
+
+      return {
+        data: {
+          isSplit: true,
+          role: 'parent',
+          parentItem: current,
+          childItems: children,
+          partnerItem: primaryChild,
+          canRevert: !hasSubChildren && !isChildCompleted,
+          reasonCannotRevert,
+          suggestedFriendlyId: restoredId,
+          totalPrintRun: totalQty,
+          totalBoxes: totalBx
+        },
+        error: null
+      };
+    }
+
+    // Cenário 3: Fallback por sufixo de friendly_id (.1 e .2) se o split_from_item_id estiver nulo
+    const currentFriendly = (current.friendly_id || '').trim();
+    if (/\.[12]$/.test(currentFriendly) && current.order_id) {
+      const isDot1 = currentFriendly.endsWith('.1');
+      const siblingSuffix = isDot1 ? '.2' : '.1';
+      const basePrefix = currentFriendly.slice(0, -2);
+      const expectedSiblingFriendly = `${basePrefix}${siblingSuffix}`;
+
+      const { data: sibling } = await getDbClient()
+        .from('order_items')
+        .select('*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))')
+        .eq('order_id', current.order_id)
+        .eq('friendly_id', expectedSiblingFriendly)
+        .maybeSingle();
+
+      if (sibling) {
+        const parentItem = isDot1 ? sibling : current;
+        const childItem = isDot1 ? current : sibling;
+        const totalQty = Number(parentItem.print_run || 0) + Number(childItem.print_run || 0);
+        const totalBx = Number(parentItem.boxes_count || 1) + Number(childItem.boxes_count || 0);
+
+        return {
+          data: {
+            isSplit: true,
+            role: isDot1 ? 'child' : 'parent',
+            parentItem,
+            childItems: [childItem],
+            partnerItem: sibling,
+            canRevert: true,
+            suggestedFriendlyId: basePrefix,
+            totalPrintRun: totalQty,
+            totalBoxes: totalBx
+          },
+          error: null
+        };
+      }
+    }
+
+    return {
+      data: {
+        isSplit: false,
+        role: 'none',
+        parentItem: null,
+        childItems: [],
+        partnerItem: null,
+        canRevert: false
+      },
+      error: null
+    };
+  } catch (err: any) {
+    console.error('Erro ao consultar split info do item:', err);
+    return { data: null, error: err };
+  }
+}
+
+export interface RevertSplitOrderItemParams {
+  currentItemId: string;
+  partnerItemId?: string;
+  targetStageId?: string;
+  userId?: string;
+  tenantId?: string;
+}
+
+export async function revertSplitOrderItem(params: RevertSplitOrderItemParams) {
+  const { currentItemId, partnerItemId, targetStageId, userId, tenantId } = params;
+
+  const splitInfoRes = await getCardSplitInfo(currentItemId, tenantId);
+  if (splitInfoRes.error || !splitInfoRes.data || !splitInfoRes.data.isSplit) {
+    return {
+      data: null,
+      error: splitInfoRes.error || new Error('Não foi possível localizar o par de desmembramento deste card.')
+    };
+  }
+
+  const { role, parentItem, childItems, partnerItem } = splitInfoRes.data;
+
+  let parent = parentItem;
+  let child = partnerItemId 
+    ? childItems.find(c => c.id === partnerItemId) || partnerItem
+    : partnerItem;
+
+  if (role === 'child') {
+    child = childItems[0];
+    parent = parentItem;
+  }
+
+  if (!parent || !child) {
+    return { data: null, error: new Error('Não foi possível identificar o card pai e o card filho para a reunificação.') };
+  }
+
+  if (child.id === parent.id) {
+    return { data: null, error: new Error('Inconsistência nos identificadores: o card pai e o filho são idênticos.') };
+  }
+
+  const totalPrintRun = Number(parent.print_run || 0) + Number(child.print_run || 0);
+  const totalBoxes = Number(parent.boxes_count || 1) + Number(child.boxes_count || 0);
+
+  // Restaura o friendly_id removendo .2 do pai, ou .1 do filho
+  let restoredFriendlyId = (parent.friendly_id || '').trim();
+  if (/\.2$/.test(restoredFriendlyId)) {
+    restoredFriendlyId = restoredFriendlyId.replace(/\.2$/, '');
+  } else if (/\.1$/.test((child.friendly_id || '').trim())) {
+    restoredFriendlyId = (child.friendly_id || '').trim().replace(/\.1$/, '');
+  }
+
+  // Limpa as anotações geradas no split
+  let cleanedNotes = (parent.notes || '')
+    .replace(/\r?\n?\[Desmembrado: Saldo restante de [^\]]+\]/gi, '')
+    .replace(/\r?\n?\[Desmembrado de [^\]]+\]/gi, '')
+    .replace(/\r?\n?Saldo restante de [^\n\r]+/gi, '')
+    .trim();
+
+  const nowIso = new Date().toISOString();
+  const dateFormatted = new Date().toLocaleDateString('pt-BR');
+  const auditNote = `[Desmembramento revertido: reunificado com ${child.friendly_id || 'card filho'} (+${Number(child.print_run || 0).toLocaleString('pt-BR')} un) em ${dateFormatted}]`;
+  cleanedNotes = cleanedNotes ? `${cleanedNotes}\n${auditNote}` : auditNote;
+
+  const finalStageId = targetStageId || parent.stage_id;
+
+  if (isMockMode) {
+    // 1. Atualiza o pai no mock
+    mockOrderItems = mockOrderItems.map(item => {
+      if (item.id === parent.id) {
+        return {
+          ...item,
+          friendly_id: restoredFriendlyId,
+          print_run: totalPrintRun,
+          boxes_count: totalBoxes,
+          stage_id: finalStageId,
+          notes: cleanedNotes,
+          split_at: null,
+          split_by_user_id: null,
+          updated_at: nowIso
+        };
+      }
+      return item;
+    });
+
+    // 2. Remove o filho do mock
+    mockOrderItems = mockOrderItems.filter(item => item.id !== child.id);
+
+    const updatedParentMock = mockOrderItems.find(item => item.id === parent.id);
+    return {
+      data: {
+        reunifiedCard: updatedParentMock,
+        deletedCardId: child.id
+      },
+      error: null
+    };
+  }
+
+  // 1. Checa se o pai possui outros filhos além deste
+  const { data: otherChildren } = await getDbClient()
+    .from('order_items')
+    .select('id')
+    .eq('split_from_item_id', parent.id)
+    .neq('id', child.id);
+
+  const hasOtherChildren = !!(otherChildren && otherChildren.length > 0);
+
+  // 2. Atualiza o card pai com a tiragem somada e friendly_id recomposto
+  const parentUpdates: any = {
+    friendly_id: restoredFriendlyId,
+    print_run: totalPrintRun,
+    boxes_count: totalBoxes,
+    stage_id: finalStageId,
+    notes: cleanedNotes,
+    split_at: hasOtherChildren ? parent.split_at : null,
+    split_by_user_id: hasOtherChildren ? parent.split_by_user_id : null,
+    updated_at: nowIso
+  };
+
+  const { data: updatedParent, error: updateErr } = await getDbClient()
+    .from('order_items')
+    .update(parentUpdates)
+    .eq('id', parent.id)
+    .select('*, product:products(*), stage:order_stages(*), order:orders(*, customer:customers(*))')
+    .single();
+
+  if (updateErr) {
+    console.error('Erro ao atualizar card pai na reversão de split:', updateErr);
+    return { data: null, error: updateErr };
+  }
+
+  // 3. Se a etapa mudou na reunificação, grava histórico de etapas
+  if (finalStageId !== parent.stage_id) {
+    try {
+      await getDbClient().from('order_item_stage_history').insert([{
+        tenant_id: tenantId || parent.tenant_id,
+        order_item_id: parent.id,
+        from_stage_id: parent.stage_id,
+        to_stage_id: finalStageId,
+        changed_by_profile_id: userId || null,
+        notes: `Reunificação de desmembramento com ${child.friendly_id}`
+      }]);
+    } catch (stgErr) {
+      console.warn('Aviso ao gravar histórico de etapa na reunificação:', stgErr);
+    }
+  }
+
+  // 4. Remove o card filho (dependências em cascata como histórico e manuseio são limpos)
+  const { error: deleteErr } = await getDbClient()
+    .from('order_items')
+    .delete()
+    .eq('id', child.id);
+
+  if (deleteErr) {
+    console.error('Erro ao excluir card filho na reversão de split:', deleteErr);
+    return { data: null, error: deleteErr };
+  }
+
+  return {
+    data: {
+      reunifiedCard: updatedParent,
+      deletedCardId: child.id
+    },
+    error: null
+  };
+}
+
 export async function getPendingAdjustment(tenantId: string, customerId: string, productId: string | null) {
   if (!customerId || !productId) return { data: null, error: null };
   

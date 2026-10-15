@@ -5600,6 +5600,38 @@ export default function PedidosPage() {
                                   <span style={{ fontWeight: 700, fontSize: '0.725rem', color: 'var(--text)' }}>
                                     {item.friendly_id || '---'}
                                   </span>
+                                  {(item.friendly_id?.endsWith('.1') || !!item.split_from_item_id) && (
+                                    <span
+                                      style={{
+                                        fontSize: '0.58rem',
+                                        fontWeight: 700,
+                                        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                                        color: 'var(--primary)',
+                                        padding: '1px 4px',
+                                        borderRadius: '3px',
+                                        border: '1px solid rgba(59, 130, 246, 0.25)'
+                                      }}
+                                      title="Card Desmembrado (.1)"
+                                    >
+                                      .1
+                                    </span>
+                                  )}
+                                  {(item.friendly_id?.endsWith('.2') || !!item.split_at) && (
+                                    <span
+                                      style={{
+                                        fontSize: '0.58rem',
+                                        fontWeight: 700,
+                                        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                                        color: '#d97706',
+                                        padding: '1px 4px',
+                                        borderRadius: '3px',
+                                        border: '1px solid rgba(245, 158, 11, 0.25)'
+                                      }}
+                                      title="Saldo Remanescente de Divisão (.2)"
+                                    >
+                                      .2
+                                    </span>
+                                  )}
                                   {!isReleased && (
                                     <span title="Pedido Bloqueado (Aguardando Pagamento/Sinal)" style={{ display: 'inline-flex', alignItems: 'center' }}>
                                       <AlertTriangle size={11} color="var(--danger)" style={{ flexShrink: 0 }} />
@@ -6545,6 +6577,38 @@ export default function PedidosPage() {
                         <td style={{ verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
                             <span>{pvDisplay}</span>
+                            {(item.friendly_id?.endsWith('.1') || !!item.split_from_item_id) && (
+                              <span
+                                style={{
+                                  fontSize: '0.58rem',
+                                  fontWeight: 700,
+                                  backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                                  color: 'var(--primary)',
+                                  padding: '1px 4px',
+                                  borderRadius: '3px',
+                                  border: '1px solid rgba(59, 130, 246, 0.25)'
+                                }}
+                                title="Card Desmembrado (.1)"
+                              >
+                                .1
+                              </span>
+                            )}
+                            {(item.friendly_id?.endsWith('.2') || !!item.split_at) && (
+                              <span
+                                style={{
+                                  fontSize: '0.58rem',
+                                  fontWeight: 700,
+                                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                                  color: '#d97706',
+                                  padding: '1px 4px',
+                                  borderRadius: '3px',
+                                  border: '1px solid rgba(245, 158, 11, 0.25)'
+                                }}
+                                title="Saldo Remanescente de Divisão (.2)"
+                              >
+                                .2
+                              </span>
+                            )}
                             {!isReleased && (
                               <span title="Pedido Bloqueado (Aguardando Pagamento/Sinal)" style={{ display: 'inline-flex', alignItems: 'center' }}>
                                 <AlertTriangle size={11} color="var(--danger)" style={{ flexShrink: 0 }} />

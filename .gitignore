@@ -55,7 +55,7 @@ mapa_samppel.md
 env samppel*
 
 # backups
-backup_pre_coleta_fields/
+backup_*/
 temp_*_backup/
 temp_backup/
 *.zip
