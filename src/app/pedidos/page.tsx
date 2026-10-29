@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
+import { authenticatedFetch } from '@/lib/apiFetch';
 import { HandlingReworkModal } from '@/components/modals/HandlingReworkModal';
 import { DetailModal } from '@/components/modals/DetailModal';
 import { RevertAuthModal } from '@/components/modals/RevertAuthModal';
@@ -412,6 +413,48 @@ export default function PedidosPage() {
     user?.email?.toLowerCase() === 'admin@samppel.com.br';
 
   const isJunior = user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com';
+
+  const isSupervisorRole = user?.role === 'Supervisão';
+  const supervisorHasFinance = isSupervisorRole && (user?.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard']).includes('financeiro');
+  const isLegacySupervisor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
+  const isSupervisor = isSupervisorRole || isLegacySupervisor;
+  const isVendedor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && !isSupervisor;
+  const hideMonetaryValues = !supervisorHasFinance && user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isLegacySupervisor);
+
+  // Helper para verificar permissões de carteira de vendedor do usuário logado
+  const canUserViewOrderSeller = (sellerName: string): boolean => {
+    if (!user) return true;
+    if (user.role === 'Administrador' || user.role === 'Supervisão') return true;
+
+    if (user.role === 'Comercial' || user.role === 'Vendedor') {
+      const sellerPermsMap = getSellerPermissionsMap();
+      const userPerms = sellerPermsMap[user.id];
+
+      if (!userPerms) {
+        const userFullNameLower = (user.full_name || '').toLowerCase().trim();
+        const sellerNameLower = (sellerName || '').toLowerCase().trim();
+        if (!sellerNameLower) return false;
+        return sellerNameLower === userFullNameLower;
+      }
+
+      const mode = userPerms.seller_access_mode || 'OWN';
+      if (mode === 'ALL' || (userPerms.allowed_sellers || []).includes('*')) return true;
+
+      const primary = (userPerms.primary_seller_name || '').toLowerCase().trim();
+      const sLower = (sellerName || '').toLowerCase().trim();
+
+      if (primary && primary === sLower) return true;
+
+      const allowed = userPerms.allowed_sellers || [];
+      return allowed.some(a => a && a.toLowerCase().trim() === sLower);
+    }
+
+    return true;
+  };
+
+  const cleanPvForMatch = (pv: string) => {
+    return (pv || '').split('/')[0].trim().toLowerCase();
+  };
 
   const isManualOrder = (order: any): boolean => {
     if (!order) return true;
@@ -1438,6 +1481,7 @@ export default function PedidosPage() {
         setItemHandlingTeamsMap(teamsMap);
         setShortagesMap(sMap);
       }
+      fetchUserPermissions();
       return ordersRes.data || [];
     } catch (e) {
       console.error('Erro ao carregar dados da página de pedidos:', e);
@@ -1449,19 +1493,34 @@ export default function PedidosPage() {
 
 
   const fetchUserPermissions = async () => {
-    if (!user || !supabase) return;
+    if (!user) return;
     try {
       if (user.role === 'Administrador' && !user.is_factory_account) {
+        setUserPermissions([]);
         return; // Admin tem permissão irrestrita por padrão
       }
 
-      const { data, error } = await supabase
-        .from('profile_stage_permissions')
-        .select('stage_id, can_enter, can_exit')
-        .eq('profile_id', user.id);
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('profile_stage_permissions')
+          .select('stage_id, can_enter, can_exit')
+          .eq('profile_id', user.id);
 
-      if (data) {
-        setUserPermissions(data);
+        if (!error && data) {
+          setUserPermissions(data);
+          return;
+        }
+      }
+
+      // Fallback via API caso a query direta falhe ou sofra com RLS
+      const tenantId = user.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const res = await authenticatedFetch(`/api/operators?tenantId=${tenantId}`);
+      if (res.ok) {
+        const json = await res.json();
+        const currentOp = (json.data || []).find((o: any) => o.id === user.id);
+        if (currentOp && currentOp.profile_stage_permissions) {
+          setUserPermissions(currentOp.profile_stage_permissions);
+        }
       }
     } catch (err) {
       console.error('Erro ao carregar permissões do usuário:', err);
@@ -1835,7 +1894,7 @@ export default function PedidosPage() {
         setLoading(true);
         try {
           const { data: credits } = await getCustomerStockCredits(customerId, 'ATIVO', tenantId);
-          const activeCredit = (credits || []).find((c: any) => c.product_id === productId);
+          const activeCredit = (credits || []).find((c: any) => c.product_id === productId && (Number(c.remaining_quantity) || 0) > 0);
 
           if (activeCredit) {
             setProductionAlertData(activeCredit);
@@ -2039,11 +2098,25 @@ export default function PedidosPage() {
     }
 
     // Regras de Transições baseadas em Papel
-    if (user && user.role !== 'Administrador' && !activeOpId) {
+    if (user && user.role !== 'Administrador') {
       // 1. Vendedor(a) regular
       if (isVendedor) {
         if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
           alert('Permissão Negada: Vendedores só podem movimentar seus próprios pedidos.');
+          return;
+        }
+
+        // Validação estrita de permissões de saída (can_exit) e entrada (can_enter) para Vendedores
+        const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
+        if (!currentStagePerm || !currentStagePerm.can_exit) {
+          const currentStage = stages.find(s => s.id === currentStageId);
+          alert(`Permissão Negada: Você não possui autorização nos ajustes do seu perfil para retirar pedidos da etapa "${currentStage?.name || 'Atual'}".`);
+          return;
+        }
+
+        const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
+        if (!targetStagePerm || !targetStagePerm.can_enter) {
+          alert(`Permissão Negada: Você não possui autorização nos ajustes do seu perfil para colocar pedidos na etapa "${targetStage.name}".`);
           return;
         }
       }
@@ -2074,21 +2147,24 @@ export default function PedidosPage() {
         }
       }
 
-      // Validar saída da etapa atual (se houver uma etapa atual)
-      if (currentStageId) {
-        const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
-        if (!currentStagePerm || !currentStagePerm.can_exit) {
-          const currentStage = stages.find(s => s.id === currentStageId);
-          alert(`Você não tem liberação para retirar itens da etapa "${currentStage?.name || 'desconhecida'}".`);
+      // 5. Validar saída e entrada por permissões configuradas por etapa (se houver permissões cadastradas para outros usuários não-vendedores)
+      if (!isVendedor && userPermissions && userPermissions.length > 0) {
+        // Validar saída da etapa atual (se houver uma etapa atual)
+        if (currentStageId) {
+          const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
+          if (!currentStagePerm || !currentStagePerm.can_exit) {
+            const currentStage = stages.find(s => s.id === currentStageId);
+            alert(`Você não tem liberação para retirar itens da etapa "${currentStage?.name || 'desconhecida'}".`);
+            return;
+          }
+        }
+
+        // Validar entrada na etapa de destino
+        const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
+        if (!targetStagePerm || !targetStagePerm.can_enter) {
+          alert(`Você não tem liberação para colocar itens na etapa "${targetStage.name}".`);
           return;
         }
-      }
-
-      // Validar entrada na etapa de destino
-      const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
-      if (!targetStagePerm || !targetStagePerm.can_enter) {
-        alert(`Você não tem liberação para colocar itens na etapa "${targetStage.name}".`);
-        return;
       }
     }
 
@@ -3084,8 +3160,36 @@ export default function PedidosPage() {
   };
 
   const canUserMoveItemStage = (item: any) => {
-    if (!user) return true;
-    if (['Admin', 'Gerente', 'Comercial', 'Vendedor', 'Atendimento'].includes(user.role)) return true;
+    if (!user) return false;
+    if (user.role === 'Administrador') return true;
+
+    if (isVendedor) {
+      // Vendedor só pode movimentar pedidos da sua própria carteira
+      if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
+        return false;
+      }
+
+      // Vendedor só pode iniciar movimentação se tiver permissão de SAÍDA (can_exit) da etapa atual
+      const currentStageId = item.stage_id || stages[0]?.id;
+      const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
+      if (!currentStagePerm || !currentStagePerm.can_exit) {
+        return false;
+      }
+
+      // Deve haver pelo menos uma outra etapa onde ele tem permissão de ENTRADA (can_enter)
+      const hasAnyAllowedTarget = stages.some(s => {
+        if (s.id === currentStageId) return false;
+        const targetPerm = userPermissions.find(p => p.stage_id === s.id);
+        return targetPerm && targetPerm.can_enter;
+      });
+
+      if (!hasAnyAllowedTarget) {
+        return false;
+      }
+
+      return true;
+    }
+
     if (user.role === 'Estoque') {
       const currentStage = stages.find(s => s.id === item.stage_id);
       return currentStage?.name === 'Estoque';
@@ -3100,12 +3204,37 @@ export default function PedidosPage() {
     return true;
   };
 
+  const canUserMoveItemToSpecificStage = (item: any, targetStageId: string) => {
+    if (!user) return false;
+    if (user.role === 'Administrador') return true;
+
+    if (isVendedor) {
+      if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
+        return false;
+      }
+      const currentStageId = item.stage_id || stages[0]?.id;
+      const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
+      if (!currentStagePerm || !currentStagePerm.can_exit) {
+        return false;
+      }
+      const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
+      if (!targetStagePerm || !targetStagePerm.can_enter) {
+        return false;
+      }
+      return true;
+    }
+
+    return canUserMoveItemStage(item);
+  };
+
   const handlePointerDown = (e: React.PointerEvent, item: any) => {
     if ((e.pointerType as string) === 'touch') return;
     if (e.button !== 0) return;
 
     const target = e.target as HTMLElement;
     if (target.closest('button')) return;
+
+    if (!canUserMoveItemStage(item)) return;
 
     wasJustDragged.current = false;
 
@@ -4180,52 +4309,7 @@ export default function PedidosPage() {
     }
   };
 
-  const isSupervisorRole = user?.role === 'Supervisão';
-  const supervisorHasFinance = isSupervisorRole && (user?.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard']).includes('financeiro');
-  const isLegacySupervisor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && (user.email?.includes('supervisor') || user.full_name?.includes('Super'));
-  const isSupervisor = isSupervisorRole || isLegacySupervisor;
-  const isVendedor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && !isSupervisor;
-  const hideMonetaryValues = !supervisorHasFinance && user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isLegacySupervisor);
 
-  const cleanPvForMatch = (pv: string) => {
-    return (pv || '').split('/')[0].trim().toLowerCase();
-  };
-
-  // Helper para verificar permissões de carteira de vendedor do usuário logado
-  const canUserViewOrderSeller = (sellerName: string): boolean => {
-    if (!user) return true;
-    if (user.role === 'Administrador' || user.role === 'Supervisão') return true;
-
-    if (user.role === 'Comercial' || user.role === 'Vendedor') {
-      const sellerPermsMap = getSellerPermissionsMap();
-      const userPerms = sellerPermsMap[user.id];
-
-      if (!userPerms) {
-        // Fallback: usar igualdade exata para evitar que "Lucas" veja "Lucas Silva" se forem pessoas diferentes.
-        // O administrador deve configurar corretamente em Ajustes -> Permissões de Vendedor caso os nomes não batam exatamente.
-        const userFullNameLower = (user.full_name || '').toLowerCase().trim();
-        const sellerNameLower = (sellerName || '').toLowerCase().trim();
-        if (!sellerNameLower) return false;
-        
-        return sellerNameLower === userFullNameLower;
-      }
-
-      const mode = userPerms.seller_access_mode || 'OWN';
-      if (mode === 'ALL' || (userPerms.allowed_sellers || []).includes('*')) return true;
-
-      const primary = (userPerms.primary_seller_name || '').toLowerCase().trim();
-      const sLower = (sellerName || '').toLowerCase().trim();
-
-      // Se coincidir EXATAMENTE com o vendedor principal vinculado
-      if (primary && primary === sLower) return true;
-
-      // Se coincidir EXATAMENTE com algum dos vendedores autorizados na lista
-      const allowed = userPerms.allowed_sellers || [];
-      return allowed.some(a => a && a.toLowerCase().trim() === sLower);
-    }
-
-    return true;
-  };
 
   const getFreightBadgeStyle = (shippingType: string, notesFreight?: string | null) => {
     if (notesFreight) {
@@ -6435,23 +6519,45 @@ export default function PedidosPage() {
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1px', paddingTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
                                 {(() => {
                                   const realStageIdx = item.stage_id ? stages.findIndex(s => s.id === item.stage_id) : 0;
+                                  const prevStage = realStageIdx > 0 ? stages[realStageIdx - 1] : null;
+                                  const nextStage = (realStageIdx !== -1 && realStageIdx < stages.length - 1) ? stages[realStageIdx + 1] : null;
+
+                                  const canGoPrev = Boolean(prevStage && canUserMoveItemToSpecificStage(item, prevStage.id));
+                                  const canGoNext = Boolean(nextStage && canUserMoveItemToSpecificStage(item, nextStage.id));
+
                                   return (
                                     <div style={{ display: 'flex', gap: '1px' }}>
                                       <button
-                                        disabled={realStageIdx <= 0}
-                                        onClick={() => moveOrderItemToStage(item, stages[realStageIdx - 1].id)}
+                                        disabled={!canGoPrev}
+                                        onClick={() => {
+                                          if (canGoPrev && prevStage) moveOrderItemToStage(item, prevStage.id);
+                                        }}
                                         className="btn btn-secondary"
-                                        style={{ padding: '1px 3px', display: 'flex', alignItems: 'center' }}
-                                        title="Voltar"
+                                        style={{
+                                          padding: '1px 3px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          opacity: canGoPrev ? 1 : 0.3,
+                                          cursor: canGoPrev ? 'pointer' : 'not-allowed'
+                                        }}
+                                        title={canGoPrev ? `Voltar para ${prevStage?.name}` : 'Sem permissão para voltar para a etapa anterior'}
                                       >
                                         <ChevronLeft size={10} />
                                       </button>
                                       <button
-                                        disabled={realStageIdx === -1 || realStageIdx === stages.length - 1}
-                                        onClick={() => moveOrderItemToStage(item, stages[realStageIdx + 1].id)}
+                                        disabled={!canGoNext}
+                                        onClick={() => {
+                                          if (canGoNext && nextStage) moveOrderItemToStage(item, nextStage.id);
+                                        }}
                                         className="btn btn-secondary"
-                                        style={{ padding: '1px 3px', display: 'flex', alignItems: 'center' }}
-                                        title="Avançar"
+                                        style={{
+                                          padding: '1px 3px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          opacity: canGoNext ? 1 : 0.3,
+                                          cursor: canGoNext ? 'pointer' : 'not-allowed'
+                                        }}
+                                        title={canGoNext ? `Avançar para ${nextStage?.name}` : 'Sem permissão para avançar para a próxima etapa'}
                                       >
                                         <ChevronRight size={10} />
                                       </button>
@@ -6867,7 +6973,7 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {isShippingCrudModalOpen && <ShippingCrudModal {...{ createShippingTypeConfig, deleteShippingTypeConfig, loading, newShippingTypeName, setIsShippingCrudModalOpen, setLoading, setNewShippingTypeName, setShippingTypes, shippingTypes, user }} />}
 
-      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, fetchAllData, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, setIsMoveStageModalOpen, setItemToMoveStage, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
+      {isDetailModalOpen && <DetailViewModal {...{ isBusinessDays, canUserDeleteOrder, canUserMoveItemStage, Copy, CopyButton, Edit3, RefreshCw, Scale, adjustments, calculateExpeditionDate, capitalizeText, detailItem, extractOrderDetails, fetchAllData, financialTransactions, formatDocument, formatPhone, getFreightBadgeStyle, getItemRealMeasure, handleOpenEdit, handleOpenHandlingTeamModalForItem, handleRequestDeleteManualOrder, handleSyncSingleOrder, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, itemHandlingTeamsMap, orderItems, orderRangeChoiceMap, parseDeadlineFromNotes, productionMachines, setExpeditionResolutionNotes, setExpeditionResolutionType, setExpeditionTargetItem, setExpeditionTargetShortage, setIsDetailModalOpen, setIsExpeditionModalOpen, setIsMoveStageModalOpen, setItemToMoveStage, shortagesMap, showToast, stages, syncingSingleOrder, user }} />}
 
       {/* ========================================
           MODAL CRUD DE SETORES DE PRODUÇÃO
@@ -6895,7 +7001,7 @@ export default function PedidosPage() {
       {isBlockedPaymentModalOpen && <BlockedPaymentModal {...{ RefreshCw, blockedPaymentItem, blockedPaymentTargetStageId, blockedSyncFeedback, checkIsDelayed, handleCancelBlockedPaymentMove, handleConfirmBlockedPaymentMove, handleSyncSingleOrder, hasOverdueInstallments, importing, stages }} />}
 
       {/* MODAL DE MOVER PEDIDO DE ETAPA (MOBILE / TABLETS / MANUAL COM PIN) */}
-      {isMoveStageModalOpen && <MoveStageModal {...{ ArrowRightLeft, itemToMoveStage, moveOrderItemToStage, setIsMoveStageModalOpen, setItemToMoveStage, stages, tenantId: user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', user }} />}
+      {isMoveStageModalOpen && <MoveStageModal {...{ ArrowRightLeft, isVendedor, itemToMoveStage, moveOrderItemToStage, setIsMoveStageModalOpen, setItemToMoveStage, stages, tenantId: user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', user, userPermissions }} />}
 
       {/* MODAL CRUD: GERENCIAR LOCALIZAÇÕES FÍSICAS NA FÁBRICA */}
       {isLocationCrudModalOpen && <LocationCrudModal {...{ Edit3, Loader2, editingLocation, factoryLocations, handleDeleteLocationClick, handleEditLocationClick, handleSaveLocation, locationName, locationStatus, setEditingLocation, setIsLocationCrudModalOpen, setLocationName, setLocationStatus, submittingLocation }} />}

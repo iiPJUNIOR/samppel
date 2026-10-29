@@ -1,0 +1,42 @@
+name: Sincronizacao Agendada Conta Azul (15 Minutos)
+
+on:
+  schedule:
+    # Executa a cada 15 minutos (00, 15, 30, 45 de cada hora)
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Permite disparo manual direto pela aba Actions do GitHub
+
+jobs:
+  trigger-sync:
+    name: Disparar Sincronizacao Incremental
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Executar chamada HTTP ao endpoint de sincronizacao
+        run: |
+          echo "Iniciando chamada para https://portalsamppel.vercel.app/api/sync/cron?mode=incremental..."
+          
+          AUTH_HEADER=""
+          if [ -n "${{ secrets.CRON_SECRET }}" ]; then
+            AUTH_HEADER="Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          fi
+
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://portalsamppel.vercel.app/api/sync/cron?mode=incremental" \
+            ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+            -H "Content-Type: application/json" \
+            --max-time 120 \
+            --retry 2)
+
+          HTTP_BODY=$(echo "$RESPONSE" | sed -e '$d')
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+
+          echo "Status retornado: $HTTP_STATUS"
+          echo "Resposta: $HTTP_BODY"
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Sincronizacao incremental iniciada com sucesso."
+          else
+            echo "Falha ao acionar sincronizacao (HTTP $HTTP_STATUS)."
+            exit 1
+          fi

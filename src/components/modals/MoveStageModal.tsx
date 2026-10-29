@@ -15,7 +15,9 @@ export function MoveStageModal(props: any) {
     setItemToMoveStage,
     stages,
     tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    user
+    user,
+    userPermissions = [],
+    isVendedor = false
   } = props;
 
   // Define se o usuario atual pertence a conta compartilhada da Fabrica/Producao
@@ -89,6 +91,15 @@ export function MoveStageModal(props: any) {
       setPin('');
       setStep('PIN');
     } else {
+      // Validação prévia de permissão de entrada caso seja vendedor
+      if (isVendedor && user?.role !== 'Administrador') {
+        const targetPerm = (userPermissions || []).find((p: any) => p.stage_id === stg.id);
+        if (!targetPerm || !targetPerm.can_enter) {
+          alert(`Você não possui autorização nos ajustes do seu perfil para colocar pedidos na etapa "${stg.name}".`);
+          return;
+        }
+      }
+
       // Usuario autenticado individual (Admin, Supervisao, Comercial, Vendedor, etc.):
       // Move direto sem pedir PIN, utilizando o proprio login ativo
       try {
@@ -303,13 +314,17 @@ export function MoveStageModal(props: any) {
             {stages.map((stg: any) => {
               const isCurrent = itemToMoveStage.stage_id === stg.id || (!itemToMoveStage.stage_id && stg.id === stages[0]?.id);
               const isTargetMoving = movingStageId === stg.id;
+              const isUserAdmin = user?.role === 'Administrador';
+              const targetPerm = (userPermissions || []).find((p: any) => p.stage_id === stg.id);
+              const canEnter = isUserAdmin || !isVendedor || Boolean(targetPerm && targetPerm.can_enter);
+              const isDisabled = isCurrent || isMovingDirect || !canEnter;
 
               return (
                 <button
                   key={stg.id}
                   type="button"
                   onClick={() => handleSelectStage(stg)}
-                  disabled={isCurrent || isMovingDirect}
+                  disabled={isDisabled}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -317,21 +332,27 @@ export function MoveStageModal(props: any) {
                     padding: '0.75rem 0.95rem',
                     borderRadius: 'var(--radius-md, 8px)',
                     border: isCurrent ? `2px solid ${stg.color}` : '1px solid var(--border)',
-                    backgroundColor: isCurrent ? `${stg.color}15` : 'var(--surface)',
-                    cursor: isCurrent || isMovingDirect ? 'default' : 'pointer',
+                    backgroundColor: isCurrent ? `${stg.color}15` : !canEnter ? 'var(--surface-subtle)' : 'var(--surface)',
+                    cursor: isDisabled ? 'not-allowed' : 'pointer',
+                    opacity: !canEnter ? 0.45 : 1,
                     transition: 'all 0.15s ease',
                     minHeight: '44px'
                   }}
+                  title={!canEnter ? `Sem autorização nos ajustes do perfil para colocar na etapa "${stg.name}"` : ''}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
                     <span style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: stg.color, display: 'inline-block', flexShrink: 0 }} />
-                    <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 800 : 600, color: 'var(--text)' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 800 : 600, color: !canEnter ? 'var(--text-muted)' : 'var(--text)' }}>
                       {stg.name}
                     </span>
                   </div>
                   {isCurrent ? (
                     <span style={{ fontSize: '0.7rem', fontWeight: 700, color: stg.color, backgroundColor: `${stg.color}25`, padding: '2px 8px', borderRadius: '99px' }}>
                       Etapa Atual
+                    </span>
+                  ) : !canEnter ? (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', backgroundColor: 'var(--border)', padding: '2px 8px', borderRadius: '99px' }}>
+                      Bloqueado
                     </span>
                   ) : isTargetMoving ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 700 }}>
@@ -340,7 +361,7 @@ export function MoveStageModal(props: any) {
                     </div>
                   ) : (
                     <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)' }}>
-                      {isFactoryUser ? 'Escolher >' : 'Mover para ca'}
+                      {isFactoryUser ? 'Escolher >' : 'Mover para cá'}
                     </span>
                   )}
                 </button>

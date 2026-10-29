@@ -1466,7 +1466,7 @@ export async function createOrderBalanceAdjustment(adjustment: Omit<OrderBalance
       );
     }
 
-    if (adjustment.action_taken === 'CREDITO_PROXIMO_PEDIDO' || adjustment.action_taken === 'REPRODUCAO_PENDENTE') {
+    if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(adjustment.action_taken)) {
       const type = adjustment.difference_quantity > 0 ? 'CORTESIA_SOBRA' : 'PENDENCIA_ENTREGA';
       const qty = Math.abs(adjustment.difference_quantity);
       await createCustomerStockCredit({
@@ -1512,7 +1512,7 @@ export async function createOrderBalanceAdjustment(adjustment: Omit<OrderBalance
       );
     }
 
-    if (data.action_taken === 'CREDITO_PROXIMO_PEDIDO' || data.action_taken === 'REPRODUCAO_PENDENTE') {
+    if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(data.action_taken)) {
       const type = data.difference_quantity > 0 ? 'CORTESIA_SOBRA' : 'PENDENCIA_ENTREGA';
       const qty = Math.abs(data.difference_quantity);
       await createCustomerStockCredit({

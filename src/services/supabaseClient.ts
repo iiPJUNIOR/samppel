@@ -136,14 +136,39 @@ export async function getIntegrationLogs(tenantId = 'd3b07384-d113-4ec8-a5c6-e91
   return { data, error };
 }
 
+function sanitizeLogData(data: any): any {
+  if (!data) return null;
+  if (typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    return { count: data.length, sample: data.slice(0, 2).map(sanitizeLogData) };
+  }
+  const allowedKeys = ['id', 'numero', 'orderId', 'pv_number', 'client_id', 'imported', 'updated', 'total', 'action', 'status', 'name', 'step', 'progress'];
+  const sanitized: Record<string, any> = {};
+  for (const key of Object.keys(data)) {
+    if (allowedKeys.includes(key) || typeof data[key] === 'string' || typeof data[key] === 'number' || typeof data[key] === 'boolean') {
+      const val = data[key];
+      if (typeof val === 'string' && val.length > 250) {
+        sanitized[key] = val.substring(0, 250) + '...';
+      } else {
+        sanitized[key] = val;
+      }
+    }
+  }
+  return sanitized;
+}
+
 export async function createIntegrationLog(action: string, status: 'SUCCESS' | 'ERROR' | 'PENDING_RETRY', payload: any, response: any, errorMessage: string | null = null, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
+  // Em caso de sucesso, compacta o payload para não inflar a ingestão de logs e egress no Supabase
+  const finalPayload = status === 'SUCCESS' ? sanitizeLogData(payload) : payload;
+  const finalResponse = status === 'SUCCESS' ? sanitizeLogData(response) : response;
+
   const log = {
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
     tenant_id: tenantId,
     action,
     status,
-    payload,
-    response,
+    payload: finalPayload,
+    response: finalResponse,
     error_message: errorMessage,
     created_at: new Date().toISOString()
   };

@@ -445,29 +445,7 @@ export function ExpeditionTransitionModal(props: any) {
                           notes: expeditionTransitionNotes || `Registrado na consolidação da Expedição (${adjType})`,
                           created_by_name: user?.full_name || user?.email || 'Sistema'
                         });
-
-                        // Registra Crédito/Débito em customer_stock_credits
-                        if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(itemData.adjustmentAction)) {
-                          const creditType = diffQty < 0 ? 'PENDENCIA_ENTREGA' : 'CORTESIA_SOBRA';
-                          const absQty = Math.abs(diffQty);
-
-                          const { error: creditError } = await createCustomerStockCredit({
-                            tenant_id: tenantId,
-                            customer_id: itm.order?.customer_id || expeditionTransitionItem.order?.customer_id,
-                            product_id: itm.product_id,
-                            credit_type: creditType,
-                            original_quantity: absQty,
-                            remaining_quantity: absQty,
-                            source_order_id: itm.order_id,
-                            source_adjustment_id: null,
-                            status: 'ATIVO',
-                            notes: expeditionTransitionNotes || `Registrado na Expedição (${diffQty < 0 ? 'Falta' : 'Cortesia'})`
-                          });
-
-                          if (creditError) {
-                            console.error('Erro ao registrar saldo acumulado do cliente:', creditError.message);
-                          }
-                        }
+                        // Nota: O crédito em customer_stock_credits ou estoque personalizado já é criado automaticamente dentro de createOrderBalanceAdjustment acima.
                       }
                     }
 

@@ -5,6 +5,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import Sidebar from "@/components/Sidebar";
 import AppGuard from "@/components/AppGuard";
+import DatabaseStatusBanner from "@/components/DatabaseStatusBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,6 +44,7 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             <AppGuard>
+              <DatabaseStatusBanner />
               <div className="app-container">
                 <Sidebar />
                 <div className="main-content">

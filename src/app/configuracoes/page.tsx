@@ -61,7 +61,14 @@ import {
   AlertCircle,
   KeyRound,
   Zap,
-  MapPin
+  MapPin,
+  Activity,
+  Server,
+  ExternalLink,
+  ShieldCheck,
+  Moon,
+  Sun,
+  Bell
 } from 'lucide-react';
 
 export default function ConfiguracoesPage() {
@@ -150,6 +157,66 @@ export default function ConfiguracoesPage() {
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [fetchingInvites, setFetchingInvites] = useState(false);
+
+  // States de Saúde do Banco de Dados Supabase & Alertas
+  const [dbHealth, setDbHealth] = useState<any>(null);
+  const [checkingDbHealth, setCheckingDbHealth] = useState(false);
+  const [sendingTestAlert, setSendingTestAlert] = useState(false);
+  const [sendingTestMorningReport, setSendingTestMorningReport] = useState(false);
+  const [alertFeedback, setAlertFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const fetchDbHealth = async () => {
+    setCheckingDbHealth(true);
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      setDbHealth(data);
+    } catch (err: any) {
+      setDbHealth({
+        healthy: false,
+        status: 'unreachable',
+        database: { error: err.message || 'Erro ao conectar à API de saúde' }
+      });
+    } finally {
+      setCheckingDbHealth(false);
+    }
+  };
+
+  const handleSendTestAlert = async () => {
+    setSendingTestAlert(true);
+    setAlertFeedback(null);
+    try {
+      const res = await fetch('/api/health?testAlert=true');
+      const data = await res.json();
+      if (data.success) {
+        setAlertFeedback({ type: 'success', message: 'E-mail de teste de alerta enviado com sucesso para junior.8350i@gmail.com!' });
+      } else {
+        setAlertFeedback({ type: 'error', message: data.details?.error || 'Falha ao enviar e-mail de teste.' });
+      }
+    } catch (err: any) {
+      setAlertFeedback({ type: 'error', message: err.message || 'Erro de comunicação ao disparar e-mail.' });
+    } finally {
+      setSendingTestAlert(false);
+    }
+  };
+
+  const handleSendTestMorningReport = async () => {
+    setSendingTestMorningReport(true);
+    setAlertFeedback(null);
+    try {
+      const res = await fetch('/api/health?testDailyReport=true');
+      const data = await res.json();
+      if (data.success) {
+        setAlertFeedback({ type: 'success', message: 'Relatório matinal de teste enviado com sucesso para junior.8350i@gmail.com!' });
+      } else {
+        setAlertFeedback({ type: 'error', message: data.details?.error || 'Falha ao enviar relatório matinal.' });
+      }
+    } catch (err: any) {
+      setAlertFeedback({ type: 'error', message: err.message || 'Erro de comunicação ao disparar relatório.' });
+    } finally {
+      setSendingTestMorningReport(false);
+    }
+  };
 
   const fetchInvites = async () => {
     setFetchingInvites(true);
@@ -1170,7 +1237,10 @@ export default function ConfiguracoesPage() {
           <span>Integração ERP</span>
         </button>
         <button 
-          onClick={() => setActiveTab('sistema')} 
+          onClick={() => {
+            setActiveTab('sistema');
+            fetchDbHealth();
+          }} 
           className={`tab-btn ${activeTab === 'sistema' ? 'active' : ''}`}
         >
           <Settings size={16} />
@@ -3269,7 +3339,277 @@ export default function ConfiguracoesPage() {
         </div>
       )}
 
-      {/* Modal de Alerta de Alteração de Credenciais de API */}
+      {/* TAB CONTENT: GERAL & SISTEMA */}
+      {activeTab === 'sistema' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
+          
+          {/* 1. MONITOR DE SAÚDE E CONEXÃO SUPABASE */}
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text)' }}>
+                  <Server size={20} style={{ color: 'var(--primary)' }} />
+                  <span>Integridade da Base de Dados Supabase</span>
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0.25rem 0 0 0' }}>
+                  Monitoramento contínuo de conectividade e prevenção contra pausas automáticas por inatividade.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={fetchDbHealth}
+                  disabled={checkingDbHealth}
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                >
+                  <RefreshCw size={14} className={checkingDbHealth ? 'animate-spin' : ''} />
+                  <span>{checkingDbHealth ? 'Testando...' : 'Testar Conexão Agora'}</span>
+                </button>
+
+                <a
+                  href="https://supabase.com/dashboard/project/cywbfcrtuawsgtbsjnnb"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.8rem', textDecoration: 'none' }}
+                >
+                  <span>Console Supabase</span>
+                  <ExternalLink size={14} />
+                </a>
+              </div>
+            </div>
+
+            {/* STATUS BANNER */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1rem 1.25rem',
+              borderRadius: 'var(--radius-md, 8px)',
+              backgroundColor: dbHealth ? (dbHealth.healthy ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.12)') : 'var(--surface-subtle)',
+              border: `1px solid ${dbHealth ? (dbHealth.healthy ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.4)') : 'var(--border)'}`,
+              marginBottom: '1.25rem',
+              flexWrap: 'wrap',
+              gap: '1rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  backgroundColor: dbHealth ? (dbHealth.healthy ? '#22c55e' : '#ef4444') : '#94a3b8',
+                  boxShadow: dbHealth ? (dbHealth.healthy ? '0 0 10px #22c55e' : '0 0 10px #ef4444') : 'none'
+                }} />
+                <div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text)' }}>
+                    {dbHealth
+                      ? (dbHealth.healthy ? 'Banco de Dados Online e Operacional' : 'Atenção: Banco Inacessível ou Pausado')
+                      : 'Clique em "Testar Conexão Agora" para verificar o status'}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {dbHealth?.database?.latencyMs !== undefined
+                      ? `Latência medida: ${dbHealth.database.latencyMs} ms | Verificado em: ${new Date(dbHealth.system?.checkedAt || Date.now()).toLocaleTimeString('pt-BR')}`
+                      : 'Projeto ID: cywbfcrtuawsgtbsjnnb (Portal Samppel)'}
+                  </div>
+                </div>
+              </div>
+
+              {dbHealth && !dbHealth.healthy && (
+                <a
+                  href="https://supabase.com/dashboard/project/cywbfcrtuawsgtbsjnnb"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary"
+                  style={{ backgroundColor: '#dc2626', borderColor: '#dc2626', fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                >
+                  Reativar Projeto no Supabase
+                </a>
+              )}
+            </div>
+
+            {/* GRID DE PARÂMETROS TÉCNICOS */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+              <div style={{ padding: '0.85rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Projeto Supabase</div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', marginTop: '0.25rem' }}>Portal Samppel</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>cywbfcrtuawsgtbsjnnb</div>
+              </div>
+
+              <div style={{ padding: '0.85rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Host do Banco (Postgres)</div>
+                <div style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--text)', marginTop: '0.25rem', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  db.cywbfcrtuawsgtbsjnnb.supabase.co
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Região: sa-east-1 (São Paulo)</div>
+              </div>
+
+              <div style={{ padding: '0.85rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Validade do PAT Supabase</div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#f59e0b', marginTop: '0.25rem' }}>
+                  04 de Janeiro de 2027
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Token de Acesso Pessoal da Integração</div>
+              </div>
+
+              <div style={{ padding: '0.85rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Rotina Keep-Alive Ativa</div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#22c55e', marginTop: '0.25rem' }}>
+                  2x ao dia (00:00 e 12:00 BRT)
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Zera contador de inatividade de 7 dias</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. CANAL DE ALERTAS POR E-MAIL (RESEND) */}
+          <div className="card">
+            <div style={{ marginBottom: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text)' }}>
+                <Bell size={20} style={{ color: 'var(--primary)' }} />
+                <span>Canal de Notificações &amp; Alertas de Emergência</span>
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0.25rem 0 0 0' }}>
+                Disparo automático de alerta quando o Supabase estiver inacessível ou se a sincronização matinal falhar.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', marginBottom: '1.25rem' }}>
+              <div style={{ padding: '1rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Provedor de E-mail</div>
+                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.35rem' }}>Resend API (Produção)</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  Remetente Oficial: <strong>sistema@samppel.com.br</strong> (Domínio verificado)
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  Destinatário de Alerta: <strong>junior.8350i@gmail.com</strong>
+                </div>
+              </div>
+
+              <div style={{ padding: '1rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Gatilhos de Notificação</div>
+                <ul style={{ margin: '0.5rem 0 0 1.25rem', padding: 0, fontSize: '0.8rem', color: 'var(--text)', lineHeight: 1.6 }}>
+                  <li>Tentativa de sincronização com banco inacessível ou pausado.</li>
+                  <li>Falha crítica durante a importação Conta Azul.</li>
+                  <li>Relatório matinal diário de saúde do sistema e fila.</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* FEEDBACK DE DISPARO DE TESTE */}
+            {alertFeedback && (
+              <div style={{
+                padding: '0.75rem 1rem',
+                borderRadius: 'var(--radius-sm, 6px)',
+                backgroundColor: alertFeedback.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                border: `1px solid ${alertFeedback.type === 'success' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                color: alertFeedback.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                marginBottom: '1rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}>
+                {alertFeedback.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                <span>{alertFeedback.message}</span>
+              </div>
+            )}
+
+            {/* BOTÕES DE TESTE DE E-MAIL */}
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleSendTestAlert}
+                disabled={sendingTestAlert || sendingTestMorningReport}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.55rem 1rem' }}
+              >
+                <Send size={15} />
+                <span>{sendingTestAlert ? 'Disparando...' : 'Testar Envio de Alerta por E-mail'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSendTestMorningReport}
+                disabled={sendingTestAlert || sendingTestMorningReport}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', padding: '0.55rem 1rem' }}
+              >
+                <Mail size={15} />
+                <span>{sendingTestMorningReport ? 'Disparando...' : 'Testar Relatório Matinal por E-mail'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 3. INSTRUÇÕES DE PREVENÇÃO & KEEP-ALIVE */}
+          <div className="card">
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text)' }}>
+              <ShieldCheck size={18} style={{ color: 'var(--primary)' }} />
+              <span>Como Funciona a Prevenção contra Pausa Automática</span>
+            </h3>
+
+            <div style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.6 }}>
+              <p style={{ margin: '0 0 0.75rem 0' }}>
+                O plano gratuito do Supabase suspende projetos automaticamente quando passam <strong>7 dias seguidos sem nenhuma consulta SQL ou requisição</strong>.
+              </p>
+              <p style={{ margin: '0 0 0.75rem 0' }}>
+                Para evitar isso de forma definitiva:
+              </p>
+              <ol style={{ margin: '0 0 1rem 1.25rem', padding: 0 }}>
+                <li><strong>Cron Integrado:</strong> A rota <code>/api/sync/cron</code> roda toda madrugada e a rota <code>/api/health</code> roda ao meio-dia, realizando leituras reais na base para renovar a atividade.</li>
+                <li><strong>Monitor Externo (Opcional):</strong> Se desejar monitoramento independente que avise no celular caso a Vercel ou o Supabase oscilem, você pode cadastrar a URL abaixo em serviços gratuitos como <strong>UptimeRobot</strong> ou <strong>cron-job.org</strong>:</li>
+              </ol>
+
+              <div style={{
+                backgroundColor: 'var(--background)',
+                padding: '0.75rem 1rem',
+                borderRadius: 'var(--radius-sm, 6px)',
+                border: '1px solid var(--border)',
+                fontFamily: 'monospace',
+                fontSize: '0.8rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}>
+                <span>https://portalsamppel.vercel.app/api/health</span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>HTTP GET (Retorna 200 se ativo ou 503 se pausado)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. PREFERÊNCIAS VISUAIS DO PORTAL */}
+          <div className="card">
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text)' }}>
+              <Settings size={18} style={{ color: 'var(--primary)' }} />
+              <span>Aparência e Preferências Visuais</span>
+            </h3>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 0' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text)' }}>Tema da Interface</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Alternar entre modo claro e escuro no Portal Samppel
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}
+              >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                <span>Alternar para Modo {theme === 'dark' ? 'Claro' : 'Escuro'}</span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+      )}
       {isConfigWarningModalOpen && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,

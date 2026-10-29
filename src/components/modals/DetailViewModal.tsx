@@ -56,7 +56,8 @@ export function DetailViewModal(props: any) {
     syncingSingleOrder,
     user,
     setItemToMoveStage,
-    setIsMoveStageModalOpen
+    setIsMoveStageModalOpen,
+    canUserMoveItemStage
   } = props;
 
   const [isSplitCardModalOpen, setIsSplitCardModalOpen] = useState(false);
@@ -210,22 +211,40 @@ export function DetailViewModal(props: any) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginLeft: 'auto' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDetailModalOpen(false);
-                      if (setItemToMoveStage && setIsMoveStageModalOpen) {
-                        setItemToMoveStage(detailItem);
-                        setIsMoveStageModalOpen(true);
-                      }
-                    }}
-                    className="btn btn-secondary"
-                    title="Mover este pedido de etapa (PIN)"
-                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap', fontWeight: 700 }}
-                  >
-                    <ArrowRightLeft size={12} />
-                    <span>Mover Etapa</span>
-                  </button>
+                  {(() => {
+                    const canMoveThis = typeof canUserMoveItemStage === 'function' ? canUserMoveItemStage(detailItem) : true;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canMoveThis) {
+                            setIsDetailModalOpen(false);
+                            if (setItemToMoveStage && setIsMoveStageModalOpen) {
+                              setItemToMoveStage(detailItem);
+                              setIsMoveStageModalOpen(true);
+                            }
+                          }
+                        }}
+                        disabled={!canMoveThis}
+                        className="btn btn-secondary"
+                        title={canMoveThis ? "Mover este pedido de etapa" : "Sem autorização nos ajustes do perfil para retirar este pedido da etapa atual"}
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.35rem 0.65rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          whiteSpace: 'nowrap',
+                          fontWeight: 700,
+                          opacity: canMoveThis ? 1 : 0.45,
+                          cursor: canMoveThis ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        <ArrowRightLeft size={12} />
+                        <span>Mover Etapa</span>
+                      </button>
+                    );
+                  })()}
                   {(!user?.role || user.role !== 'Produção' || currentStage?.name === 'Em produção') && (
                     <button
                       onClick={() => { setIsDetailModalOpen(false); handleOpenEdit(detailItem); }}

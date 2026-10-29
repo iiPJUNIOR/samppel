@@ -83,25 +83,49 @@ export function ProductionAlertModal(props: any) {
                   <p style={{ margin: '0 0 0.75rem 0' }}>
                     <strong>O que aconteceu?</strong>
                     <br />
-                    No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, sobrou um excedente que foi enviado como <strong>cortesia/bonificação de {productionAlertData.remaining_quantity.toLocaleString('pt-BR')} unidades</strong> ao cliente.
+                    {productionAlertData.original_quantity && productionAlertData.original_quantity !== productionAlertData.remaining_quantity ? (
+                      <>
+                        No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, houve um excedente original de <strong>{Number(productionAlertData.original_quantity).toLocaleString('pt-BR')} unidades</strong> enviado como cortesia, restando atualmente <strong>{Number(productionAlertData.remaining_quantity || 0).toLocaleString('pt-BR')} unidades de saldo ativo</strong>.
+                      </>
+                    ) : (
+                      <>
+                        No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, sobrou um excedente que foi enviado como <strong>cortesia/bonificação de {Number(productionAlertData.remaining_quantity || 0).toLocaleString('pt-BR')} unidades</strong> ao cliente.
+                      </>
+                    )}
                   </p>
                   <p style={{ margin: '0 0 0.75rem 0' }}>
                     <strong>Como corrigir agora?</strong>
                     <br />
                     Como o cliente já recebeu fisicamente essas unidades anteriormente, nós podemos <strong>subtrair/abater</strong> essa quantidade da tiragem do novo pedido atual para evitar produzir itens duplicados.
                   </p>
-                  <div style={{
-                    marginTop: '0.75rem',
-                    paddingTop: '0.75rem',
-                    borderTop: '1px solid var(--border)',
-                    fontWeight: 700,
-                    fontSize: '0.9rem',
-                    color: 'var(--success)'
-                  }}>
-                    Ajuste de Tiragem:
-                    <br />
-                    {productionAlertItem.print_run.toLocaleString('pt-BR')} un (Pedido) - {productionAlertData.remaining_quantity.toLocaleString('pt-BR')} un (Bonificado) = {Math.max(0, productionAlertItem.print_run - productionAlertData.remaining_quantity).toLocaleString('pt-BR')} un a produzir.
-                  </div>
+                  {(() => {
+                    const orderPrintRun = Number(productionAlertItem?.print_run) || 0;
+                    const availableCredit = Number(productionAlertData?.remaining_quantity) || 0;
+                    const isCreditExcess = availableCredit > orderPrintRun;
+                    const usedCredit = isCreditExcess ? orderPrintRun : availableCredit;
+                    const leftoverCredit = Math.max(0, availableCredit - usedCredit);
+                    const finalProductionQty = Math.max(0, orderPrintRun - usedCredit);
+
+                    return (
+                      <div style={{
+                        marginTop: '0.75rem',
+                        paddingTop: '0.75rem',
+                        borderTop: '1px solid var(--border)',
+                        fontWeight: 700,
+                        fontSize: '0.9rem',
+                        color: 'var(--success)'
+                      }}>
+                        Ajuste de Tiragem:
+                        <br />
+                        {orderPrintRun.toLocaleString('pt-BR')} un (Pedido) - {usedCredit.toLocaleString('pt-BR')} un ({isCreditExcess ? 'Abatimento Parcial' : 'Bonificado'}) = {finalProductionQty.toLocaleString('pt-BR')} un a produzir.
+                        {isCreditExcess && (
+                          <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: '#0284c7', fontWeight: 600 }}>
+                            Saldo remanescente de {leftoverCredit.toLocaleString('pt-BR')} un continuará ATIVO para próximos pedidos deste cliente.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -173,17 +197,29 @@ export function ProductionAlertModal(props: any) {
                 onClick={async () => {
                   setLoading(true);
                   try {
-                    const originalPrintRun = productionAlertItem.print_run || 0;
-                    const remainingQty = productionAlertData.remaining_quantity || 0;
+                    const originalPrintRun = Number(productionAlertItem.print_run) || 0;
+                    const availableCredit = Number(productionAlertData.remaining_quantity) || 0;
                     let finalProductionQty = originalPrintRun;
+                    let usedCredit = 0;
+                    let leftoverCredit = 0;
                     let mathString = '';
 
                     if (productionAlertData.credit_type === 'PENDENCIA_ENTREGA') {
-                      finalProductionQty = originalPrintRun + remainingQty;
-                      mathString = `${originalPrintRun.toLocaleString('pt-BR')} + ${remainingQty.toLocaleString('pt-BR')} = ${finalProductionQty.toLocaleString('pt-BR')} (Falta)`;
+                      usedCredit = availableCredit;
+                      leftoverCredit = 0;
+                      finalProductionQty = originalPrintRun + availableCredit;
+                      mathString = `${originalPrintRun.toLocaleString('pt-BR')} + ${availableCredit.toLocaleString('pt-BR')} = ${finalProductionQty.toLocaleString('pt-BR')} (Falta)`;
                     } else {
-                      finalProductionQty = Math.max(0, originalPrintRun - remainingQty);
-                      mathString = `${originalPrintRun.toLocaleString('pt-BR')} - ${remainingQty.toLocaleString('pt-BR')} = ${finalProductionQty.toLocaleString('pt-BR')} (Cortesia)`;
+                      // CORTESIA_SOBRA
+                      usedCredit = Math.min(originalPrintRun, availableCredit);
+                      leftoverCredit = availableCredit - usedCredit;
+                      finalProductionQty = Math.max(0, originalPrintRun - usedCredit);
+
+                      if (leftoverCredit > 0) {
+                        mathString = `${originalPrintRun.toLocaleString('pt-BR')} - ${usedCredit.toLocaleString('pt-BR')} = ${finalProductionQty.toLocaleString('pt-BR')} (Cortesia - Restam ${leftoverCredit.toLocaleString('pt-BR')} un de saldo)`;
+                      } else {
+                        mathString = `${originalPrintRun.toLocaleString('pt-BR')} - ${usedCredit.toLocaleString('pt-BR')} = ${finalProductionQty.toLocaleString('pt-BR')} (Cortesia)`;
+                      }
                     }
 
                     // 1. Atualiza o item de pedido com a matemática do saldo aplicado
@@ -193,9 +229,10 @@ export function ProductionAlertModal(props: any) {
                       adjusted_production_quantity: finalProductionQty
                     });
 
-                    // 2. Marca o saldo acumulado como UTILIZADO temporariamente para evitar outros usos
+                    // 2. Atualiza o saldo acumulado: deduz a quantidade utilizada e preserva o restante ativo se houver
                     await updateCustomerStockCredit(productionAlertData.id, {
-                      status: 'UTILIZADO'
+                      remaining_quantity: leftoverCredit,
+                      status: leftoverCredit > 0 ? 'ATIVO' : 'UTILIZADO'
                     });
 
                     // 3. Move o card para a produção

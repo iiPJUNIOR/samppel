@@ -63,7 +63,16 @@ export function ConferencyModal(props: any) {
               marginBottom: '1.25rem'
             }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.82rem' }}>
-                <div><strong style={{ color: 'var(--text-muted)' }}>Saldo Anterior Compensado:</strong> {conferencyData.credit_type === 'PENDENCIA_ENTREGA' ? `Falta de ${conferencyData.original_quantity} unidades (Acrescentada) do pedido original ${conferencyData.source_order?.pv_number || 'PV'}` : `Cortesia de ${conferencyData.original_quantity} unidades (Descontada) do pedido original ${conferencyData.source_order?.pv_number || 'PV'}`}</div>
+                <div>
+                  <strong style={{ color: 'var(--text-muted)' }}>Saldo Anterior:</strong>{' '}
+                  {conferencyData.credit_type === 'PENDENCIA_ENTREGA'
+                    ? `Falta de ${conferencyData.original_quantity?.toLocaleString('pt-BR')} unidades (Acrescentada) do pedido original ${conferencyData.source_order?.pv_number || 'PV'}`
+                    : `Cortesia de ${conferencyData.original_quantity?.toLocaleString('pt-BR')} unidades do pedido original ${conferencyData.source_order?.pv_number || 'PV'}${
+                        (conferencyData.remaining_quantity || 0) > 0
+                          ? ` (Restam ${conferencyData.remaining_quantity?.toLocaleString('pt-BR')} un ativas para futuros pedidos)`
+                          : ' (Totalmente consumida)'
+                      }`}
+                </div>
                 <div><strong style={{ color: 'var(--text-muted)' }}>Matemática de Tiragem:</strong> <code>{conferencyItem.adjusted_quantity_math}</code></div>
                 <div><strong style={{ color: 'var(--text-muted)' }}>Tiragem Líquida Esperada:</strong> {conferencyItem.adjusted_production_quantity?.toLocaleString('pt-BR')} unidades</div>
               </div>
@@ -127,14 +136,16 @@ export function ConferencyModal(props: any) {
                   try {
                     const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
 
-                    // 1. Atualiza o status do saldo acumulado original para UTILIZADO (zerado para sempre)
-                    const { error: creditError } = await updateCustomerStockCredit(conferencyData.id, {
-                      status: 'UTILIZADO',
-                      remaining_quantity: 0
-                    });
+                    // 1. Se o saldo foi integralmente consumido, garante que o status esteja como UTILIZADO
+                    if ((conferencyData.remaining_quantity || 0) <= 0) {
+                      const { error: creditError } = await updateCustomerStockCredit(conferencyData.id, {
+                        status: 'UTILIZADO',
+                        remaining_quantity: 0
+                      });
 
-                    if (creditError) {
-                      console.error('Erro ao zerar saldo acumulado:', creditError.message);
+                      if (creditError) {
+                        console.error('Erro ao finalizar saldo acumulado:', creditError.message);
+                      }
                     }
 
                     // 2. Atualiza a quantidade produzida final/expedida no item de pedido e marca como resolvido
