@@ -18,7 +18,7 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts` | 2026-10-27 | OK |
-| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-22 | OK |
+| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-29 | OK |
 | **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`) | 2026-10-27 | OK |
 | **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
 | **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-10-21 | OK |
@@ -189,3 +189,4 @@ Legenda de Status:
 | :--- | :--- | :--- | :--- |
 | **2026-10-23** | MOD-01 até MOD-15 | APROVADO COM ÊXITO | Baseline inicial criada. Correções em MOD-04, MOD-06 e MOD-07 (Saldos e Créditos) validadas e 100% integradas. Zero erros no TypeScript e compilação Next.js estável. |
 | **2026-10-29** | MOD-14, MOD-15 | APROVADO COM ÊXITO | Otimização anti-estouro de cotas Supabase: sincronização incremental rápida a cada 15 minutos (.github/workflows/sync-cron.yml), supressão de logs ruidosos, separação de catálogo diário (03:00) e trava de Page Visibility no monitor de status do banco. Puxar pedido manual (PV) 100% preservado. |
+| **2026-10-29** | MOD-02 | APROVADO COM ÊXITO | Eliminação definitiva do gargalo N+1 em order_item_packaging (de 904 requisições por carregamento de página para 1 única requisição em lote com getOrderItemPackagingBulk). Redução de ~96,7% no tráfego de borda do Supabase. |

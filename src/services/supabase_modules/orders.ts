@@ -3065,6 +3065,37 @@ export async function getOrderItemPackaging(orderItemId: string) {
   return { data, error };
 }
 
+export async function getOrderItemPackagingBulk(orderItemIds: string[]) {
+  if (!orderItemIds || orderItemIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  if (isMockMode) {
+    const records = mockOrderItemPackaging.filter(p => orderItemIds.includes(p.order_item_id));
+    return { data: records, error: null };
+  }
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('order_item_packaging')
+      .select('order_item_id')
+      .in('order_item_id', orderItemIds);
+
+    if (error && shouldFallbackToMock(error)) {
+      const records = mockOrderItemPackaging.filter(p => orderItemIds.includes(p.order_item_id));
+      return { data: records, error: null };
+    }
+
+    return { data: data || [], error };
+  } catch (err: any) {
+    if (shouldFallbackToMock(err)) {
+      const records = mockOrderItemPackaging.filter(p => orderItemIds.includes(p.order_item_id));
+      return { data: records, error: null };
+    }
+    return { data: [], error: err };
+  }
+}
+
 export async function saveOrderItemPackagingVolumes(
   orderItemId: string,
   tenantId: string,

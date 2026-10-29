@@ -66,6 +66,7 @@ import {
   getHandlingTeams,
   getPackagingMaterialTypes,
   getOrderItemPackaging,
+  getOrderItemPackagingBulk,
   saveOrderItemPackagingVolumes,
   getPackagingSettings,
   getShippingTypesConfig,
@@ -1467,10 +1468,10 @@ export default function PedidosPage() {
           sMap.set(s.order_item_id, arr);
         });
 
-        await Promise.allSettled(itemIds.map(async (id) => {
-          const pkgRes = await getOrderItemPackaging(id);
-          if (pkgRes.data && pkgRes.data.length > 0) packaged.add(id);
-        }));
+        const pkgBulkRes = await getOrderItemPackagingBulk(itemIds);
+        (pkgBulkRes.data || []).forEach((p: any) => {
+          if (p.order_item_id) packaged.add(p.order_item_id);
+        });
 
         setItemsWithPackaging(packaged);
         if (typeof window !== 'undefined' && Array.isArray(teamsBulkRes.data)) {
