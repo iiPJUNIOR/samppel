@@ -38,6 +38,61 @@ export const METRIC_GUIDES = {
     codeFixToAvoidPro:
       'Em qualquer tela nova do sistema, nunca use setInterval cego em background; sempre valide document.visibilityState === "visible" no codigo.',
   },
+  api_real_plan_status: {
+    title: 'Plano Oficial via API Supabase & Regua Dupla (Pro -> Alvo Free)',
+    polarity: 'CONTROL_REF',
+    polarityLabel: 'PLANO ALVO: FREE (CUSTO ZERO) | CACHE API: 10 MINUTOS',
+    whatIsIt:
+      'Consulta diretamente a Supabase Management API v1 (/v1/organizations/{slug} e /v1/projects/{ref}/billing/addons) para exibir qual plano esta ativo de verdade na sua conta hoje (ex: PRO ATIVO neste mes), mantendo ao mesmo tempo a Regua Meta Free (500 MB / 1 GB / 5 GB / 50k MAU) ligada por padrao nos alertas.',
+    whenToAct:
+      'Enquanto estiver no mes do Pro pago, guie-se sempre pela Regua Meta Free para garantir que o consumo nunca passe dos limites gratuitos antes de virar o mes.',
+    codeFixToAvoidPro:
+      'Adicione SUPABASE_ACCESS_TOKEN (seu PAT sbp_...) apenas nas Environment Variables de servidor na Vercel. O cache de 10 minutos garante zero rate-limit e zero custo.',
+  },
+  downgrade_readiness_checklist: {
+    title: 'Checklist Automatico de 6 Pre-Requisitos & Janela Ideal Pro -> Free',
+    polarity: 'CONTROL_REF',
+    polarityLabel: 'OBJETIVO: 6 DE 6 ITENS "PRONTO PARA FREE" ANTES DA VIRADA DO CICLO',
+    whatIsIt:
+      'Audita automaticamente via SQL + Management API todas as travas oficiais da Supabase para fazer downgrade do Pro para o Free sem erro: 1) Banco <= 500 MB; 2) Storage <= 1 GB; 3) MAU <= 50.000; 4) Zero add-ons pagos extras; 5) Vaga no limite global de 2 projetos Free ativos em toda a sua conta; 6) Egress controlado e atividade < 7 dias.',
+    whenToAct:
+      '1 a 2 dias ANTES da data de renovacao do ciclo Pro. Importante: na Supabase o downgrade tem efeito imediato (nao espera o fim do mes e dias restantes viram credito interno, nao estorno no cartao), mas se passar da data de renovacao cobra mais US$ 25.',
+    codeFixToAvoidPro:
+      'Se o item 5 apontar projetos Free ativos em outras organizacoes da sua conta, pause os projetos sem uso ate sobrar no maximo 1 projeto Free ativo fora desta organizacao antes de clicar em Downgrade.',
+  },
+  api_gateway_requests: {
+    title: 'Requisicoes Oficiais no API Gateway (Ultimas 24h)',
+    polarity: 'LOW_IS_GOOD',
+    polarityLabel: 'BOM SER BAIXO E PROPORCIONAL A EQUIPE (Sem picos noturnos)',
+    whatIsIt:
+      'Puxa diretamente do endpoint oficial /analytics/endpoints/usage.api-counts da Supabase quantas requisicoes HTTP bateram em REST (PostgREST), Auth, Storage e Realtime nas ultimas 24 horas.',
+    whenToAct:
+      'No Plano Free as requisicoes de API sao ilimitadas, mas o volume de dados trafegado por elas conta nos 5 GB mensais de Egress. Agir apenas se REST ou Auth dispararem dezenas de milhares de chamadas por dia numa equipe pequena.',
+    codeFixToAvoidPro:
+      'Se REST subir demais, agrupe leituras repetidas em lote (.in()) e remova .select("*"). Se Auth subir demais, evite chamadas desnecessarias de getSession()/refreshSession() em polling.',
+  },
+  vm_hardware_metrics: {
+    title: 'Telemetria Real da VM via Prometheus (RAM Fisica, Disco /data e Rede)',
+    polarity: 'LOW_IS_GOOD',
+    polarityLabel: 'RAM E DISCO DA VM: BOM SER BAIXO (< 80%)',
+    whatIsIt:
+      'Lido diretamente do endpoint oficial Prometheus da instancia Postgres (node_memory_*, node_filesystem_* e node_network_transmit_bytes_total). Mostra a memoria RAM fisica real da maquina virtual, o disco SSD provisionado e o acumulador bruto de rede da VM desde o ultimo boot. Nota: a Supabase nao expoe o valor consolidado de Egress faturado em GB na Management API publica; este numero de rede e do hardware da VM, enquanto a fatura oficial fica no link direto "Usage Oficial".',
+    whenToAct:
+      'Se a RAM Fisica usada ficar constantemente acima de 85% (risco de swap/lentidao no Nano Compute do Free).',
+    codeFixToAvoidPro:
+      'Reduzir conexoes simultaneas abertas, criar indices SQL para evitar sorts pesados em memoria e paginar respostas grandes mantem a RAM folgada mesmo no Compute gratuito do Free.',
+  },
+  kpi_mau_quota: {
+    title: 'Usuarios Ativos Mensais — MAU (Teto Free: 50.000)',
+    polarity: 'LOW_IS_GOOD',
+    polarityLabel: 'BOM SER BAIXO (Abaixo de 50.000 MAU/mes = 100% gratuito)',
+    whatIsIt:
+      'Quantidade de usuarios unicos autenticados no Supabase Auth nos ultimos 30 dias (auth.users.last_sign_in_at). O Plano Free inclui ate 50.000 MAU gratuitos por mes (e o Pro ate 100.000).',
+    whenToAct:
+      'Em um ERP/Portal corporativo interno (dezenas de colaboradores), voce usara menos de 0,1% dessa cota e nunca precisara agir.',
+    codeFixToAvoidPro:
+      'Nunca crie usuarios descartaveis/anonimos automaticos no Supabase Auth a cada visita publica; mantenha login restrito apenas aos colaboradores reais.',
+  },
 
   // ── PAINEL VEREDITO ANTI-ESTOURO (5 PILARES DO PLANO FREE) ────────────────
   section_free_shield: {
@@ -567,6 +622,17 @@ export const METRIC_GUIDES = {
     codeFixToAvoidPro:
       'Gerar um novo PAT no painel da conta Supabase e totalmente gratuito e leva 1 minuto.',
   },
+  gov_supabase_access_token: {
+    title: 'Variavel SUPABASE_ACCESS_TOKEN (Management API v1 Server-Only)',
+    polarity: 'CONTROL_REF',
+    polarityLabel: 'IDEAL: "Configurada" NA VERCEL (NUNCA NEXT_PUBLIC_)',
+    whatIsIt:
+      'Permite que o backend de /api/admin/monitoring consulte diretamente https://api.supabase.com/v1 para descobrir seu Plano Real (Pro vs Free), Compute, Add-ons pagos, Requisicoes do API Gateway (24h) e a vaga no limite de 2 projetos Free ativos.',
+    whenToAct:
+      'Se aparecer "Nao definida", cadastre SUPABASE_ACCESS_TOKEN com o valor do seu PAT (sbp_...) em Vercel -> Project Settings -> Environment Variables (Production) e faca Redeploy ou novo push.',
+    codeFixToAvoidPro:
+      'Nunca adicione prefixo NEXT_PUBLIC_ nesta chave. Ela roda 100% blindada no servidor com cache de 10 minutos.',
+  },
   gov_rls_exposed: {
     title: 'Tabelas Publicas sem Row Level Security (RLS)',
     polarity: 'ZERO_IS_BEST',
@@ -649,3 +715,4 @@ export const METRIC_GUIDES = {
 } as const satisfies Record<string, MetricGuide>;
 
 export type MetricGuideKey = keyof typeof METRIC_GUIDES;
+

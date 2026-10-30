@@ -20,8 +20,12 @@ CREATE TABLE IF NOT EXISTS public.system_monitoring_state (
   baseline_reset_at timestamptz,
   query_baseline jsonb NOT NULL DEFAULT '{}'::jsonb,
   recent_cron_events jsonb NOT NULL DEFAULT '[]'::jsonb,
+  billing_transition_config jsonb NOT NULL DEFAULT '{}'::jsonb,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.system_monitoring_state
+  ADD COLUMN IF NOT EXISTS billing_transition_config jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 ALTER TABLE public.system_monitoring_state ENABLE ROW LEVEL SECURITY;
 
@@ -575,6 +579,8 @@ BEGIN
   SELECT jsonb_build_object(
     'auth_stats', jsonb_build_object(
       'auth_users_count', (SELECT count(*) FROM auth.users),
+      'mau_calendar_month', (SELECT count(*) FROM auth.users WHERE last_sign_in_at >= date_trunc('month', now())),
+      'mau_rolling_30d', (SELECT count(*) FROM auth.users WHERE last_sign_in_at >= now() - interval '30 days'),
       'active_sessions_count', (SELECT count(*) FROM auth.sessions WHERE not_after IS NULL OR not_after > now()),
       'refresh_tokens_count', (SELECT count(*) FROM auth.refresh_tokens),
       'refresh_tokens_size', pg_size_pretty(pg_total_relation_size('auth.refresh_tokens'::regclass)),
@@ -582,6 +588,7 @@ BEGIN
       'profiles_forced_pwd_count', (SELECT count(*) FROM public.profiles WHERE tenant_id = p_tenant_id AND coalesce(force_password_change, false) = true),
       'stage_moves_24h', (SELECT count(*) FROM public.order_item_stage_history WHERE tenant_id = p_tenant_id AND created_at >= now() - interval '24 hours')
     ),
+    'billing_transition_config', coalesce(v_state.billing_transition_config, '{}'::jsonb),
     'business_sanity', jsonb_build_object(
       'orders_total', (SELECT count(*) FROM public.orders WHERE tenant_id = p_tenant_id),
       'order_items_total', (SELECT count(*) FROM public.order_items WHERE tenant_id = p_tenant_id),

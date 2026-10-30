@@ -4,11 +4,18 @@ import {
   requireMonitoringOwner,
   supabaseAdmin,
 } from '@/lib/serverAuth';
+import {
+  clearSupabasePlatformCache,
+  fetchSupabasePlatformSnapshot,
+  SupabasePlatformSnapshot,
+} from '@/lib/supabasePlatformClient';
 import { sendMonitoringAnomalyAlert } from '@/services/emailService';
 
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_TENANT_ID = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+const SUPABASE_PROJECT_REF = 'cywbfcrtuawsgtbsjnnb';
+const DEFAULT_ORG_SLUG = 'mkvmhmshlztvcvueonya';
 const SUPABASE_PAT_EXPIRATION_ISO = '2027-01-04T00:00:00-03:00';
 const CACHE_TTL_MS = 60 * 1000; // 60s de cache em memoria para zero auto-consumo
 
@@ -16,6 +23,10 @@ const FREE_DB_LIMIT_BYTES = 500 * 1024 * 1024; // 500 MB
 const PRO_DB_LIMIT_BYTES = 8 * 1024 * 1024 * 1024; // 8 GB
 const FREE_STORAGE_LIMIT_BYTES = 1 * 1024 * 1024 * 1024; // 1 GB
 const PRO_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB
+const FREE_MAU_LIMIT = 50_000; // 50.000 MAU no Plano Free
+const PRO_MAU_LIMIT = 100_000; // 100.000 MAU no Plano Pro
+const FREE_EGRESS_LIMIT_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB Uncached (+ 5 GB Cached)
+const PRO_EGRESS_LIMIT_BYTES = 250 * 1024 * 1024 * 1024; // 250 GB Uncached (+ 250 GB Cached)
 
 const SQL_MAINTENANCE_ACTIONS = new Set([
   'PURGE_LOGS_OLDER_THAN',
@@ -72,6 +83,23 @@ export interface FreeTierShieldPillar {
   linkLabel?: string;
 }
 
+export interface DowngradeChecklistItem {
+  id: string;
+  title: string;
+  sourceLabel: string;
+  freeRequirement: string;
+  currentValue: string;
+  status: 'APROVADO' | 'ATENCAO' | 'BLOQUEADOR' | 'PENDENTE_API';
+  statusLabel: string;
+  guidance: string;
+}
+
+function formatDatePtBr(ymd: string): string {
+  const parts = ymd.split('-');
+  if (parts.length !== 3) return ymd;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -84,7 +112,7 @@ function formatBytes(bytes: number): string {
   return `${val.toFixed(idx >= 2 ? 2 : 0)} ${units[idx]}`;
 }
 
-function buildIntelligence(raw: any) {
+function buildIntelligence(raw: any, platform?: SupabasePlatformSnapshot) {
   const diagnostics: MonitoringDiagnostic[] = [];
   let score = 100;
 
@@ -531,10 +559,17 @@ function buildIntelligence(raw: any) {
     }
   }
 
+  const authStats = governance?.auth_stats || {};
+  const mauCalendarMonth = Number(authStats.mau_calendar_month ?? 0);
+  const mauRolling30d = Number(authStats.mau_rolling_30d ?? 0);
+  const mauEffective = Math.max(mauCalendarMonth, mauRolling30d);
+
   const freeDbPct = Math.round((dbSizeBytes / FREE_DB_LIMIT_BYTES) * 10000) / 100;
   const proDbPct = Math.round((dbSizeBytes / PRO_DB_LIMIT_BYTES) * 10000) / 100;
   const freeStoragePct = Math.round((storageBytes / FREE_STORAGE_LIMIT_BYTES) * 10000) / 100;
   const proStoragePct = Math.round((storageBytes / PRO_STORAGE_LIMIT_BYTES) * 10000) / 100;
+  const freeMauPct = Math.round((mauEffective / FREE_MAU_LIMIT) * 10000) / 100;
+  const proMauPct = Math.round((mauEffective / PRO_MAU_LIMIT) * 10000) / 100;
 
   if (freeDbPct >= 80) {
     score -= freeDbPct >= 92 ? 20 : 10;
@@ -551,6 +586,56 @@ function buildIntelligence(raw: any) {
       actionKey: 'PURGE_LOGS_OLDER_THAN',
       actionLabel: 'Liberar Espaco em Logs',
       retentionHours: 24,
+    });
+  }
+
+  // 9.B. Integracao Oficial com Supabase Management API v1 & Metrics API (Transicao Pro -> Free)
+  const mgmt = platform?.managementApi;
+  const vm = platform?.vmMetrics;
+  const detectedPlan = mgmt?.detectedPlan || 'unknown';
+  const orgSlug = mgmt?.organizationId || DEFAULT_ORG_SLUG;
+  const orgName = mgmt?.organizationName || 'Samppel';
+  const apiGateway = mgmt?.apiGatewayUsage;
+
+  if (
+    mgmt?.reachable &&
+    detectedPlan === 'pro' &&
+    mgmt.otherFreeOrgsActiveProjectsCount >= 2
+  ) {
+    const activeFreeNames = mgmt.freeOrgProjects
+      .filter((p) => p.isActive)
+      .slice(0, 4)
+      .map((p) => `${p.projectName} (${p.orgName})`)
+      .join(', ');
+    diagnostics.push({
+      id: 'downgrade-two-free-projects-limit',
+      severity: 'ATENCAO',
+      category: 'NEGOCIO',
+      title: 'Atencao para o Downgrade Pro -> Free: Limite Global de 2 Projetos Free Ativos',
+      description: `A API oficial da Supabase detectou que o Portal Samppel esta no Plano Pro, mas sua conta possui ${mgmt.otherFreeOrgsActiveProjectsCount} projeto(s) Free ativo(s) em outras organizacoes (${activeFreeNames}). A Supabase limita 2 projetos Free ativos somando todas as orgs onde voce e Owner/Admin.`,
+      metric: `${mgmt.otherFreeOrgsActiveProjectsCount} Free ativos em outras orgs`,
+      actionRequired: 'PREVENTIVO',
+      codeSolution:
+        'No dia em que for fazer o downgrade do Portal Samppel para o Plano Free (1 a 2 dias antes de virar a fatura), pause projetos Free sem uso nas outras organizacoes ate sobrar pelo menos 1 vaga Free livre.',
+    });
+  }
+
+  if (mgmt?.reachable && mgmt.extraPaidOrBlockingAddonsCount > 0) {
+    const extraNames = mgmt.selectedAddons
+      .filter((a) => a.isExtraPaidOrBlocksFree)
+      .map((a) => `${a.name} (${a.priceDescription})`)
+      .join(', ');
+    score -= 8;
+    diagnostics.push({
+      id: 'active-paid-addons-blocking-free',
+      severity: 'ATENCAO',
+      category: 'NEGOCIO',
+      title: 'Add-ons Pagos Ativos Detectados via API Oficial da Supabase',
+      description: `O endpoint /billing/addons reportou add-on(s) alem do Compute Micro padrao: ${extraNames}. Esses recursos cobram por hora fora do Spend Cap e sao incompativeis com o Plano Free.`,
+      metric: `${mgmt.extraPaidOrBlockingAddonsCount} add-on(s) extra(s)`,
+      actionRequired: 'PREVENTIVO',
+      codeSolution:
+        'Desative Custom Domain, PITR, IPv4 ou Compute acima de Micro em Project Settings -> Add-ons antes de encerrar o ciclo Pro para voltar ao Free a custo zero.',
     });
   }
 
@@ -587,6 +672,10 @@ function buildIntelligence(raw: any) {
       ? 'ACAO PREVENTIVA'
       : 'SEM ACAO AGORA (FOLGADO)';
 
+  const apiGatewaySummaryText = apiGateway?.available
+    ? ` | API 24h: ${apiGateway.totalRequests.toLocaleString('pt-BR')} reqs`
+    : '';
+
   const freeTierPillars: FreeTierShieldPillar[] = [
     {
       id: 'db_disk',
@@ -594,11 +683,11 @@ function buildIntelligence(raw: any) {
       title: '1. Disco do Banco Postgres',
       limitLabel: 'Teto Free: 500 MB',
       directionLabel: 'Bom ser BAIXO (< 350 MB)',
-      currentValue: `${db.db_size_pretty || formatBytes(dbSizeBytes)} (${freeDbPct}%)`,
+      currentValue: `${db.db_size_pretty || formatBytes(dbSizeBytes)} (${freeDbPct}% Free | ${proDbPct}% Pro)`,
       headroomLabel: `${formatBytes(Math.max(0, FREE_DB_LIMIT_BYTES - dbSizeBytes))} livres de 500 MB`,
       status: dbDiskStatus,
       statusLabel: statusToLabel(dbDiskStatus),
-      triggerRule: 'Agir apenas se passar de 325 MB (65%)',
+      triggerRule: 'Agir apenas se passar de 325 MB (65% do Free)',
       codeFix:
         'Expurgar logs (>48h) e sync_queue concluida; no codigo, manter limpeza automatica no cron diario e nunca salvar arquivos/base64 em tabelas SQL.',
       actionKey: dbDiskStatus !== 'FOLGADO' ? 'PURGE_LOGS_OLDER_THAN' : undefined,
@@ -610,11 +699,11 @@ function buildIntelligence(raw: any) {
       title: '2. Arquivos no Supabase Storage',
       limitLabel: 'Teto Free: 1 GB',
       directionLabel: 'Bom ser BAIXO (< 700 MB)',
-      currentValue: `${formatBytes(storageBytes)} (${freeStoragePct}%)`,
+      currentValue: `${formatBytes(storageBytes)} (${freeStoragePct}% Free | ${proStoragePct}% Pro)`,
       headroomLabel: `${formatBytes(Math.max(0, FREE_STORAGE_LIMIT_BYTES - storageBytes))} livres (${Number(db.storage_files_count || 0)} arquivo(s))`,
       status: storageStatus,
       statusLabel: statusToLabel(storageStatus),
-      triggerRule: 'Agir apenas se passar de 650 MB (65%)',
+      triggerRule: 'Agir apenas se passar de 650 MB (65% do Free)',
       codeFix:
         'Comprimir imagens para WebP/JPEG leve no navegador antes do upload, usar cacheControl: "31536000" e remover anexos de pedidos cancelados.',
     },
@@ -624,7 +713,7 @@ function buildIntelligence(raw: any) {
       title: '3. Trafego de Rede (Egress) & Anti-N+1',
       limitLabel: 'Teto Free: 5 GB/mes',
       directionLabel: 'Bom ser BAIXO (Poucas linhas/min)',
-      currentValue: `${rowsPerMin.toLocaleString('pt-BR')} linhas/min | ${callsPerMin.toLocaleString('pt-BR')} queries/min`,
+      currentValue: `${rowsPerMin.toLocaleString('pt-BR')} linhas/min | ${callsPerMin.toLocaleString('pt-BR')} queries/min${apiGatewaySummaryText}`,
       headroomLabel: hasBaseline
         ? `Query lider pos-reset: ${topActiveCalls.toLocaleString('pt-BR')} chamadas`
         : `Acumulado antes do reset: ${topActiveCalls.toLocaleString('pt-BR')} chamadas`,
@@ -737,8 +826,293 @@ function buildIntelligence(raw: any) {
         : overallVerdict === 'PREVENTIVO'
         ? 'Nao ha risco de estourar o Plano Free agora, mas existe ajuste preventivo disponivel para manter tudo enxuto no codigo/banco.'
         : 'Voce NAO precisa tomar nenhuma acao agora. Todos os limites fisicos do Plano Free operam com ampla folga a custo zero.',
-    subheadline: `${safePillarsCount} de ${freeTierPillars.length} pilares fisicos do Plano Free estao com margem folgada. Passe o mouse ou clique no icone (i) de qualquer indicador para entender se ele deve ser alto ou baixo e como resolver no codigo caso suba no futuro.`,
+    subheadline: `${safePillarsCount} de ${freeTierPillars.length} pilares fisicos do Plano Free estao com margem folgada (Regua Dupla ativa: monitorando tetos do Free mesmo enquanto o Pro estiver vigente neste mes).`,
     pillars: freeTierPillars,
+  };
+
+  // 11. Checklist Automatico de Prontidao & Calendario para Downgrade Pro -> Free
+  const billingCfg = governance?.billing_transition_config || {};
+  const cycleRenewalDate: string | null =
+    typeof billingCfg.cycle_renewal_date === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(billingCfg.cycle_renewal_date)
+      ? billingCfg.cycle_renewal_date
+      : null;
+
+  let daysUntilRenewal: number | null = null;
+  let idealWindowStart: string | null = null;
+  let idealWindowEnd: string | null = null;
+  let cycleStatusBadge = 'DATA DO CICLO NAO INFORMADA';
+  let cycleGuidanceMessage =
+    'Informe ao lado a data de renovacao da sua fatura Pro (visivel em Organization -> Billing -> Upcoming Invoice). Como o downgrade na Supabase tem efeito imediato e nao estorna no cartao, a melhor janela para voltar ao Free e 1 a 2 dias antes da renovacao.';
+
+  if (cycleRenewalDate) {
+    const renewalMs = new Date(`${cycleRenewalDate}T00:00:00-03:00`).getTime();
+    if (!Number.isNaN(renewalMs)) {
+      const nowMidnightApprox = Date.now();
+      daysUntilRenewal = Math.ceil((renewalMs - nowMidnightApprox) / (24 * 60 * 60 * 1000));
+      const dStart = new Date(renewalMs - 2 * 24 * 60 * 60 * 1000);
+      const dEnd = new Date(renewalMs - 1 * 24 * 60 * 60 * 1000);
+      idealWindowStart = dStart.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      idealWindowEnd = dEnd.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+      if (detectedPlan === 'free') {
+        cycleStatusBadge = 'JA OPERANDO NO PLANO FREE';
+        cycleGuidanceMessage =
+          'A API oficial confirma que sua organizacao ja esta no Plano Free (custo zero). Mantenha os pilares verdes para nunca precisar voltar ao Pro.';
+      } else if (daysUntilRenewal > 2) {
+        cycleStatusBadge = `FALTAM ${daysUntilRenewal} DIAS PARA VIRAR O CICLO`;
+        cycleGuidanceMessage = `Aproveite o Plano Pro ja pago neste mes. Janela ideal para clicar em Downgrade para Free: entre ${idealWindowStart} e ${idealWindowEnd} (1 a 2 dias antes de ${formatDatePtBr(cycleRenewalDate)} para nao gerar nova cobranca de US$ 25).`;
+      } else if (daysUntilRenewal >= 0) {
+        cycleStatusBadge =
+          daysUntilRenewal === 0
+            ? 'HOJE E O DIA DE VIRADA DO CICLO'
+            : `JANELA IDEAL ABERTA (FALTA(M) ${daysUntilRenewal} DIA(S))`;
+        cycleGuidanceMessage = `Momento ideal de acao! Confira se todos os 6 pre-requisitos abaixo estao aprovados e altere o plano para Free antes de ${formatDatePtBr(cycleRenewalDate)} para evitar renovacao automatica.`;
+      } else {
+        cycleStatusBadge = 'DATA DO CICLO ANTERIOR VENCIDA';
+        cycleGuidanceMessage = `A data configurada (${formatDatePtBr(cycleRenewalDate)}) ja passou. Se ja voltou ao Free, sincronize a API; se renovou por mais um ciclo, atualize a nova data.`;
+      }
+    }
+  } else if (detectedPlan === 'free') {
+    cycleStatusBadge = 'JA OPERANDO NO PLANO FREE';
+    cycleGuidanceMessage =
+      'A API oficial confirma que sua organizacao ja opera no Plano Free sem mensalidade.';
+  }
+
+  const checklistStatusLabel = (s: DowngradeChecklistItem['status']) =>
+    s === 'APROVADO'
+      ? 'PRONTO PARA FREE'
+      : s === 'ATENCAO'
+      ? 'ATENCAO PREVENTIVA'
+      : s === 'BLOQUEADOR'
+      ? 'IMPEDE DOWNGRADE'
+      : 'AGUARDANDO PAT API';
+
+  const dbCheckStatus: DowngradeChecklistItem['status'] =
+    dbSizeBytes > FREE_DB_LIMIT_BYTES
+      ? 'BLOQUEADOR'
+      : freeDbPct >= 75
+      ? 'ATENCAO'
+      : 'APROVADO';
+
+  const storageCheckStatus: DowngradeChecklistItem['status'] =
+    storageBytes > FREE_STORAGE_LIMIT_BYTES
+      ? 'BLOQUEADOR'
+      : freeStoragePct >= 75
+      ? 'ATENCAO'
+      : 'APROVADO';
+
+  const mauCheckStatus: DowngradeChecklistItem['status'] =
+    mauEffective > FREE_MAU_LIMIT
+      ? 'BLOQUEADOR'
+      : freeMauPct >= 75
+      ? 'ATENCAO'
+      : 'APROVADO';
+
+  let addonsCheckStatus: DowngradeChecklistItem['status'] = 'PENDENTE_API';
+  let addonsCurrentValue = 'Aguardando SUPABASE_ACCESS_TOKEN';
+  let addonsGuidance =
+    'Configure SUPABASE_ACCESS_TOKEN nas Environment Variables da Vercel para verificar automaticamente Compute e Add-ons via /v1/projects/{ref}/billing/addons.';
+
+  if (mgmt?.reachable) {
+    const activeInOrg = mgmt.activeProjectsInCurrentOrg || 1;
+    if (mgmt.extraPaidOrBlockingAddonsCount === 0 && activeInOrg <= 2) {
+      addonsCheckStatus = 'APROVADO';
+      addonsCurrentValue = `Compute ${mgmt.computeSizeLabel || 'Micro Padrao'} | 0 add-ons extras | ${activeInOrg} projeto na org`;
+      addonsGuidance =
+        'Nenhum add-on pago extra (Custom Domain, PITR, IPv4, Read Replica) ativo. No downgrade, a instancia Micro reverte automaticamente para o tier gratuito.';
+    } else {
+      addonsCheckStatus = 'BLOQUEADOR';
+      const extraList = mgmt.selectedAddons
+        .filter((a) => a.isExtraPaidOrBlocksFree)
+        .map((a) => a.name)
+        .join(', ');
+      addonsCurrentValue =
+        activeInOrg > 2
+          ? `${activeInOrg} projetos ativos nesta org (maximo 2 no Free)`
+          : `${mgmt.extraPaidOrBlockingAddonsCount} add-on(s) extra(s): ${extraList}`;
+      addonsGuidance =
+        activeInOrg > 2
+          ? 'Transfira ou pause projetos excedentes desta organizacao (o Free aceita ate 2 projetos ativos).'
+          : 'Remova os add-ons pagos listados em Project Settings -> Add-ons antes de mudar para o Plano Free.';
+    }
+  }
+
+  let freeSlotsCheckStatus: DowngradeChecklistItem['status'] = 'PENDENTE_API';
+  let freeSlotsCurrentValue = 'Aguardando SUPABASE_ACCESS_TOKEN';
+  let freeSlotsGuidance =
+    'Configure SUPABASE_ACCESS_TOKEN na Vercel para auditar quantos projetos Free ativos sua conta possui em outras organizacoes.';
+
+  if (mgmt?.reachable) {
+    if (detectedPlan === 'free') {
+      freeSlotsCheckStatus = 'APROVADO';
+      freeSlotsCurrentValue = `Ja no Free (${mgmt.allFreeOrgsActiveProjectsCount} projeto(s) Free ativo(s) visiveis)`;
+      freeSlotsGuidance = 'Organizacao atual ja esta enquadrada dentro do Plano Free.';
+    } else {
+      const neededSlots = mgmt.activeProjectsInCurrentOrg || 1;
+      const otherFreeActive = mgmt.otherFreeOrgsActiveProjectsCount;
+      if (otherFreeActive + neededSlots <= 2) {
+        freeSlotsCheckStatus = 'APROVADO';
+        freeSlotsCurrentValue = `${otherFreeActive} projeto(s) Free ativo(s) em outras orgs (cabe no limite de 2)`;
+        freeSlotsGuidance =
+          'Sua conta possui vaga livre no limite global de 2 projetos Free ativos para receber o Portal Samppel.';
+      } else {
+        freeSlotsCheckStatus = 'BLOQUEADOR';
+        const names = mgmt.freeOrgProjects
+          .filter((p) => p.isActive)
+          .map((p) => `${p.projectName} [${p.orgName}]`)
+          .join(', ');
+        freeSlotsCurrentValue = `${otherFreeActive} Free ativos em outras orgs: ${names}`;
+        freeSlotsGuidance =
+          'A Supabase soma o limite de 2 projetos Free ativos em todas as orgs onde voce e Owner/Admin. Antes de clicar em Downgrade no Portal Samppel, pause projetos Free sem uso ate restar no maximo 1 ativo fora desta org.';
+      }
+    }
+  }
+
+  const egressCheckStatus: DowngradeChecklistItem['status'] =
+    egressStatus === 'AGIR_AGORA'
+      ? 'BLOQUEADOR'
+      : egressStatus === 'PREVENTIVO'
+      ? 'ATENCAO'
+      : 'APROVADO';
+
+  const stageMoves24h = Number(authStats.stage_moves_24h ?? 0);
+  const vmTxSummary =
+    vm?.available && vm.networkTxBytesTotal !== null
+      ? ` | Rede VM acumulada: ${formatBytes(vm.networkTxBytesTotal)}`
+      : '';
+
+  const downgradeChecklist: DowngradeChecklistItem[] = [
+    {
+      id: 'db_size_500mb',
+      title: '1. Disco do Banco <= 500 MB',
+      sourceLabel: 'SQL Exato (pg_database_size)',
+      freeRequirement: 'Maximo 500 MB (Ideal < 350 MB)',
+      currentValue: `${db.db_size_pretty || formatBytes(dbSizeBytes)} (${freeDbPct}% do Free | ${proDbPct}% do Pro)`,
+      status: dbCheckStatus,
+      statusLabel: checklistStatusLabel(dbCheckStatus),
+      guidance:
+        dbCheckStatus === 'APROVADO'
+          ? `Ampla folga: restam ${formatBytes(Math.max(0, FREE_DB_LIMIT_BYTES - dbSizeBytes))} livres dentro do teto gratuito de 500 MB.`
+          : 'Execute limpeza de logs e filas concluidas na aba Manutencao antes do downgrade.',
+    },
+    {
+      id: 'storage_1gb',
+      title: '2. Arquivos Storage <= 1 GB',
+      sourceLabel: 'SQL Exato (storage.objects)',
+      freeRequirement: 'Maximo 1 GB (1.024 MB)',
+      currentValue: `${formatBytes(storageBytes)} (${freeStoragePct}% do Free | ${Number(db.storage_files_count || 0)} arq.)`,
+      status: storageCheckStatus,
+      statusLabel: checklistStatusLabel(storageCheckStatus),
+      guidance:
+        storageCheckStatus === 'APROVADO'
+          ? 'Consumo de Storage perfeitamente enquadrado na franquia gratuita de 1 GB.'
+          : 'Remova arquivos antigos ou comprima imagens nos buckets antes de voltar ao Free.',
+    },
+    {
+      id: 'mau_50k',
+      title: '3. Usuarios Ativos (MAU) <= 50.000',
+      sourceLabel: 'SQL Exato (auth.users 30d)',
+      freeRequirement: 'Maximo 50.000 MAU/mes',
+      currentValue: `${mauEffective.toLocaleString('pt-BR')} MAU (${freeMauPct}% do Free | ${Number(authStats.auth_users_count || 0)} contas)`,
+      status: mauCheckStatus,
+      statusLabel: checklistStatusLabel(mauCheckStatus),
+      guidance:
+        'Operacao corporativa interna usa menos de 0,1% da franquia gratuita de 50.000 usuarios mensais.',
+    },
+    {
+      id: 'zero_paid_addons',
+      title: '4. Zero Add-ons Pagos Incompativeis',
+      sourceLabel: 'Management API (/billing/addons)',
+      freeRequirement: '0 add-ons extras e <= 2 projetos na org',
+      currentValue: addonsCurrentValue,
+      status: addonsCheckStatus,
+      statusLabel: checklistStatusLabel(addonsCheckStatus),
+      guidance: addonsGuidance,
+    },
+    {
+      id: 'two_free_projects_quota',
+      title: '5. Vaga no Limite de 2 Projetos Free Ativos',
+      sourceLabel: 'Management API (/organizations + /projects)',
+      freeRequirement: 'Ate 2 projetos Free ativos por Owner/Admin',
+      currentValue: freeSlotsCurrentValue,
+      status: freeSlotsCheckStatus,
+      statusLabel: checklistStatusLabel(freeSlotsCheckStatus),
+      guidance: freeSlotsGuidance,
+    },
+    {
+      id: 'egress_and_activity_free',
+      title: '6. Ritmo de Egress (<= 5 GB) & Anti-Pausa 7d',
+      sourceLabel: 'SQL + API Gateway + Metrics VM',
+      freeRequirement: '5 GB Uncached + Atividade < 7 dias',
+      currentValue: `${rowsPerMin.toLocaleString('pt-BR')} linhas/min${apiGatewaySummaryText}${vmTxSummary}`,
+      status: egressCheckStatus,
+      statusLabel: checklistStatusLabel(egressCheckStatus),
+      guidance: `Gargalo N+1 eliminado e atividade diaria ativa (${stageMoves24h} mov. Kanban/24h + sync incremental), evitando pausa por inatividade de 7 dias no Free.`,
+    },
+  ];
+
+  const approvedChecklistCount = downgradeChecklist.filter(
+    (c) => c.status === 'APROVADO'
+  ).length;
+  const blockingChecklistCount = downgradeChecklist.filter(
+    (c) => c.status === 'BLOQUEADOR'
+  ).length;
+  const pendingApiChecklistCount = downgradeChecklist.filter(
+    (c) => c.status === 'PENDENTE_API'
+  ).length;
+
+  const planAndDowngradeReadiness = {
+    detectedPlan,
+    detectedPlanLabel:
+      detectedPlan === 'pro'
+        ? 'PRO ATIVO (API OFICIAL)'
+        : detectedPlan === 'free'
+        ? 'FREE ATIVO (API OFICIAL)'
+        : detectedPlan === 'team'
+        ? 'TEAM ATIVO (API OFICIAL)'
+        : detectedPlan === 'enterprise'
+        ? 'ENTERPRISE ATIVO (API OFICIAL)'
+        : mgmt?.configured
+        ? 'VERIFICANDO API...'
+        : 'AGUARDANDO PAT NA VERCEL',
+    targetPlan: 'free' as const,
+    targetPlanLabel: 'RETORNO AO FREE (CUSTO ZERO)',
+    organizationId: orgSlug,
+    organizationName: orgName,
+    projectName: mgmt?.projectName || 'Portal Samppel',
+    projectStatus: mgmt?.projectStatus || 'ACTIVE_HEALTHY',
+    computeSizeLabel: mgmt?.computeSizeLabel || null,
+    selectedAddons: mgmt?.selectedAddons || [],
+    extraPaidOrBlockingAddonsCount: mgmt?.extraPaidOrBlockingAddonsCount ?? 0,
+    otherFreeOrgsActiveProjectsCount: mgmt?.otherFreeOrgsActiveProjectsCount ?? 0,
+    freeOrgProjects: mgmt?.freeOrgProjects || [],
+    apiGatewayUsage: apiGateway || null,
+    vmMetrics: vm || null,
+    managementApiConfigured: Boolean(mgmt?.configured),
+    managementApiReachable: Boolean(mgmt?.reachable),
+    managementApiReason: mgmt?.reason || null,
+    platformCached: Boolean(platform?.cached),
+    platformCacheAgeSec: platform?.cacheAgeSec ?? 0,
+    platformCollectedAt: platform?.collectedAt || null,
+    billingCycle: {
+      cycleRenewalDate,
+      daysUntilRenewal,
+      idealWindowStart,
+      idealWindowEnd,
+      statusBadge: cycleStatusBadge,
+      guidanceMessage: cycleGuidanceMessage,
+      billingDashboardUrl: `https://supabase.com/dashboard/org/${orgSlug}/billing`,
+      usageDashboardUrl: `https://supabase.com/dashboard/org/${orgSlug}/usage`,
+      addonsDashboardUrl: `https://supabase.com/dashboard/project/${SUPABASE_PROJECT_REF}/settings/addons`,
+    },
+    checklist: downgradeChecklist,
+    approvedChecklistCount,
+    totalChecklistCount: downgradeChecklist.length,
+    blockingChecklistCount,
+    pendingApiChecklistCount,
+    readyForCleanDowngrade:
+      blockingChecklistCount === 0 && pendingApiChecklistCount === 0,
   };
 
   const estimatedDaysToFreeLimit =
@@ -767,6 +1141,7 @@ function buildIntelligence(raw: any) {
     healthScore: clampedScore,
     healthStatus,
     freeTierShield,
+    planAndDowngradeReadiness,
     diagnostics,
     velocity: {
       callsPerMin,
@@ -787,6 +1162,12 @@ function buildIntelligence(raw: any) {
         storageLimitBytes: FREE_STORAGE_LIMIT_BYTES,
         storageLimitPretty: '1 GB',
         storageUsedPct: freeStoragePct,
+        mauLimit: FREE_MAU_LIMIT,
+        mauLimitPretty: '50.000 MAU',
+        mauUsed: mauEffective,
+        mauUsedPct: freeMauPct,
+        egressLimitBytes: FREE_EGRESS_LIMIT_BYTES,
+        egressLimitPretty: '5 GB uncached + 5 GB cached',
       },
       pro: {
         dbLimitBytes: PRO_DB_LIMIT_BYTES,
@@ -795,6 +1176,12 @@ function buildIntelligence(raw: any) {
         storageLimitBytes: PRO_STORAGE_LIMIT_BYTES,
         storageLimitPretty: '100 GB',
         storageUsedPct: proStoragePct,
+        mauLimit: PRO_MAU_LIMIT,
+        mauLimitPretty: '100.000 MAU',
+        mauUsed: mauEffective,
+        mauUsedPct: proMauPct,
+        egressLimitBytes: PRO_EGRESS_LIMIT_BYTES,
+        egressLimitPretty: '250 GB uncached + 250 GB cached',
       },
       connections: {
         used: totalConnections,
@@ -804,12 +1191,14 @@ function buildIntelligence(raw: any) {
     },
     environment: {
       ownerEmail: OWNER_MONITORING_EMAIL,
-      supabaseProjectRef: 'cywbfcrtuawsgtbsjnnb',
+      supabaseProjectRef: SUPABASE_PROJECT_REF,
+      supabaseOrganizationSlug: orgSlug,
       region: 'sa-east-1 (Sao Paulo)',
       appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://portalsamppel.vercel.app',
       hasCronSecret: Boolean(process.env.CRON_SECRET),
       hasResendApiKey: Boolean(process.env.RESEND_API_KEY),
       hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      hasSupabaseAccessToken: Boolean(process.env.SUPABASE_ACCESS_TOKEN),
       hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
       patExpiresAt: '2027-01-04',
       patDaysRemaining,
@@ -905,9 +1294,11 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const force = searchParams.get('force') === 'true';
+  const forceApi = searchParams.get('forceApi') === 'true';
 
   if (
     !force &&
+    !forceApi &&
     telemetryMemoryCache &&
     Date.now() - telemetryMemoryCache.timestamp < CACHE_TTL_MS
   ) {
@@ -918,12 +1309,23 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const startMs = Date.now();
-  const { data: rawTelemetry, error } = await supabaseAdmin.rpc(
-    'get_system_monitoring_telemetry',
-    { p_tenant_id: DEFAULT_TENANT_ID }
-  );
-  const rpcLatencyMs = Date.now() - startMs;
+  const rpcStartMs = Date.now();
+  const [rpcRes, platformSnapshot] = await Promise.all([
+    (async () => {
+      const res = await supabaseAdmin.rpc('get_system_monitoring_telemetry', {
+        p_tenant_id: DEFAULT_TENANT_ID,
+      });
+      return { ...res, latencyMs: Date.now() - rpcStartMs };
+    })(),
+    fetchSupabasePlatformSnapshot({
+      projectRef: SUPABASE_PROJECT_REF,
+      force: forceApi,
+    }),
+  ]);
+
+  const rawTelemetry = rpcRes.data;
+  const error = rpcRes.error;
+  const rpcLatencyMs = rpcRes.latencyMs;
 
   if (error || !rawTelemetry) {
     console.error('[AdminMonitoring] Erro ao executar get_system_monitoring_telemetry:', error);
@@ -937,13 +1339,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const intelligence = buildIntelligence(rawTelemetry);
+  const intelligence = buildIntelligence(rawTelemetry, platformSnapshot);
   const payload = {
     success: true,
     cached: false,
     cacheAgeSec: 0,
     rpcLatencyMs,
     telemetry: rawTelemetry,
+    platform: platformSnapshot,
     intelligence,
   };
 
@@ -986,6 +1389,77 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    if (action === 'REFRESH_PLATFORM_API') {
+      clearSupabasePlatformCache();
+      telemetryMemoryCache = null;
+      const freshPlatform = await fetchSupabasePlatformSnapshot({
+        projectRef: SUPABASE_PROJECT_REF,
+        force: true,
+      });
+      return NextResponse.json({
+        success: true,
+        action,
+        message: freshPlatform.managementApi.reachable
+          ? `API oficial da Supabase sincronizada (Plano detectado: ${freshPlatform.managementApi.detectedPlan.toUpperCase()}).`
+          : freshPlatform.vmMetrics.available
+          ? 'Metricas Prometheus da VM sincronizadas. Configure SUPABASE_ACCESS_TOKEN na Vercel para liberar Management API v1.'
+          : 'Cache da API limpo. Verifique SUPABASE_ACCESS_TOKEN nas variaveis de ambiente da Vercel.',
+      });
+    }
+
+    if (action === 'SET_BILLING_CYCLE_DATE') {
+      const rawDate =
+        body?.cycleRenewalDate === null || body?.cycleRenewalDate === undefined
+          ? ''
+          : String(body.cycleRenewalDate).trim();
+
+      if (rawDate !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+        return NextResponse.json(
+          { error: 'Formato de data invalido. Utilize AAAA-MM-DD.' },
+          { status: 400 }
+        );
+      }
+
+      if (rawDate !== '') {
+        const parsedMs = new Date(`${rawDate}T00:00:00-03:00`).getTime();
+        if (Number.isNaN(parsedMs)) {
+          return NextResponse.json(
+            { error: 'Data de renovacao do ciclo invalida.' },
+            { status: 400 }
+          );
+        }
+      }
+
+      const nextConfig = {
+        cycle_renewal_date: rawDate || null,
+        updated_at: new Date().toISOString(),
+        updated_by: OWNER_MONITORING_EMAIL,
+      };
+
+      const { error: updateErr } = await supabaseAdmin
+        .from('system_monitoring_state')
+        .update({
+          billing_transition_config: nextConfig,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 'global');
+
+      if (updateErr) {
+        throw updateErr;
+      }
+
+      telemetryMemoryCache = null;
+
+      return NextResponse.json({
+        success: true,
+        action,
+        cycleRenewalDate: rawDate || null,
+        message: rawDate
+          ? `Data de renovacao do ciclo Pro salva (${formatDatePtBr(rawDate)}). A janela ideal de downgrade foi calculada.`
+          : 'Data de renovacao do ciclo Pro removida.',
+      });
+    }
+
     if (action === 'RECORD_MANUAL_SNAPSHOT') {
       const { data, error } = await supabaseAdmin.rpc('record_monitoring_snapshot', {
         p_source: 'manual',
@@ -1011,17 +1485,25 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'SEND_EXECUTIVE_EMAIL') {
-      const { data: rawTelemetry, error } = await supabaseAdmin.rpc(
-        'get_system_monitoring_telemetry',
-        { p_tenant_id: DEFAULT_TENANT_ID }
-      );
+      const [rpcRes, platformSnapshot] = await Promise.all([
+        supabaseAdmin.rpc('get_system_monitoring_telemetry', {
+          p_tenant_id: DEFAULT_TENANT_ID,
+        }),
+        fetchSupabasePlatformSnapshot({
+          projectRef: SUPABASE_PROJECT_REF,
+          force: false,
+        }),
+      ]);
+      const rawTelemetry = rpcRes.data;
+      const error = rpcRes.error;
       if (error || !rawTelemetry) {
         throw new Error(error?.message || 'Falha ao coletar telemetria para envio do relatorio.');
       }
-      const intel = buildIntelligence(rawTelemetry);
+      const intel = buildIntelligence(rawTelemetry, platformSnapshot);
       const db = rawTelemetry.database || {};
       const logs = rawTelemetry.integration?.logs || {};
       const sq = rawTelemetry.integration?.sync_queue || {};
+      const pdr = intel.planAndDowngradeReadiness;
 
       const emailRes = await sendMonitoringAnomalyAlert({
         title: `Resumo Executivo de Saude (Score ${intel.healthScore}/100 - ${intel.healthStatus})`,
@@ -1037,7 +1519,9 @@ export async function POST(request: NextRequest) {
             : 'Nenhuma intervencao corretiva necessaria no momento.',
         metrics: {
           'Score de Saude': `${intel.healthScore}/100 (${intel.healthStatus})`,
+          'Plano Oficial (API)': `${pdr.detectedPlanLabel} | Prontidao Free: ${pdr.approvedChecklistCount}/${pdr.totalChecklistCount} aprovados`,
           'Tamanho do Banco': `${db.db_size_pretty || 'N/A'} (${intel.quotas.free.dbUsedPct}% Free / ${intel.quotas.pro.dbUsedPct}% Pro)`,
+          'Usuarios Ativos (MAU)': `${intel.quotas.free.mauUsed} / 50.000 Free (${intel.quotas.free.mauUsedPct}%)`,
           'Conexoes Ativas / Pool': `${db.total_connections || 0} / ${db.max_connections || 60} (Cache Hit: ${db.cache_hit_ratio || 100}%)`,
           'Fila sync_queue': `${sq.pending || 0} pendentes | ${sq.processing || 0} proc | ${sq.failed || 0} falhas`,
           'Logs Conta Azul (24h)': `${logs.last_24h_success || 0} sucessos | ${logs.last_24h_error || 0} erros`,

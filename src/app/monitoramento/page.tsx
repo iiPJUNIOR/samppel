@@ -191,11 +191,12 @@ export default function MonitoramentoPage() {
   const [confirmModal, setConfirmModal] = useState<ConfirmActionState | null>(null);
   const [cognitoCheckResult, setCognitoCheckResult] = useState<any | null>(null);
   const [executionLog, setExecutionLog] = useState<ActionExecutionEntry[]>([]);
+  const [cycleDateInput, setCycleDateInput] = useState<string>('');
 
   const fetchTelemetry = useCallback(
-    async (force = false) => {
+    async (force = false, forceApi = false) => {
       if (!isOwner) return;
-      if (force) {
+      if (force || forceApi) {
         setRefreshing(true);
       } else if (!data) {
         setLoading(true);
@@ -203,10 +204,15 @@ export default function MonitoramentoPage() {
       setErrorMsg(null);
 
       try {
-        const res = await authenticatedFetch(
-          `/api/admin/monitoring${force ? '?force=true' : ''}`,
-          { method: 'GET', cache: 'no-store' }
-        );
+        const params = new URLSearchParams();
+        if (force) params.set('force', 'true');
+        if (forceApi) params.set('forceApi', 'true');
+        const qs = params.toString() ? `?${params.toString()}` : '';
+
+        const res = await authenticatedFetch(`/api/admin/monitoring${qs}`, {
+          method: 'GET',
+          cache: 'no-store',
+        });
         const json = await res.json();
         if (!res.ok) {
           throw new Error(json?.error || `Falha HTTP ${res.status}`);
@@ -221,6 +227,12 @@ export default function MonitoramentoPage() {
     },
     [isOwner, data]
   );
+
+  useEffect(() => {
+    const savedDate =
+      data?.intelligence?.planAndDowngradeReadiness?.billingCycle?.cycleRenewalDate || '';
+    setCycleDateInput(savedDate);
+  }, [data?.intelligence?.planAndDowngradeReadiness?.billingCycle?.cycleRenewalDate]);
 
   useEffect(() => {
     if (isOwner) {
@@ -242,7 +254,11 @@ export default function MonitoramentoPage() {
     return () => clearInterval(interval);
   }, [isOwner, autoRefresh5m, fetchTelemetry]);
 
-  const executeAction = async (action: string, customRetentionHours?: number) => {
+  const executeAction = async (
+    action: string,
+    customRetentionHours?: number,
+    extraPayload?: Record<string, any>
+  ) => {
     setActionBusy(action);
     setFeedback(null);
     setConfirmModal(null);
@@ -255,6 +271,7 @@ export default function MonitoramentoPage() {
           action,
           retentionHours:
             customRetentionHours !== undefined ? customRetentionHours : retentionHours,
+          ...(extraPayload || {}),
         }),
       });
       const json = await res.json();
@@ -283,7 +300,7 @@ export default function MonitoramentoPage() {
       );
 
       if (action !== 'CHECK_COGNITO_APP' && action !== 'SEND_EXECUTIVE_EMAIL') {
-        await fetchTelemetry(true);
+        await fetchTelemetry(true, action === 'REFRESH_PLATFORM_API');
       }
     } catch (err: any) {
       const msg = err?.message || 'Erro ao executar acao de manutencao.';
@@ -388,6 +405,8 @@ export default function MonitoramentoPage() {
 
   const freeShield = intel.freeTierShield || null;
   const freePillars: any[] = Array.isArray(freeShield?.pillars) ? freeShield.pillars : [];
+  const pdr = intel.planAndDowngradeReadiness || null;
+  const checklistItems: any[] = Array.isArray(pdr?.checklist) ? pdr.checklist : [];
 
   return (
     <div className={styles.pageWrapper}>
@@ -402,6 +421,25 @@ export default function MonitoramentoPage() {
             <span className={`${styles.badge} ${styles.badgeNeutral}`}>
               Projeto: {intel.environment?.supabaseProjectRef || 'cywbfcrtuawsgtbsjnnb'}
             </span>
+            {pdr && (
+              <span className={styles.labelWithInfo}>
+                <span
+                  className={`${styles.badge} ${
+                    pdr.detectedPlan === 'free'
+                      ? styles.badgeSuccess
+                      : pdr.detectedPlan === 'pro'
+                      ? styles.badgeWarning
+                      : styles.badgeNeutral
+                  }`}
+                >
+                  Plano Real: {pdr.detectedPlanLabel}
+                </span>
+                <span className={`${styles.badge} ${styles.badgeSuccess}`}>
+                  Regua Alvo: Free (Custo Zero)
+                </span>
+                <InfoHint guideKey="api_real_plan_status" />
+              </span>
+            )}
             {data && (
               <span className={`${styles.metaText} ${styles.labelWithInfo}`}>
                 <span>
@@ -418,7 +456,7 @@ export default function MonitoramentoPage() {
             <span>Central de Monitoramento, Telemetria Anti-Estouro e Governanca</span>
           </h1>
           <p className={styles.pageSubtitle}>
-            Vigilancia preventiva de cotas gratuitas (Supabase + Vercel), explicacao didatica em cada indicador (i) e receitas diretas de codigo/banco para nunca precisar pagar upgrade desnecessario ao Plano Pro.
+            Integrada diretamente as APIs oficiais da Supabase (Management API v1, Prometheus VM Metrics e SQL consolidado), com Regua Dupla Pro -&gt; Alvo Free, explicacao (i) em cada metrica e checklist automatico para retorno seguro ao Plano Free.
           </p>
         </div>
 
@@ -456,19 +494,20 @@ export default function MonitoramentoPage() {
             <span>Enviar Resumo E-mail</span>
           </button>
 
-          <a
-            href="https://supabase.com/dashboard/project/cywbfcrtuawsgtbsjnnb/reports"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => fetchTelemetry(true, true)}
+            disabled={refreshing || loading}
             className={styles.btnSecondary}
+            title="Ignora o cache de 10 minutos e consulta a API oficial da Supabase ao vivo"
           >
-            <span>Supabase Reports</span>
-            <ExternalLink size={14} />
-          </a>
+            <Server size={15} />
+            <span>Sincronizar API Supabase</span>
+          </button>
 
           <button
             type="button"
-            onClick={() => fetchTelemetry(true)}
+            onClick={() => fetchTelemetry(true, false)}
             disabled={refreshing || loading}
             className={styles.btnPrimary}
           >
@@ -578,7 +617,7 @@ export default function MonitoramentoPage() {
       {loading && !data ? (
         <div className={styles.cardPanel}>
           <div className={styles.emptyState}>
-            Coletando telemetria consolidada do Postgres em chamada unica...
+            Coletando telemetria consolidada do Postgres e das APIs oficiais da Supabase...
           </div>
         </div>
       ) : (
@@ -710,6 +749,296 @@ export default function MonitoramentoPage() {
                 </section>
               )}
 
+              {/* ── PAINEL API OFICIAL SUPABASE & CHECKLIST PRO -> FREE ── */}
+              {pdr && (
+                <section
+                  className={`${styles.transitionPanel} ${
+                    pdr.readyForCleanDowngrade
+                      ? styles.transitionReady
+                      : pdr.blockingChecklistCount > 0
+                      ? styles.transitionBlocked
+                      : ''
+                  }`}
+                >
+                  <div className={styles.transitionTopRow}>
+                    <div>
+                      <div className={styles.transitionBadgeGroup}>
+                        <span
+                          className={`${styles.badge} ${
+                            pdr.detectedPlan === 'free'
+                              ? styles.badgeSuccess
+                              : pdr.detectedPlan === 'pro'
+                              ? styles.badgeWarning
+                              : styles.badgeInfo
+                          }`}
+                        >
+                          <Server size={12} />
+                          <span>{pdr.detectedPlanLabel}</span>
+                        </span>
+                        <span
+                          className={`${styles.badge} ${
+                            pdr.readyForCleanDowngrade
+                              ? styles.badgeSuccess
+                              : pdr.blockingChecklistCount > 0
+                              ? styles.badgeDanger
+                              : styles.badgeInfo
+                          }`}
+                        >
+                          Prontidao Free: {pdr.approvedChecklistCount}/{pdr.totalChecklistCount}{' '}
+                          pre-requisitos aprovados
+                        </span>
+                        <span className={`${styles.badge} ${styles.badgeNeutral}`}>
+                          {pdr.platformCached
+                            ? `Cache API 10m (${pdr.platformCacheAgeSec}s)`
+                            : 'API Oficial ao Vivo'}
+                        </span>
+                        <InfoHint guideKey="downgrade_readiness_checklist" />
+                      </div>
+                      <h2 className={styles.verdictHeadlineText}>
+                        Uso Real via APIs Oficiais Supabase &amp; Checklist de Transicao Pro -&gt; Free
+                      </h2>
+                      <p className={styles.verdictSubText}>
+                        Acompanha ao vivo o Plano da Organizacao ({pdr.organizationName}), Compute, Add-ons, Requisicoes do API Gateway, Hardware Prometheus da VM e os 6 pre-requisitos obrigatorios para cancelar o Pro no proximo ciclo e permanecer 100% no Free.
+                      </p>
+                    </div>
+                  </div>
+
+                  {!pdr.managementApiConfigured && (
+                    <div className={styles.apiSetupNotice}>
+                      <div>
+                        <strong>Ativacao opcional da Management API v1 na Vercel:</strong>{' '}
+                        adicione a variavel server-only <code>SUPABASE_ACCESS_TOKEN</code> (com o seu PAT <code>sbp_...</code>) em{' '}
+                        <em>Vercel -&gt; Settings -&gt; Environment Variables</em> para habilitar leitura automatica de Plano Real, Add-ons, API Gateway (24h) e auditoria de projetos Free em outras organizacoes. As metricas SQL exatas e Prometheus da VM ja operam normalmente.
+                      </div>
+                      <InfoHint guideKey="gov_supabase_access_token" />
+                    </div>
+                  )}
+
+                  {/* Faixa de Telemetria ao Vivo das APIs da Plataforma */}
+                  <div className={styles.liveApiStrip}>
+                    <div className={styles.liveApiMetricBox}>
+                      <span className={styles.liveApiMetricLabel}>
+                        <span>Plano Oficial, Org &amp; Compute</span>
+                        <InfoHint guideKey="api_real_plan_status" />
+                      </span>
+                      <div className={styles.liveApiMetricValue}>
+                        {pdr.detectedPlan === 'pro'
+                          ? 'Plano PRO'
+                          : pdr.detectedPlan === 'free'
+                          ? 'Plano FREE'
+                          : 'Aguardando PAT'}
+                        {pdr.computeSizeLabel ? ` (${pdr.computeSizeLabel})` : ''}
+                      </div>
+                      <div className={styles.liveApiMetricSub}>
+                        Org: {pdr.organizationName} ({pdr.organizationId}) |{' '}
+                        {pdr.extraPaidOrBlockingAddonsCount} add-on(s) pago(s) extra(s)
+                      </div>
+                    </div>
+
+                    <div className={styles.liveApiMetricBox}>
+                      <span className={styles.liveApiMetricLabel}>
+                        <span>API Gateway (Ultimas 24h)</span>
+                        <InfoHint guideKey="api_gateway_requests" />
+                      </span>
+                      <div className={styles.liveApiMetricValue}>
+                        {pdr.managementApiReachable
+                          ? `${formatNumber(pdr.apiGatewayUsage?.totalRequests ?? 0)} req/24h`
+                          : 'Requer PAT na Vercel'}
+                      </div>
+                      <div className={styles.liveApiMetricSub}>
+                        REST: {formatNumber(pdr.apiGatewayUsage?.restRequests ?? 0)} | Auth:{' '}
+                        {formatNumber(pdr.apiGatewayUsage?.authRequests ?? 0)} | Storage:{' '}
+                        {formatNumber(pdr.apiGatewayUsage?.storageRequests ?? 0)} | RT:{' '}
+                        {formatNumber(pdr.apiGatewayUsage?.realtimeRequests ?? 0)}
+                      </div>
+                    </div>
+
+                    <div className={styles.liveApiMetricBox}>
+                      <span className={styles.liveApiMetricLabel}>
+                        <span>Hardware da VM (Prometheus)</span>
+                        <InfoHint guideKey="vm_hardware_metrics" />
+                      </span>
+                      <div className={styles.liveApiMetricValue}>
+                        {pdr.vmMetrics?.available && pdr.vmMetrics.ramUsedPct !== null
+                          ? `RAM Fisica: ${pdr.vmMetrics.ramUsedPct}%`
+                          : 'Metricas VM indisponiveis'}
+                      </div>
+                      <div className={styles.liveApiMetricSub}>
+                        {pdr.vmMetrics?.available ? (
+                          <>
+                            RAM: {formatBytesClient(pdr.vmMetrics.ramUsedBytes)} /{' '}
+                            {formatBytesClient(pdr.vmMetrics.ramTotalBytes)} | Disco VM:{' '}
+                            {pdr.vmMetrics.diskUsedPct ?? 0}% | Rede TX:{' '}
+                            {formatBytesClient(pdr.vmMetrics.networkTxBytesTotal)}
+                          </>
+                        ) : (
+                          pdr.vmMetrics?.reason || 'Verificando endpoint Prometheus...'
+                        )}
+                      </div>
+                    </div>
+
+                    <div className={styles.liveApiMetricBox}>
+                      <span className={styles.liveApiMetricLabel}>
+                        <span>Usuarios Ativos Mensais (MAU)</span>
+                        <InfoHint guideKey="kpi_mau_quota" />
+                      </span>
+                      <div className={styles.liveApiMetricValue}>
+                        {formatNumber(intel.quotas?.free?.mauUsed ?? 0)} / 50.000 Free
+                      </div>
+                      <div className={styles.liveApiMetricSub}>
+                        Free: {intel.quotas?.free?.mauUsedPct ?? 0}% de 50k | Pro:{' '}
+                        {intel.quotas?.pro?.mauUsedPct ?? 0}% de 100k
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Planejador do Ciclo de Faturamento Pro -> Janela Ideal */}
+                  <div className={styles.cyclePlannerBox}>
+                    <div className={styles.cycleInfoCol}>
+                      <div className={styles.ownerPillRow}>
+                        <span
+                          className={`${styles.badge} ${
+                            pdr.detectedPlan === 'free'
+                              ? styles.badgeSuccess
+                              : pdr.billingCycle?.daysUntilRenewal !== null &&
+                                pdr.billingCycle?.daysUntilRenewal >= 0 &&
+                                pdr.billingCycle?.daysUntilRenewal <= 2
+                              ? styles.badgeWarning
+                              : styles.badgeInfo
+                          }`}
+                        >
+                          <Clock size={12} />
+                          <span>{pdr.billingCycle?.statusBadge}</span>
+                        </span>
+                      </div>
+                      <p className={styles.verdictSubText}>
+                        {pdr.billingCycle?.guidanceMessage}
+                      </p>
+                    </div>
+
+                    <div className={styles.cycleActionsCol}>
+                      <div className={styles.cycleFormRow}>
+                        <label
+                          htmlFor="billing-cycle-renewal-date"
+                          className={styles.cycleDateLabel}
+                        >
+                          Renovacao do Ciclo Pro:
+                        </label>
+                        <input
+                          id="billing-cycle-renewal-date"
+                          type="date"
+                          value={cycleDateInput}
+                          onChange={(e) => setCycleDateInput(e.target.value)}
+                          className={styles.inputControl}
+                        />
+                        <button
+                          type="button"
+                          disabled={actionBusy === 'SET_BILLING_CYCLE_DATE'}
+                          onClick={() =>
+                            executeAction('SET_BILLING_CYCLE_DATE', undefined, {
+                              cycleRenewalDate: cycleDateInput,
+                            })
+                          }
+                          className={`${styles.btnPrimary} ${styles.btnSmall}`}
+                        >
+                          Salvar Data
+                        </button>
+                        {pdr.billingCycle?.cycleRenewalDate && (
+                          <button
+                            type="button"
+                            disabled={actionBusy === 'SET_BILLING_CYCLE_DATE'}
+                            onClick={() => {
+                              setCycleDateInput('');
+                              executeAction('SET_BILLING_CYCLE_DATE', undefined, {
+                                cycleRenewalDate: '',
+                              });
+                            }}
+                            className={`${styles.btnGhost} ${styles.btnSmall}`}
+                          >
+                            Limpar
+                          </button>
+                        )}
+                      </div>
+
+                      <div className={styles.cycleLinksRow}>
+                        <a
+                          href={pdr.billingCycle?.usageDashboardUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${styles.btnSecondary} ${styles.btnSmall}`}
+                        >
+                          <span>Usage Oficial (Egress Fatura)</span>
+                          <ExternalLink size={12} />
+                        </a>
+                        <a
+                          href={pdr.billingCycle?.billingDashboardUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${styles.btnSecondary} ${styles.btnSmall}`}
+                        >
+                          <span>Billing &amp; Downgrade</span>
+                          <ExternalLink size={12} />
+                        </a>
+                        <a
+                          href={pdr.billingCycle?.addonsDashboardUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${styles.btnSecondary} ${styles.btnSmall}`}
+                        >
+                          <span>Compute &amp; Add-ons</span>
+                          <ExternalLink size={12} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Checklist dos 6 Pre-Requisitos Oficiais para o Downgrade */}
+                  {checklistItems.length > 0 && (
+                    <div className={styles.checklistGrid}>
+                      {checklistItems.map((item: any) => {
+                        const cardCls =
+                          item.status === 'APROVADO'
+                            ? styles.checkApproved
+                            : item.status === 'BLOQUEADOR'
+                            ? styles.checkBlocker
+                            : item.status === 'ATENCAO'
+                            ? styles.checkWarning
+                            : styles.checkPending;
+                        const badgeCls =
+                          item.status === 'APROVADO'
+                            ? styles.badgeSuccess
+                            : item.status === 'BLOQUEADOR'
+                            ? styles.badgeDanger
+                            : item.status === 'ATENCAO'
+                            ? styles.badgeWarning
+                            : styles.badgeInfo;
+
+                        return (
+                          <div
+                            key={item.id}
+                            className={`${styles.checklistCard} ${cardCls}`}
+                          >
+                            <div className={styles.pillarTop}>
+                              <div className={styles.checklistHeader}>
+                                <span className={styles.checklistTitle}>{item.title}</span>
+                                <span className={`${styles.badge} ${badgeCls}`}>
+                                  {item.statusLabel}
+                                </span>
+                              </div>
+                              <div className={styles.checklistSource}>
+                                Fonte: {item.sourceLabel} | Regra Free: {item.freeRequirement}
+                              </div>
+                              <div className={styles.checklistVal}>{item.currentValue}</div>
+                            </div>
+                            <div className={styles.checklistGuidance}>{item.guidance}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
+
               <div className={styles.kpiGrid}>
                 {/* KPI 1: Health Score */}
                 <div className={styles.kpiCard}>
@@ -733,12 +1062,12 @@ export default function MonitoramentoPage() {
                   </div>
                 </div>
 
-                {/* KPI 2: Disco & Cota */}
+                {/* KPI 2: Disco & Cota (Regua Dupla Padrao: Meta Free) */}
                 <div className={styles.kpiCard}>
                   <div className={styles.kpiHeader}>
                     <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
                       <span>
-                        Disco ({planTier === 'free' ? 'Free 500 MB' : 'Pro 8 GB'})
+                        Disco ({planTier === 'free' ? 'Meta Free 500 MB' : 'Cota Pro 8 GB'})
                       </span>
                       <InfoHint guideKey="kpi_db_disk" />
                     </span>
@@ -747,7 +1076,7 @@ export default function MonitoramentoPage() {
                       onClick={() => setPlanTier((p) => (p === 'free' ? 'pro' : 'free'))}
                       className={`${styles.btnSecondary} ${styles.btnSmall}`}
                     >
-                      Simular {planTier === 'free' ? 'Pro' : 'Free'}
+                      {planTier === 'free' ? 'Regua: Meta Free' : 'Regua: Cota Pro'}
                     </button>
                   </div>
                   <span className={styles.kpiPolarityHint}>
@@ -769,7 +1098,8 @@ export default function MonitoramentoPage() {
                   </div>
                   <div className={styles.kpiSubtext}>
                     <span>
-                      {dbUsedPct}% de {activeQuota?.dbLimitPretty || '500 MB'}
+                      Free: {intel.quotas?.free?.dbUsedPct ?? 0}% | Pro:{' '}
+                      {intel.quotas?.pro?.dbUsedPct ?? 0}%
                     </span>
                     <span>Tendencia: {intel.velocity?.dbGrowthPrettyPerDay || 'Estavel'}</span>
                   </div>
@@ -1978,6 +2308,25 @@ export default function MonitoramentoPage() {
                   </div>
                   <div className={styles.kvRow}>
                     <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                      <span>SUPABASE_ACCESS_TOKEN (Management API)</span>
+                      <InfoHint guideKey="gov_supabase_access_token" />
+                    </span>
+                    <span className={styles.kvVal}>
+                      <span
+                        className={`${styles.badge} ${
+                          intel.environment?.hasSupabaseAccessToken
+                            ? styles.badgeSuccess
+                            : styles.badgeInfo
+                        }`}
+                      >
+                        {intel.environment?.hasSupabaseAccessToken
+                          ? 'Configurada'
+                          : 'Nao definida'}
+                      </span>
+                    </span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
                       <span>CRON_SECRET</span>
                       <InfoHint guideKey="gov_cron_secret" />
                     </span>
@@ -2033,6 +2382,16 @@ export default function MonitoramentoPage() {
                     <span className={styles.kvVal}>
                       {governance.auth_stats?.auth_users_count ?? 0} /{' '}
                       {governance.auth_stats?.profiles_active_count ?? 0}
+                    </span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                      <span>MAU (30 dias / Teto Free 50k)</span>
+                      <InfoHint guideKey="kpi_mau_quota" />
+                    </span>
+                    <span className={styles.kvVal}>
+                      {formatNumber(intel.quotas?.free?.mauUsed ?? 0)} / 50.000 (
+                      {intel.quotas?.free?.mauUsedPct ?? 0}%)
                     </span>
                   </div>
                   <div className={styles.kvRow}>
