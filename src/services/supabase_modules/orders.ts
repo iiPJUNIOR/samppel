@@ -1,32 +1,7 @@
-import { getDbClient, isMockMode, mockOrders, setMockOrders, mockProducts, mockCustomers, enqueueSync, mockFinancial, setMockFinancial, mockProfiles } from '../supabaseClient';
+import { getDbClient } from '../supabaseClient';
 import { adjustStock } from './products';
 
 export async function getOrders(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const ordersWithJoins = mockOrders.filter(o => o.tenant_id === tenantId).map(order => {
-      const customer = mockCustomers.find(c => c.id === order.customer_id) || { name: 'Cliente Desconhecido' };
-      const product = mockProducts.find(p => p.id === order.product_id) || { name: 'Produto Desconhecido', stock_quantity: 0 };
-      const mockStages = [
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17001', name: 'A produzir', color: '#94a3b8' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17002', name: 'Em produção', color: '#3b82f6' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17003', name: 'Manuseio', color: '#a855f7' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17004', name: 'Em revisão', color: '#eab308' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17005', name: 'Expedição', color: '#f97316' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17006', name: 'Concluído', color: '#10b981' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17007', name: 'Estoque', color: '#14b8a6' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17008', name: 'Atrasado', color: '#ef4444' }
-      ];
-      const stage = mockStages.find(s => s.id === order.stage_id) || mockStages.find(s => s.name === order.status) || mockStages[0];
-      return {
-        ...order,
-        customer,
-        product,
-        stage
-      };
-    });
-    ordersWithJoins.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    return { data: ordersWithJoins, error: null };
-  }
   
   const selectQuery = [
     'id', 'tenant_id', 'order_number', 'pv_number', 'op_number', 'art_name', 'seller_name',
@@ -46,40 +21,10 @@ export async function getOrders(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0
     .select(selectQuery)
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
-  return { data, error };
+  return { data: (data as any[] | null), error };
 }
 
 export async function createOrder(order: any) {
-  const newOrder = {
-    id: order.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
-    tenant_id: order.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_number: mockOrders.length + 1001,
-    created_at: new Date().toISOString(),
-    ...order
-  };
-  
-  if (isMockMode) {
-    mockOrders.unshift(newOrder);
-    const product = mockProducts.find(p => p.id === newOrder.product_id);
-    const amount = (product ? product.price * newOrder.print_run : 0) + newOrder.freight_value;
-    const customer = mockCustomers.find(c => c.id === newOrder.customer_id);
-    
-    const newFin = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      tenant_id: newOrder.tenant_id,
-      order_id: newOrder.id,
-      type: 'RECEITA',
-      amount,
-      status: 'PENDENTE',
-      description: `Venda ${customer ? customer.name : 'Cliente'} #${newOrder.order_number}`,
-      due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      payment_date: null,
-      created_at: new Date().toISOString()
-    };
-    mockFinancial.unshift(newFin);
-    await enqueueSync(newOrder.tenant_id, 'ORDER', newOrder.id, 'CREATE');
-    return { data: newOrder, error: null };
-  }
   
   let orderToInsert = { ...order };
   if (!orderToInsert.product_id) {
@@ -128,26 +73,11 @@ export async function createOrder(order: any) {
       description: `Venda ${cust ? cust.name : 'Cliente'} #${data.order_number}`,
       due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     }]);
-    
-    await enqueueSync(data.tenant_id, 'ORDER', data.id, 'CREATE');
   }
   return { data, error };
 }
 
 export async function updateOrder(id: string, updates: any) {
-  if (isMockMode) {
-    const updatedMocks = mockOrders.map(o => o.id === id ? { ...o, ...updates } : o);
-    setMockOrders(updatedMocks);
-    const updated = mockOrders.find(o => o.id === id);
-    if (updated) {
-      if (updates.status === 'Pago') {
-        const updatedFinancialMocks = mockFinancial.map(f => f.order_id === id ? { ...f, status: 'CONCILIADO', payment_date: new Date().toISOString().split('T')[0] } : f);
-        setMockFinancial(updatedFinancialMocks);
-      }
-      await enqueueSync(updated.tenant_id, 'ORDER', id, 'UPDATE');
-    }
-    return { data: updated, error: null };
-  }
   
   const { data, error } = await getDbClient().from('orders').update(updates).eq('id', id).select().single();
   if (!error && data) {
@@ -157,18 +87,11 @@ export async function updateOrder(id: string, updates: any) {
         .update({ status: 'CONCILIADO', payment_date: new Date().toISOString().split('T')[0] })
         .eq('order_id', id);
     }
-    await enqueueSync(data.tenant_id, 'ORDER', data.id, 'UPDATE');
   }
   return { data, error };
 }
 
 export async function deleteOrder(id: string) {
-  if (isMockMode) {
-    const updatedMocks = mockOrders.filter(o => o.id !== id);
-    setMockOrders(updatedMocks);
-    mockOrderItems = mockOrderItems.filter(i => i.order_id !== id);
-    return { data: null, error: null };
-  }
 
   // Deleta itens do pedido
   await getDbClient().from('order_items').delete().eq('order_id', id);
@@ -181,19 +104,6 @@ export async function deleteOrder(id: string) {
 
 // Etapas do Kanban
 export async function getOrderStages(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const mockStages = [
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17001', tenant_id: tenantId, name: 'A produzir', color: '#94a3b8', sequence: 1 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17002', tenant_id: tenantId, name: 'Em produção', color: '#3b82f6', sequence: 2 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17003', tenant_id: tenantId, name: 'Manuseio', color: '#a855f7', sequence: 3 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17004', tenant_id: tenantId, name: 'Em revisão', color: '#eab308', sequence: 4 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17005', tenant_id: tenantId, name: 'Expedição', color: '#f97316', sequence: 5 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17006', tenant_id: tenantId, name: 'Concluído', color: '#10b981', sequence: 6 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17007', tenant_id: tenantId, name: 'Estoque', color: '#14b8a6', sequence: 7 },
-      { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17008', tenant_id: tenantId, name: 'Atrasado', color: '#ef4444', sequence: 8 }
-    ];
-    return { data: mockStages, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_stages')
     .select('*')
@@ -203,9 +113,6 @@ export async function getOrderStages(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4f
 }
 
 export async function createOrderStage(stage: any) {
-  if (isMockMode) {
-    return { data: { id: Math.random().toString(), ...stage }, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_stages')
     .insert([stage])
@@ -215,9 +122,6 @@ export async function createOrderStage(stage: any) {
 }
 
 export async function updateOrderStage(id: string, updates: any) {
-  if (isMockMode) {
-    return { data: { id, ...updates }, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_stages')
     .update(updates)
@@ -228,9 +132,6 @@ export async function updateOrderStage(id: string, updates: any) {
 }
 
 export async function deleteOrderStage(id: string) {
-  if (isMockMode) {
-    return { data: null, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_stages')
     .delete()
@@ -241,8 +142,6 @@ export async function deleteOrderStage(id: string) {
 }
 
 // Permissões por Perfil
-
-
 
 // --- ITENS DE PEDIDO (ORDER ITEMS) ---
 
@@ -284,130 +183,7 @@ export interface OrderItem {
   stage?: any;
 }
 
-let mockOrderItems: any[] = [
-  {
-    id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    product_id: '800184c8-3e4b-4b14-87cf-45ef42d17c01',
-    item_type: 'PRODUTO',
-    name: 'Caixa Kraft para Bombom (P)',
-    item_index: 1,
-    friendly_id: 'PV-1001/1',
-    measure: '15x10x5 cm',
-    print_run: 5000,
-    boxes_count: 10,
-    packaging_type: 'CAIXA',
-    over_short_quantity: 100,
-    status: 'A produzir',
-    production_sector: 'Impressão',
-    stage_id: 'e00184c8-3e4b-4b14-87cf-45ef42d17001',
-    physical_location: 'Máquina Flexo 1',
-    notes: 'Logo centralizada na tampa.',
-    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i02',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    product_id: null,
-    item_type: 'SERVICO',
-    name: 'Cartão de Fundo Personalizado',
-    item_index: 2,
-    friendly_id: 'PV-1001/2',
-    measure: '14x9 cm',
-    print_run: 5000,
-    boxes_count: 0,
-    packaging_type: 'PACOTE',
-    over_short_quantity: 0,
-    status: 'A produzir',
-    production_sector: 'Impressão',
-    stage_id: 'e00184c8-3e4b-4b14-87cf-45ef42d17001',
-    physical_location: 'Máquina Flexo 1',
-    notes: 'Papel duplex 250g.',
-    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i03',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00284c8-3e4b-4b14-87cf-45ef42d17c02',
-    product_id: '800284c8-3e4b-4b14-87cf-45ef42d17c02',
-    item_type: 'PRODUTO',
-    name: 'Sacola Duplex Branca Premium (M)',
-    item_index: 1,
-    friendly_id: 'PV-1002/1',
-    measure: '25x30x10 cm',
-    print_run: 2000,
-    boxes_count: 4,
-    packaging_type: 'PACOTE',
-    over_short_quantity: 0,
-    status: 'Em revisão',
-    production_sector: 'Corte e Vinco',
-    stage_id: 'e00184c8-3e4b-4b14-87cf-45ef42d17004',
-    physical_location: 'Salão',
-    notes: 'Aguardando aprovação de layout.',
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i04',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00284c8-3e4b-4b14-87cf-45ef42d17c02',
-    product_id: null,
-    item_type: 'SERVICO',
-    name: 'Serviço de Verniz Localizado',
-    item_index: 2,
-    friendly_id: 'PV-1002/2',
-    measure: null,
-    print_run: 2000,
-    boxes_count: 0,
-    packaging_type: 'PACOTE',
-    over_short_quantity: 0,
-    status: 'Em revisão',
-    production_sector: 'Corte e Vinco',
-    stage_id: 'e00184c8-3e4b-4b14-87cf-45ef42d17004',
-    physical_location: 'Salão',
-    notes: 'Aplicar verniz apenas na logo.',
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
-
 export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    let items = mockOrderItems.filter(item => item.tenant_id === tenantId);
-    if (orderId) {
-      items = items.filter(item => item.order_id === orderId);
-    }
-    const itemsWithJoins = items.map(item => {
-      const product = mockProducts.find(p => p.id === item.product_id) || null;
-      const order = mockOrders.find(o => o.id === item.order_id) || null;
-      let customer = null;
-      if (order) {
-        customer = mockCustomers.find(c => c.id === order.customer_id) || null;
-      }
-      const mockStages = [
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17001', name: 'A produzir', color: '#94a3b8' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17002', name: 'Em produção', color: '#3b82f6' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17003', name: 'Manuseio', color: '#a855f7' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17004', name: 'Em revisão', color: '#eab308' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17005', name: 'Expedição', color: '#f97316' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17006', name: 'Concluído', color: '#10b981' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17007', name: 'Estoque', color: '#14b8a6' },
-        { id: 'e00184c8-3e4b-4b14-87cf-45ef42d17008', name: 'Atrasado', color: '#ef4444' }
-      ];
-      const stage = mockStages.find(s => s.id === item.stage_id) || null;
-      return {
-        ...item,
-        product,
-        stage,
-        order: order ? { ...order, customer } : null
-      };
-    });
-    return { data: itemsWithJoins, error: null };
-  }
 
   // Query base com colunas otimizadas para economizar Egress e acelerar carregamento
   const itemFields = [
@@ -455,42 +231,6 @@ export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-
 
 export async function createOrderItem(item: Omit<OrderItem, 'id' | 'item_index' | 'friendly_id' | 'created_at' | 'updated_at'>) {
   const tenantId = item.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  
-  if (isMockMode) {
-    const orderItemsForParent = mockOrderItems.filter(i => i.order_id === item.order_id);
-    const nextIdx = orderItemsForParent.reduce((max, curr) => Math.max(max, curr.item_index), 0) + 1;
-    
-    const parentOrder = mockOrders.find(o => o.id === item.order_id);
-    const pvRef = parentOrder ? (parentOrder.pv_number || `PV-${parentOrder.order_number}`) : 'PV-MOCK';
-    
-    const newItem: OrderItem = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      tenant_id: tenantId,
-      order_id: item.order_id,
-      product_id: item.product_id,
-      item_type: item.item_type,
-      name: item.name,
-      item_index: nextIdx,
-      friendly_id: `${pvRef}/${nextIdx}`,
-      measure: item.measure,
-      print_run: item.print_run,
-      boxes_count: item.boxes_count,
-      packaging_type: item.packaging_type,
-      over_short_quantity: item.over_short_quantity,
-      status: item.status || 'A produzir',
-      production_sector: item.production_sector || 'Impressão',
-      stage_id: item.stage_id,
-      machine_id: (item as any).machine_id || null,
-      handling_team_id: (item as any).handling_team_id || null,
-      physical_location: item.physical_location,
-      notes: item.notes,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    
-    mockOrderItems.push(newItem);
-    return { data: newItem, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_items')
@@ -502,21 +242,6 @@ export async function createOrderItem(item: Omit<OrderItem, 'id' | 'item_index' 
 }
 
 export async function updateOrderItem(id: string, updates: Partial<OrderItem>) {
-  if (isMockMode) {
-    mockOrderItems = mockOrderItems.map(item => {
-      if (item.id === id) {
-        return {
-          ...item,
-          ...updates,
-          updated_at: new Date().toISOString()
-        };
-      }
-      return item;
-    });
-    
-    const updated = mockOrderItems.find(item => item.id === id);
-    return { data: updated, error: null };
-  }
 
   const selectItemFields = [
     'id', 'tenant_id', 'order_id', 'product_id', 'item_type', 'name', 'item_index',
@@ -597,42 +322,6 @@ export async function splitOrderItem(params: SplitOrderItemParams) {
   const part2Boxes = remainingBoxesCount ?? Math.max(1, totalBoxes - part1Boxes);
 
   const nowIso = new Date().toISOString();
-
-  if (isMockMode) {
-    mockOrderItems = mockOrderItems.map(item => {
-      if (item.id === originalItem.id) {
-        return {
-          ...item,
-          friendly_id: part2FriendlyId,
-          print_run: remainingQuantity,
-          boxes_count: part2Boxes,
-          updated_at: nowIso
-        };
-      }
-      return item;
-    });
-
-    const newMockItem: any = {
-      ...originalItem,
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      friendly_id: part1FriendlyId,
-      print_run: advanceQuantity,
-      boxes_count: part1Boxes,
-      stage_id: targetStageId,
-      created_at: nowIso,
-      updated_at: nowIso
-    };
-    mockOrderItems.push(newMockItem);
-
-    const updatedCard2 = mockOrderItems.find(i => i.id === originalItem.id);
-    return {
-      data: {
-        card1: newMockItem,
-        card2: updatedCard2
-      },
-      error: null
-    };
-  }
 
   // 1. Atualiza o card original (Card 2 - Permanece na etapa atual)
   const card2Updates = {
@@ -724,75 +413,6 @@ export async function getCardSplitInfo(itemId: string, tenantId?: string): Promi
   if (!itemId) return { data: null, error: new Error('ID do item é obrigatório.') };
 
   try {
-    if (isMockMode) {
-      const current = mockOrderItems.find(i => i.id === itemId);
-      if (!current) return { data: null, error: new Error('Item não encontrado.') };
-
-      // Se é filho (tem split_from_item_id)
-      if (current.split_from_item_id) {
-        const parent = mockOrderItems.find(i => i.id === current.split_from_item_id);
-        const subChildren = mockOrderItems.filter(i => i.split_from_item_id === current.id);
-        const hasSub = subChildren.length > 0;
-        const totalQty = (parent ? Number(parent.print_run || 0) : 0) + Number(current.print_run || 0);
-        const totalBx = (parent ? Number(parent.boxes_count || 1) : 1) + Number(current.boxes_count || 0);
-        const restoredId = (parent?.friendly_id || current.friendly_id || '').replace(/\.[12]$/, '');
-
-        return {
-          data: {
-            isSplit: true,
-            role: 'child',
-            parentItem: parent || null,
-            childItems: [current],
-            partnerItem: parent || null,
-            canRevert: !hasSub && !!parent,
-            reasonCannotRevert: hasSub ? 'Este card possui subdivisões ativas. Reverta a divisão mais recente primeiro.' : (!parent ? 'Card pai não encontrado.' : undefined),
-            suggestedFriendlyId: restoredId,
-            totalPrintRun: totalQty,
-            totalBoxes: totalBx
-          },
-          error: null
-        };
-      }
-
-      // Se é pai (outros apontam para ele)
-      const children = mockOrderItems.filter(i => i.split_from_item_id === current.id);
-      if (children.length > 0) {
-        const primaryChild = children[0];
-        const subChildren = mockOrderItems.filter(i => i.split_from_item_id === primaryChild.id);
-        const hasSub = subChildren.length > 0;
-        const totalQty = Number(current.print_run || 0) + Number(primaryChild.print_run || 0);
-        const totalBx = Number(current.boxes_count || 1) + Number(primaryChild.boxes_count || 0);
-        const restoredId = (current.friendly_id || '').replace(/\.2$/, '');
-
-        return {
-          data: {
-            isSplit: true,
-            role: 'parent',
-            parentItem: current,
-            childItems: children,
-            partnerItem: primaryChild,
-            canRevert: !hasSub,
-            reasonCannotRevert: hasSub ? 'O card filho possui subdivisões ativas. Reverta a divisão mais recente primeiro.' : undefined,
-            suggestedFriendlyId: restoredId,
-            totalPrintRun: totalQty,
-            totalBoxes: totalBx
-          },
-          error: null
-        };
-      }
-
-      return {
-        data: {
-          isSplit: false,
-          role: 'none',
-          parentItem: null,
-          childItems: [],
-          partnerItem: null,
-          canRevert: false
-        },
-        error: null
-      };
-    }
 
     // Modo Banco de Dados Real (Supabase)
     const { data: current, error: curErr } = await getDbClient()
@@ -1013,38 +633,6 @@ export async function revertSplitOrderItem(params: RevertSplitOrderItemParams) {
 
   const finalStageId = targetStageId || parent.stage_id;
 
-  if (isMockMode) {
-    // 1. Atualiza o pai no mock
-    mockOrderItems = mockOrderItems.map(item => {
-      if (item.id === parent.id) {
-        return {
-          ...item,
-          friendly_id: restoredFriendlyId,
-          print_run: totalPrintRun,
-          boxes_count: totalBoxes,
-          stage_id: finalStageId,
-          notes: cleanedNotes,
-          split_at: null,
-          split_by_user_id: null,
-          updated_at: nowIso
-        };
-      }
-      return item;
-    });
-
-    // 2. Remove o filho do mock
-    mockOrderItems = mockOrderItems.filter(item => item.id !== child.id);
-
-    const updatedParentMock = mockOrderItems.find(item => item.id === parent.id);
-    return {
-      data: {
-        reunifiedCard: updatedParentMock,
-        deletedCardId: child.id
-      },
-      error: null
-    };
-  }
-
   // 1. Checa se o pai possui outros filhos além deste
   const { data: otherChildren } = await getDbClient()
     .from('order_items')
@@ -1116,21 +704,6 @@ export async function revertSplitOrderItem(params: RevertSplitOrderItemParams) {
 
 export async function getPendingAdjustment(tenantId: string, customerId: string, productId: string | null) {
   if (!customerId || !productId) return { data: null, error: null };
-  
-  if (isMockMode) {
-    const pendingMock = mockOrderItems.find((item: any) => {
-      const order = mockOrders.find(o => o.id === item.order_id);
-      return (
-        order &&
-        order.customer_id === customerId &&
-        item.product_id === productId &&
-        item.status === 'Concluído' &&
-        item.adjustment_resolved !== true &&
-        ((item.shortage_quantity && item.shortage_quantity > 0) || (item.courtesy_quantity && item.courtesy_quantity > 0))
-      );
-    });
-    return { data: pendingMock || null, error: null };
-  }
 
   // Puxar itens com RLS e join do orders
   const { data, error } = await getDbClient()
@@ -1156,20 +729,6 @@ export async function getPendingAdjustment(tenantId: string, customerId: string,
 }
 
 export async function resolvePendingAdjustment(pendingItemId: string, resolvingItemId: string) {
-  if (isMockMode) {
-    mockOrderItems = mockOrderItems.map((item: any) => {
-      if (item.id === pendingItemId) {
-        return {
-          ...item,
-          adjustment_resolved: true,
-          resolved_by_item_id: resolvingItemId,
-          updated_at: new Date().toISOString()
-        };
-      }
-      return item;
-    });
-    return { success: true, error: null };
-  }
 
   const { error } = await getDbClient()
     .from('order_items')
@@ -1184,12 +743,6 @@ export async function resolvePendingAdjustment(pendingItemId: string, resolvingI
 }
 
 export async function deleteOrderItem(id: string) {
-  if (isMockMode) {
-    const exists = mockOrderItems.some(item => item.id === id);
-    if (!exists) return { data: null, error: { message: 'Item não encontrado.' } as any };
-    mockOrderItems = mockOrderItems.filter(item => item.id !== id);
-    return { data: null, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_items')
@@ -1255,98 +808,9 @@ export interface CustomerStockCredit {
   source_order?: any;
 }
 
-let mockCustomerProductStock: CustomerProductStock[] = [
-  {
-    id: 's00184c8-3e4b-4b14-87cf-45ef42d17s01',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    customer_id: 'c00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    product_id: '800184c8-3e4b-4b14-87cf-45ef42d17c01',
-    quantity: 150,
-    created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
-
-let mockOrderBalanceAdjustments: OrderBalanceAdjustment[] = [
-  {
-    id: 'adj-1',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    customer_id: 'c00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    product_id: '800184c8-3e4b-4b14-87cf-45ef42d17c01',
-    ordered_quantity: 5000,
-    produced_quantity: 7000,
-    difference_quantity: 2000,
-    adjustment_type: 'SOBRA',
-    action_taken: 'GUARDAR_ESTOQUE_CLIENTE',
-    notes: '2.000 sacos produzidos a mais. Guardados no estoque físico para o cliente Gourmet Brasil.',
-    created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'adj-2',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00284c8-3e4b-4b14-87cf-45ef42d17c02',
-    order_item_id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i03',
-    customer_id: 'c00284c8-3e4b-4b14-87cf-45ef42d17c02',
-    product_id: '800284c8-3e4b-4b14-87cf-45ef42d17c02',
-    ordered_quantity: 2000,
-    produced_quantity: 1850,
-    difference_quantity: -150,
-    adjustment_type: 'FALTA',
-    action_taken: 'CREDITO_PROXIMO_PEDIDO',
-    notes: 'Falta de 150 unidades. Convertido em crédito para a Quinta do Marquês usar na próxima compra.',
-    created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'adj-3',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00384c8-3e4b-4b14-87cf-45ef42d17c03',
-    order_item_id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i03',
-    customer_id: 'c00384c8-3e4b-4b14-87cf-45ef42d17c03',
-    product_id: '800384c8-3e4b-4b14-87cf-45ef42d17c03',
-    ordered_quantity: 1000,
-    produced_quantity: 1100,
-    difference_quantity: 100,
-    adjustment_type: 'SOBRA',
-    action_taken: 'COBRADO_ADICIONAL',
-    notes: 'Excedente de 100 unidades cobrado como adicional na fatura.',
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
-let mockCustomerStockCredits: CustomerStockCredit[] = [
-  {
-    id: 'cr0184c8-3e4b-4b14-87cf-45ef42d17cr1',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    customer_id: 'c00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    product_id: '800184c8-3e4b-4b14-87cf-45ef42d17c01',
-    credit_type: 'CORTESIA_SOBRA',
-    original_quantity: 150,
-    remaining_quantity: 150,
-    source_order_id: 'a00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    source_adjustment_id: null,
-    status: 'ATIVO',
-    notes: 'Sobra gerada no PV-1001 e mantida na fábrica para a padaria/empresa Gourmet.',
-    created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
-
 // --- OPERAÇÕES: ESTOQUE PERSONALIZADO POR CLIENTE ---
 
 export async function getCustomerProductStock(customerId?: string, productId?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    let filtered = mockCustomerProductStock.filter(s => s.tenant_id === tenantId);
-    if (customerId) filtered = filtered.filter(s => s.customer_id === customerId);
-    if (productId) filtered = filtered.filter(s => s.product_id === productId);
-    
-    const withJoins = filtered.map(s => ({
-      ...s,
-      customer: mockCustomers.find(c => c.id === s.customer_id) || null,
-      product: mockProducts.find(p => p.id === s.product_id) || null
-    }));
-    return { data: withJoins, error: null };
-  }
 
   let query = getDbClient()
     .from('customer_product_stock')
@@ -1362,25 +826,6 @@ export async function getCustomerProductStock(customerId?: string, productId?: s
 
 export async function createCustomerProductStock(stock: Omit<CustomerProductStock, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = stock.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const existingIdx = mockCustomerProductStock.findIndex(s => s.customer_id === stock.customer_id && s.product_id === stock.product_id);
-    if (existingIdx !== -1) {
-      mockCustomerProductStock[existingIdx].quantity += stock.quantity;
-      mockCustomerProductStock[existingIdx].updated_at = new Date().toISOString();
-      return { data: mockCustomerProductStock[existingIdx], error: null };
-    }
-    const newStock: CustomerProductStock = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      tenant_id: tenantId,
-      customer_id: stock.customer_id,
-      product_id: stock.product_id,
-      quantity: stock.quantity,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockCustomerProductStock.push(newStock);
-    return { data: newStock, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('customer_product_stock')
@@ -1392,11 +837,6 @@ export async function createCustomerProductStock(stock: Omit<CustomerProductStoc
 }
 
 export async function updateCustomerProductStock(id: string, updates: Partial<CustomerProductStock>) {
-  if (isMockMode) {
-    mockCustomerProductStock = mockCustomerProductStock.map(s => s.id === id ? { ...s, ...updates, updated_at: new Date().toISOString() } : s);
-    const updated = mockCustomerProductStock.find(s => s.id === id);
-    return { data: updated, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('customer_product_stock')
@@ -1411,18 +851,6 @@ export async function updateCustomerProductStock(id: string, updates: Partial<Cu
 // --- OPERAÇÕES: AJUSTES DE SALDO (SOBRAS E FALTAS) ---
 
 export async function getOrderBalanceAdjustments(orderId?: string, customerId?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    let filtered = mockOrderBalanceAdjustments.filter(a => a.tenant_id === tenantId);
-    if (orderId) filtered = filtered.filter(a => a.order_id === orderId);
-    if (customerId) filtered = filtered.filter(a => a.customer_id === customerId);
-    const withJoins = filtered.map(a => ({
-      ...a,
-      order: mockOrders.find(o => o.id === a.order_id) || null,
-      customer: mockCustomers.find(c => c.id === a.customer_id) || null,
-      product: mockProducts.find(p => p.id === a.product_id) || null
-    }));
-    return { data: withJoins, error: null };
-  }
 
   let query = getDbClient()
     .from('order_balance_adjustments')
@@ -1438,53 +866,6 @@ export async function getOrderBalanceAdjustments(orderId?: string, customerId?: 
 
 export async function createOrderBalanceAdjustment(adjustment: Omit<OrderBalanceAdjustment, 'id' | 'created_at'>) {
   const tenantId = adjustment.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  
-  if (isMockMode) {
-    const newAdj: OrderBalanceAdjustment = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...adjustment,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString()
-    };
-    mockOrderBalanceAdjustments.push(newAdj);
-
-    if (adjustment.action_taken === 'GUARDAR_ESTOQUE_CLIENTE' && adjustment.difference_quantity > 0) {
-      await createCustomerProductStock({
-        tenant_id: tenantId,
-        customer_id: adjustment.customer_id,
-        product_id: adjustment.product_id,
-        quantity: adjustment.difference_quantity
-      });
-      const customerName = mockCustomers.find(c => c.id === adjustment.customer_id)?.name || 'Cliente';
-      const orderNum = mockOrders.find(o => o.id === adjustment.order_id)?.order_number || 'PV';
-      await adjustStock(
-        adjustment.product_id,
-        adjustment.difference_quantity,
-        'ENTRADA',
-        `[ESTOQUE_CLIENTE] Entrada de Sobra - Cliente: ${customerName} - PV: ${orderNum}`,
-        tenantId
-      );
-    }
-
-    if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(adjustment.action_taken)) {
-      const type = adjustment.difference_quantity > 0 ? 'CORTESIA_SOBRA' : 'PENDENCIA_ENTREGA';
-      const qty = Math.abs(adjustment.difference_quantity);
-      await createCustomerStockCredit({
-        tenant_id: tenantId,
-        customer_id: adjustment.customer_id,
-        product_id: adjustment.product_id,
-        credit_type: type,
-        original_quantity: qty,
-        remaining_quantity: qty,
-        source_order_id: adjustment.order_id,
-        source_adjustment_id: newAdj.id,
-        status: 'ATIVO',
-        notes: adjustment.notes
-      });
-    }
-
-    return { data: newAdj, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_balance_adjustments')
@@ -1536,18 +917,6 @@ export async function createOrderBalanceAdjustment(adjustment: Omit<OrderBalance
 // --- OPERAÇÕES: CRÉDITOS E PENDÊNCIAS DE ESTOQUE ---
 
 export async function getCustomerStockCredits(customerId?: string, status?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    let filtered = mockCustomerStockCredits.filter(c => c.tenant_id === tenantId);
-    if (customerId) filtered = filtered.filter(c => c.customer_id === customerId);
-    if (status) filtered = filtered.filter(c => c.status === status);
-    const withJoins = filtered.map(c => ({
-      ...c,
-      customer: mockCustomers.find(cust => cust.id === c.customer_id) || null,
-      product: mockProducts.find(p => p.id === c.product_id) || null,
-      source_order: mockOrders.find(o => o.id === c.source_order_id) || null
-    }));
-    return { data: withJoins, error: null };
-  }
 
   let query = getDbClient()
     .from('customer_stock_credits')
@@ -1563,18 +932,6 @@ export async function getCustomerStockCredits(customerId?: string, status?: stri
 
 export async function createCustomerStockCredit(credit: Omit<CustomerStockCredit, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = credit.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  
-  if (isMockMode) {
-    const newCredit: CustomerStockCredit = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...credit,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockCustomerStockCredits.push(newCredit);
-    return { data: newCredit, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('customer_stock_credits')
@@ -1586,11 +943,6 @@ export async function createCustomerStockCredit(credit: Omit<CustomerStockCredit
 }
 
 export async function updateCustomerStockCredit(id: string, updates: Partial<CustomerStockCredit>) {
-  if (isMockMode) {
-    mockCustomerStockCredits = mockCustomerStockCredits.map(c => c.id === id ? { ...c, ...updates, updated_at: new Date().toISOString() } : c);
-    const updated = mockCustomerStockCredits.find(c => c.id === id);
-    return { data: updated, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('customer_stock_credits')
@@ -1623,53 +975,7 @@ export interface OrderIncident {
   resolver?: any;
 }
 
-let mockOrderIncidents: OrderIncident[] = [
-  {
-    id: 'in0184c8-3e4b-4b14-87cf-45ef42d17in1',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    category: 'FINANCEIRO',
-    description: 'Produção iniciada antes da confirmação do sinal financeiro pelo setor financeiro.',
-    status: 'RESOLVIDO',
-    created_by: 'e00284c8-3e4b-4b14-87cf-45ef42d17c02',
-    resolved_by: 'e00184c8-3e4b-4b14-87cf-45ef42d17c01',
-    created_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-    resolved_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'in0184c8-3e4b-4b14-87cf-45ef42d17in2',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_id: 'a00584c8-3e4b-4b14-87cf-45ef42d17c05',
-    order_item_id: null,
-    category: 'TRANSPORTE',
-    description: 'Pedido enviado para cidade de destino errada (coletor leu etiqueta incorreta na triagem).',
-    status: 'ABERTO',
-    created_by: 'e00384c8-3e4b-4b14-87cf-45ef42d17c03',
-    resolved_by: null,
-    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    resolved_at: null,
-    updated_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
-
 export async function getOrderIncidents(orderId?: string, category?: string, status?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    let filtered = mockOrderIncidents.filter(inc => inc.tenant_id === tenantId);
-    if (orderId) filtered = filtered.filter(inc => inc.order_id === orderId);
-    if (category) filtered = filtered.filter(inc => inc.category === category);
-    if (status) filtered = filtered.filter(inc => inc.status === status);
-    
-    const withJoins = filtered.map(inc => ({
-      ...inc,
-      order: mockOrders.find(o => o.id === inc.order_id) || null,
-      order_item: mockOrderItems.find(item => item.id === inc.order_item_id) || null,
-      creator: mockProfiles.find(p => p.id === inc.created_by) || null,
-      resolver: mockProfiles.find(p => p.id === inc.resolved_by) || null
-    }));
-    return { data: withJoins, error: null };
-  }
 
   let query = getDbClient()
     .from('order_incidents')
@@ -1686,19 +992,6 @@ export async function getOrderIncidents(orderId?: string, category?: string, sta
 
 export async function createOrderIncident(incident: Omit<OrderIncident, 'id' | 'created_at' | 'resolved_at' | 'updated_at'>) {
   const tenantId = incident.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  
-  if (isMockMode) {
-    const newInc: OrderIncident = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...incident,
-      tenant_id: tenantId,
-      resolved_at: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockOrderIncidents.push(newInc);
-    return { data: newInc, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_incidents')
@@ -1710,22 +1003,6 @@ export async function createOrderIncident(incident: Omit<OrderIncident, 'id' | '
 }
 
 export async function resolveOrderIncident(id: string, resolvedBy: string, status: 'RESOLVIDO' = 'RESOLVIDO') {
-  if (isMockMode) {
-    mockOrderIncidents = mockOrderIncidents.map(inc => {
-      if (inc.id === id) {
-        return {
-          ...inc,
-          status,
-          resolved_by: resolvedBy,
-          resolved_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-      }
-      return inc;
-    });
-    const updated = mockOrderIncidents.find(inc => inc.id === id);
-    return { data: updated, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_incidents')
@@ -1743,20 +1020,6 @@ export async function resolveOrderIncident(id: string, resolvedBy: string, statu
 }
 
 export async function updateOrderIncident(id: string, updates: Partial<OrderIncident>) {
-  if (isMockMode) {
-    mockOrderIncidents = mockOrderIncidents.map(inc => {
-      if (inc.id === id) {
-        return {
-          ...inc,
-          ...updates,
-          updated_at: new Date().toISOString()
-        };
-      }
-      return inc;
-    });
-    const updated = mockOrderIncidents.find(inc => inc.id === id);
-    return { data: updated, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_incidents')
@@ -1801,133 +1064,7 @@ export interface ProductionSector {
   updated_at: string;
 }
 
-let mockProductionSectors: ProductionSector[] = [
-  { id: 'sec-1', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Impressão', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-2', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Corte e Vinco', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-3', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Colagem', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-4', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Guilhotina', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-5', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Manuseio', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-6', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Expedição', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-7', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Concluído', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'sec-8', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Estoque', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
-let mockProductionMachines: ProductionMachine[] = [
-  { id: 'mach-1', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Impressora Offset Heidel', sector: 'Impressão', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'mach-2', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Corte e Vinco Bobst', sector: 'Corte e Vinco', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'mach-3', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Guilhotina Rotalina A', sector: 'Corte e Vinco', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
-let mockOrderItemSectorHistory: OrderItemSectorHistory[] = [
-  {
-    id: 'h-1',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    sector: 'Impressão',
-    machine_id: 'mach-1',
-    entered_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-2',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    sector: 'Corte e Vinco',
-    machine_id: 'mach-2',
-    entered_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-3',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    sector: 'Manuseio',
-    machine_id: null,
-    entered_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-4',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i01',
-    sector: 'Expedição',
-    machine_id: null,
-    entered_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: null,
-    created_at: new Date().toISOString()
-  },
-  // Outro item do PV 1
-  {
-    id: 'h-5',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i02',
-    sector: 'Impressão',
-    machine_id: 'mach-1',
-    entered_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 3.5 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-6',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i02',
-    sector: 'Corte e Vinco',
-    machine_id: 'mach-3',
-    entered_at: new Date(Date.now() - 3.5 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-7',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00184c8-3e4b-4b14-87cf-45ef42d17i02',
-    sector: 'Colagem',
-    machine_id: null,
-    entered_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: null,
-    created_at: new Date().toISOString()
-  },
-  // Item 3 (PV-1002/1)
-  {
-    id: 'h-8',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i03',
-    sector: 'Impressão',
-    machine_id: 'mach-1',
-    entered_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-9',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i03',
-    sector: 'Atrasado',
-    machine_id: null,
-    entered_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'h-10',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    order_item_id: 'i00284c8-3e4b-4b14-87cf-45ef42d17i03',
-    sector: 'Colagem',
-    machine_id: null,
-    entered_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    exited_at: null,
-    created_at: new Date().toISOString()
-  }
-];
-
 export async function getProductionMachines(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockProductionMachines.filter(m => m.tenant_id === tenantId);
-    return { data: list, error: null };
-  }
 
   // Se executado no cliente, chama a rota de API do servidor para pular RLS de máquinas
   if (typeof window !== 'undefined') {
@@ -1953,17 +1090,6 @@ export async function getProductionMachines(tenantId = 'd3b07384-d113-4ec8-a5c6-
 
 export async function createProductionMachine(machine: Omit<ProductionMachine, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = machine.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const newMac: ProductionMachine = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...machine,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockProductionMachines.push(newMac);
-    return { data: newMac, error: null };
-  }
 
   if (typeof window !== 'undefined') {
     try {
@@ -1989,11 +1115,6 @@ export async function createProductionMachine(machine: Omit<ProductionMachine, '
 }
 
 export async function updateProductionMachine(id: string, updates: Partial<ProductionMachine>) {
-  if (isMockMode) {
-    mockProductionMachines = mockProductionMachines.map(m => m.id === id ? { ...m, ...updates, updated_at: new Date().toISOString() } : m);
-    const updated = mockProductionMachines.find(m => m.id === id);
-    return { data: updated, error: null };
-  }
 
   if (typeof window !== 'undefined') {
     try {
@@ -2020,10 +1141,6 @@ export async function updateProductionMachine(id: string, updates: Partial<Produ
 }
 
 export async function deleteProductionMachine(id: string) {
-  if (isMockMode) {
-    mockProductionMachines = mockProductionMachines.filter(m => m.id !== id);
-    return { data: true, error: null };
-  }
 
   if (typeof window !== 'undefined') {
     try {
@@ -2046,10 +1163,6 @@ export async function deleteProductionMachine(id: string) {
 }
 
 export async function getProductionSectors(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockProductionSectors.filter(s => s.tenant_id === tenantId);
-    return { data: list, error: null };
-  }
 
   // Se executado no cliente, chama a rota de API do servidor para pular RLS de setores
   if (typeof window !== 'undefined') {
@@ -2075,17 +1188,6 @@ export async function getProductionSectors(tenantId = 'd3b07384-d113-4ec8-a5c6-e
 
 export async function createProductionSector(sector: Omit<ProductionSector, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = sector.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const newSec: ProductionSector = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...sector,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockProductionSectors.push(newSec);
-    return { data: newSec, error: null };
-  }
 
   if (typeof window !== 'undefined') {
     try {
@@ -2111,11 +1213,6 @@ export async function createProductionSector(sector: Omit<ProductionSector, 'id'
 }
 
 export async function updateProductionSector(id: string, updates: Partial<ProductionSector>) {
-  if (isMockMode) {
-    mockProductionSectors = mockProductionSectors.map(s => s.id === id ? { ...s, ...updates, updated_at: new Date().toISOString() } : s);
-    const updated = mockProductionSectors.find(s => s.id === id);
-    return { data: updated, error: null };
-  }
 
   if (typeof window !== 'undefined') {
     try {
@@ -2142,10 +1239,6 @@ export async function updateProductionSector(id: string, updates: Partial<Produc
 }
 
 export async function deleteProductionSector(id: string) {
-  if (isMockMode) {
-    mockProductionSectors = mockProductionSectors.filter(s => s.id !== id);
-    return { data: true, error: null };
-  }
 
   if (typeof window !== 'undefined') {
     try {
@@ -2168,15 +1261,6 @@ export async function deleteProductionSector(id: string) {
 }
 
 export async function getOrderItemSectorHistory(orderItemId: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockOrderItemSectorHistory
-      .filter(h => h.order_item_id === orderItemId && h.tenant_id === tenantId)
-      .map(h => ({
-        ...h,
-        machine: mockProductionMachines.find(m => m.id === h.machine_id) || null
-      }));
-    return { data: list, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_item_sector_history')
     .select('*, machine:production_machines(*), operator:profiles(*)')
@@ -2193,30 +1277,6 @@ export async function logSectorTransition(
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
   operatorId?: string | null
 ) {
-  if (isMockMode) {
-    // 1. Fechar transição aberta anterior
-    mockOrderItemSectorHistory = mockOrderItemSectorHistory.map(h => {
-      if (h.order_item_id === orderItemId && h.exited_at === null) {
-        return { ...h, exited_at: new Date().toISOString() };
-      }
-      return h;
-    });
-
-    // 2. Inserir nova transição
-    const newLog: OrderItemSectorHistory = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      tenant_id: tenantId,
-      order_item_id: orderItemId,
-      sector,
-      machine_id: machineId,
-      entered_at: new Date().toISOString(),
-      exited_at: null,
-      created_at: new Date().toISOString(),
-      operator_id: operatorId || null
-    } as any;
-    mockOrderItemSectorHistory.push(newLog);
-    return { data: newLog, error: null };
-  }
 
   const db = getDbClient();
   
@@ -2257,23 +1317,7 @@ export interface ProductionOperator {
   updated_at: string;
 }
 
-let mockOperators: ProductionOperator[] = [
-  {
-    id: 'op-1',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    name: 'Operador Teste Alfa',
-    pin_hash: '$2a$10$sD8sL5fApe2V6eJb.sLHeOlyb.cQ9Nn9jD6lBskH0bJ/sSg0cKeve', // bcrypt para '1234'
-    password_hash: '$2a$10$sD8sL5fApe2V6eJb.sLHeOlyb.cQ9Nn9jD6lBskH0bJ/sSg0cKeve', // bcrypt para '123456'
-    status: 'ATIVO',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
-];
-
 export async function getOperators(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    return { data: mockOperators.filter(o => o.tenant_id === tenantId), error: null };
-  }
   const { data, error } = await getDbClient()
     .from('profiles')
     .select('id, full_name, email, status, created_at')
@@ -2293,9 +1337,6 @@ export async function getOperators(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff9
 }
 
 export async function getActiveOperators(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    return { data: mockOperators.filter(o => o.tenant_id === tenantId && o.status === 'ATIVO'), error: null };
-  }
   const { data, error } = await getDbClient()
     .from('profiles')
     .select('id, full_name, status')
@@ -2315,16 +1356,6 @@ export async function getActiveOperators(tenantId = 'd3b07384-d113-4ec8-a5c6-e91
 
 export async function createOperator(operator: any) {
   const tenantId = operator.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const newOp = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...operator,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockOperators.push(newOp);
-    return { data: newOp, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('profiles')
     .insert([{ 
@@ -2341,11 +1372,6 @@ export async function createOperator(operator: any) {
 }
 
 export async function updateOperator(id: string, updates: any) {
-  if (isMockMode) {
-    mockOperators = mockOperators.map(o => o.id === id ? { ...o, ...updates, updated_at: new Date().toISOString() } : o);
-    const updated = mockOperators.find(o => o.id === id);
-    return { data: updated, error: null };
-  }
   
   const dbPayload: any = {};
   if (updates.name !== undefined) dbPayload.full_name = updates.name;
@@ -2376,42 +1402,17 @@ export interface HandlingTeam {
   updated_at: string;
 }
 
-let mockHandlingTeams: HandlingTeam[] = [
-  { id: 'team-1', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Equipe João', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'team-2', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Equipe Zé', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'team-3', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Equipe Maria', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
 export async function getHandlingTeams(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockHandlingTeams.filter(t => t.tenant_id === tenantId);
-    return { data: list.length > 0 ? list : mockHandlingTeams, error: null };
-  }
-  try {
-    const { data, error } = await getDbClient()
-      .from('handling_teams')
-      .select('*')
-      .order('name', { ascending: true });
-    if (data && data.length > 0) {
-      return { data, error: null };
-    }
-  } catch (e) {}
-  return { data: mockHandlingTeams, error: null };
+  const { data, error } = await getDbClient()
+    .from('handling_teams')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('name', { ascending: true });
+  return { data: data || [], error };
 }
 
 export async function createHandlingTeam(team: Omit<HandlingTeam, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = team.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const newTeam: HandlingTeam = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...team,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockHandlingTeams.push(newTeam);
-    return { data: newTeam, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('handling_teams')
     .insert([{ ...team, tenant_id: tenantId }])
@@ -2421,11 +1422,6 @@ export async function createHandlingTeam(team: Omit<HandlingTeam, 'id' | 'create
 }
 
 export async function updateHandlingTeam(id: string, updates: Partial<HandlingTeam>) {
-  if (isMockMode) {
-    mockHandlingTeams = mockHandlingTeams.map(t => t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t);
-    const updated = mockHandlingTeams.find(t => t.id === id);
-    return { data: updated, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('handling_teams')
     .update({ ...updates, updated_at: new Date().toISOString() })
@@ -2436,10 +1432,6 @@ export async function updateHandlingTeam(id: string, updates: Partial<HandlingTe
 }
 
 export async function deleteHandlingTeam(id: string) {
-  if (isMockMode) {
-    mockHandlingTeams = mockHandlingTeams.filter(t => t.id !== id);
-    return { data: true, error: null };
-  }
   const { error } = await getDbClient()
     .from('handling_teams')
     .delete()
@@ -2481,27 +1473,27 @@ export const HANDLING_SERVICE_OPTIONS = [
   { key: 'RF', label: 'Reforço de Fundo' },
 ] as const;
 
-let mockOrderItemHandlingTeams: OrderItemHandlingTeam[] = [];
+let handlingTeamsMemoryCache: OrderItemHandlingTeam[] = [];
 const HANDLING_CACHE_KEY = 'samppel_handling_teams_v2';
 
 function loadHandlingCache(): OrderItemHandlingTeam[] {
-  if (typeof window === 'undefined') return mockOrderItemHandlingTeams;
+  if (typeof window === 'undefined') return handlingTeamsMemoryCache;
   try {
     const raw = localStorage.getItem(HANDLING_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        mockOrderItemHandlingTeams = parsed;
+        handlingTeamsMemoryCache = parsed;
       }
     }
   } catch (e) {
     console.warn('Erro ao carregar cache de equipes de manuseio:', e);
   }
-  return mockOrderItemHandlingTeams;
+  return handlingTeamsMemoryCache;
 }
 
 function saveHandlingCache(list: OrderItemHandlingTeam[]) {
-  mockOrderItemHandlingTeams = list;
+  handlingTeamsMemoryCache = list;
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(HANDLING_CACHE_KEY, JSON.stringify(list));
@@ -2513,11 +1505,6 @@ function saveHandlingCache(list: OrderItemHandlingTeam[]) {
 
 export async function getOrderItemHandlingTeams(orderItemId: string) {
   const currentCache = loadHandlingCache();
-
-  if (isMockMode) {
-    const list = currentCache.filter(t => t.order_item_id === orderItemId);
-    return { data: list, error: null };
-  }
 
   try {
     const { data, error } = await getDbClient()
@@ -2537,8 +1524,8 @@ export async function getOrderItemHandlingTeams(orderItemId: string) {
     console.warn('Falha na consulta remota de equipes de manuseio:', err);
   }
 
-  const mockList = currentCache.filter(t => t.order_item_id === orderItemId);
-  return { data: mockList, error: null };
+  const cachedList = currentCache.filter(t => t.order_item_id === orderItemId);
+  return { data: cachedList, error: null };
 }
 
 export async function getOrderItemHandlingTeamsBulk(orderItemIds: string[]) {
@@ -2546,11 +1533,6 @@ export async function getOrderItemHandlingTeamsBulk(orderItemIds: string[]) {
 
   if (!orderItemIds || orderItemIds.length === 0) {
     return { data: currentCache, error: null };
-  }
-
-  if (isMockMode) {
-    const list = currentCache.filter(t => orderItemIds.includes(t.order_item_id));
-    return { data: list, error: null };
   }
 
   try {
@@ -2570,8 +1552,8 @@ export async function getOrderItemHandlingTeamsBulk(orderItemIds: string[]) {
     console.warn('Falha na consulta remota bulk de equipes de manuseio:', err);
   }
 
-  const mockList = currentCache.filter(t => orderItemIds.includes(t.order_item_id));
-  return { data: mockList, error: null };
+  const cachedList = currentCache.filter(t => orderItemIds.includes(t.order_item_id));
+  return { data: cachedList, error: null };
 }
 
 export async function saveOrderItemHandlingTeams(
@@ -2620,7 +1602,7 @@ export async function saveOrderItemHandlingTeams(
   ];
   saveHandlingCache(updatedCache);
 
-  if (isMockMode || validTeams.length === 0) {
+  if (validTeams.length === 0) {
     return { data: newAllocations, error: null };
   }
 
@@ -2762,10 +1744,6 @@ export async function saveHandlingDivergence(
     }
   }
 
-  if (isMockMode) {
-    return { data: newRecord, error: null };
-  }
-
   try {
     const { data, error } = await getDbClient()
       .from('order_item_handling_divergences')
@@ -2791,10 +1769,6 @@ export async function getHandlingDivergencesForItem(orderItemId: string) {
       const raw = localStorage.getItem(HANDLING_DIVERGENCES_CACHE_KEY);
       if (raw) localList = JSON.parse(raw);
     } catch (e) {}
-  }
-
-  if (isMockMode) {
-    return { data: localList.filter(d => d.order_item_id === orderItemId), error: null };
   }
 
   try {
@@ -2827,20 +1801,7 @@ export interface FactoryLocation {
   updated_at: string;
 }
 
-let mockFactoryLocations: FactoryLocation[] = [
-  { id: 'loc-1', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Salão', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'loc-2', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Pátio', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'loc-3', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Máquina Flexo 1', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'loc-4', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Máquina Coladeira 2', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'loc-5', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Prateleira A1', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'loc-6', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Depósito de Materiais', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
 export async function getFactoryLocations(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockFactoryLocations.filter(l => l.tenant_id === tenantId);
-    return { data: list, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('factory_locations')
     .select('*')
@@ -2851,17 +1812,6 @@ export async function getFactoryLocations(tenantId = 'd3b07384-d113-4ec8-a5c6-e9
 
 export async function createFactoryLocation(loc: Omit<FactoryLocation, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = loc.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const newLoc: FactoryLocation = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...loc,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockFactoryLocations.push(newLoc);
-    return { data: newLoc, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('factory_locations')
     .insert([{ ...loc, tenant_id: tenantId }])
@@ -2871,11 +1821,6 @@ export async function createFactoryLocation(loc: Omit<FactoryLocation, 'id' | 'c
 }
 
 export async function updateFactoryLocation(id: string, updates: Partial<FactoryLocation>) {
-  if (isMockMode) {
-    mockFactoryLocations = mockFactoryLocations.map(l => l.id === id ? { ...l, ...updates, updated_at: new Date().toISOString() } : l);
-    const updated = mockFactoryLocations.find(l => l.id === id);
-    return { data: updated, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('factory_locations')
     .update({ ...updates, updated_at: new Date().toISOString() })
@@ -2886,10 +1831,6 @@ export async function updateFactoryLocation(id: string, updates: Partial<Factory
 }
 
 export async function deleteFactoryLocation(id: string) {
-  if (isMockMode) {
-    mockFactoryLocations = mockFactoryLocations.filter(l => l.id !== id);
-    return { data: true, error: null };
-  }
   const { error } = await getDbClient()
     .from('factory_locations')
     .delete()
@@ -2912,104 +1853,37 @@ export interface PackagingMaterialType {
   updated_at: string;
 }
 
-function shouldFallbackToMock(error: any): boolean {
-  if (!error) return false;
-  return (
-    error.code === 'PGRST205' ||
-    error.code === '42P01' ||
-    String(error.message).includes('schema cache') ||
-    String(error.message).includes('does not exist')
-  );
-}
-
-let mockPackagingMaterialTypes: PackagingMaterialType[] = [
-  { id: 'pmt-1', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Caixa de Papelão Corrugado', code: 'CX-001', category: 'CAIXA', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'pmt-2', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Fundo Reforçado Kraft', code: 'FD-001', category: 'FUNDO', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'pmt-3', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Divisória Interna', code: 'DV-001', category: 'DIVISORIA', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-];
-
 export async function getPackagingMaterialTypes(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    return { data: mockPackagingMaterialTypes.filter(t => t.tenant_id === tenantId), error: null };
-  }
   const { data, error } = await getDbClient()
     .from('packaging_material_types')
     .select('*')
     .eq('tenant_id', tenantId)
     .order('name', { ascending: true });
-
-  if (error && shouldFallbackToMock(error)) {
-    return { data: mockPackagingMaterialTypes.filter(t => t.tenant_id === tenantId), error: null };
-  }
   return { data, error };
 }
 
 export async function createPackagingMaterialType(item: Omit<PackagingMaterialType, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = item.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    const newItem: PackagingMaterialType = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-      ...item,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockPackagingMaterialTypes.push(newItem);
-    return { data: newItem, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('packaging_material_types')
     .insert([{ ...item, tenant_id: tenantId }])
     .select()
     .single();
-
-  if (error && shouldFallbackToMock(error)) {
-    const newItem: PackagingMaterialType = {
-      id: Math.random().toString(36).substring(2),
-      ...item,
-      tenant_id: tenantId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockPackagingMaterialTypes.push(newItem);
-    return { data: newItem, error: null };
-  }
   return { data, error };
 }
 
 export async function updatePackagingMaterialType(id: string, updates: Partial<PackagingMaterialType>) {
-  if (isMockMode) {
-    mockPackagingMaterialTypes = mockPackagingMaterialTypes.map(t =>
-      t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t
-    );
-    return { data: mockPackagingMaterialTypes.find(t => t.id === id), error: null };
-  }
   const { data, error } = await getDbClient()
     .from('packaging_material_types')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select()
     .single();
-
-  if (error && shouldFallbackToMock(error)) {
-    mockPackagingMaterialTypes = mockPackagingMaterialTypes.map(t =>
-      t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t
-    );
-    return { data: mockPackagingMaterialTypes.find(t => t.id === id), error: null };
-  }
   return { data, error };
 }
 
 export async function deletePackagingMaterialType(id: string) {
-  if (isMockMode) {
-    mockPackagingMaterialTypes = mockPackagingMaterialTypes.filter(t => t.id !== id);
-    return { data: true, error: null };
-  }
   const { error } = await getDbClient().from('packaging_material_types').delete().eq('id', id);
-  if (error && shouldFallbackToMock(error)) {
-    mockPackagingMaterialTypes = mockPackagingMaterialTypes.filter(t => t.id !== id);
-    return { data: true, error: null };
-  }
   return { data: !error, error };
 }
 
@@ -3038,30 +1912,12 @@ export interface OrderItemPackaging {
   material_type?: PackagingMaterialType | null;
 }
 
-let mockOrderItemPackaging: OrderItemPackaging[] = [];
-
 export async function getOrderItemPackaging(orderItemId: string) {
-  if (isMockMode) {
-    const records = mockOrderItemPackaging.filter(p => p.order_item_id === orderItemId);
-    // Join mock material type
-    records.forEach(r => {
-      r.material_type = mockPackagingMaterialTypes.find(t => t.id === r.packaging_material_type_id) || null;
-    });
-    return { data: records, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_item_packaging')
     .select('*, material_type:packaging_material_types(*)')
     .eq('order_item_id', orderItemId)
     .order('volume_index', { ascending: true });
-
-  if (error && shouldFallbackToMock(error)) {
-    const records = mockOrderItemPackaging.filter(p => p.order_item_id === orderItemId);
-    records.forEach(r => {
-      r.material_type = mockPackagingMaterialTypes.find(t => t.id === r.packaging_material_type_id) || null;
-    });
-    return { data: records, error: null };
-  }
   return { data, error };
 }
 
@@ -3070,28 +1926,14 @@ export async function getOrderItemPackagingBulk(orderItemIds: string[]) {
     return { data: [], error: null };
   }
 
-  if (isMockMode) {
-    const records = mockOrderItemPackaging.filter(p => orderItemIds.includes(p.order_item_id));
-    return { data: records, error: null };
-  }
-
   try {
     const { data, error } = await getDbClient()
       .from('order_item_packaging')
       .select('order_item_id')
       .in('order_item_id', orderItemIds);
 
-    if (error && shouldFallbackToMock(error)) {
-      const records = mockOrderItemPackaging.filter(p => orderItemIds.includes(p.order_item_id));
-      return { data: records, error: null };
-    }
-
     return { data: data || [], error };
   } catch (err: any) {
-    if (shouldFallbackToMock(err)) {
-      const records = mockOrderItemPackaging.filter(p => orderItemIds.includes(p.order_item_id));
-      return { data: records, error: null };
-    }
     return { data: [], error: err };
   }
 }
@@ -3102,23 +1944,6 @@ export async function saveOrderItemPackagingVolumes(
   volumes: Omit<OrderItemPackaging, 'id' | 'created_at' | 'updated_at' | 'material_type'>[],
   registeredBy?: string
 ) {
-  if (isMockMode) {
-    // Remove existing records for this item
-    mockOrderItemPackaging = mockOrderItemPackaging.filter(p => p.order_item_id !== orderItemId);
-    const now = new Date().toISOString();
-    const newRecords: OrderItemPackaging[] = volumes.map((v, i) => ({
-      ...v,
-      id: Math.random().toString(36).substring(2),
-      order_item_id: orderItemId,
-      tenant_id: tenantId,
-      volume_index: i + 1,
-      registered_by: registeredBy || null,
-      created_at: now,
-      updated_at: now
-    }));
-    mockOrderItemPackaging.push(...newRecords);
-    return { data: newRecords, error: null };
-  }
 
   const db = getDbClient();
   try {
@@ -3140,44 +1965,17 @@ export async function saveOrderItemPackagingVolumes(
       .from('order_item_packaging')
       .insert(records)
       .select();
-
-    if (error && shouldFallbackToMock(error)) {
-      throw error; // Let try-catch block handle fallback
-    }
     return { data, error };
   } catch (err: any) {
-    if (shouldFallbackToMock(err)) {
-      mockOrderItemPackaging = mockOrderItemPackaging.filter(p => p.order_item_id !== orderItemId);
-      const now = new Date().toISOString();
-      const newRecords: OrderItemPackaging[] = volumes.map((v, i) => ({
-        ...v,
-        id: Math.random().toString(36).substring(2),
-        order_item_id: orderItemId,
-        tenant_id: tenantId,
-        volume_index: i + 1,
-        registered_by: registeredBy || null,
-        created_at: now,
-        updated_at: now
-      }));
-      mockOrderItemPackaging.push(...newRecords);
-      return { data: newRecords, error: null };
-    }
     throw err;
   }
 }
 
 export async function hasPackagingData(orderItemId: string): Promise<boolean> {
-  if (isMockMode) {
-    return mockOrderItemPackaging.some(p => p.order_item_id === orderItemId);
-  }
   const { count, error } = await getDbClient()
     .from('order_item_packaging')
     .select('id', { count: 'exact', head: true })
     .eq('order_item_id', orderItemId);
-
-  if (error && shouldFallbackToMock(error)) {
-    return mockOrderItemPackaging.some(p => p.order_item_id === orderItemId);
-  }
   return (count || 0) > 0;
 }
 
@@ -3194,47 +1992,13 @@ export interface PackagingSettings {
   updated_at: string;
 }
 
-let mockPackagingSettings: PackagingSettings[] = [
-  {
-    id: 'ps-1',
-    tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
-    keywords: 'caixa,fundo,divisoria,saco,embalagem,pacote',
-    association_rule: 'FIRST_ITEM',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
-];
-
 export async function getPackagingSettings(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const config = mockPackagingSettings.find(s => s.tenant_id === tenantId) || {
-      id: 'ps-temp',
-      tenant_id: tenantId,
-      keywords: 'caixa,fundo,divisoria,saco,embalagem,pacote',
-      association_rule: 'FIRST_ITEM' as const,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    return { data: config, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('packaging_settings')
     .select('*')
     .eq('tenant_id', tenantId)
     .maybeSingle();
-
-  if (error && shouldFallbackToMock(error)) {
-    const config = mockPackagingSettings.find(s => s.tenant_id === tenantId) || {
-      id: 'ps-temp',
-      tenant_id: tenantId,
-      keywords: 'caixa,fundo,divisoria,saco,embalagem,pacote',
-      association_rule: 'FIRST_ITEM' as const,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    return { data: config, error: null };
-  }
 
   // Se nao encontrar registro, retorna um padrao inicial sem erro
   if (!data && !error) {
@@ -3254,25 +2018,6 @@ export async function getPackagingSettings(tenantId = 'd3b07384-d113-4ec8-a5c6-e
 
 export async function savePackagingSettings(item: Omit<PackagingSettings, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = item.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
-  if (isMockMode) {
-    let config = mockPackagingSettings.find(s => s.tenant_id === tenantId);
-    if (config) {
-      config.keywords = item.keywords;
-      config.association_rule = item.association_rule;
-      config.updated_at = new Date().toISOString();
-    } else {
-      config = {
-        id: Math.random().toString(36).substring(2),
-        tenant_id: tenantId,
-        keywords: item.keywords,
-        association_rule: item.association_rule,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      mockPackagingSettings.push(config);
-    }
-    return { data: config, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('packaging_settings')
@@ -3284,26 +2029,6 @@ export async function savePackagingSettings(item: Omit<PackagingSettings, 'id' |
     }, { onConflict: 'tenant_id' })
     .select()
     .single();
-
-  if (error && shouldFallbackToMock(error)) {
-    let config = mockPackagingSettings.find(s => s.tenant_id === tenantId);
-    if (config) {
-      config.keywords = item.keywords;
-      config.association_rule = item.association_rule;
-      config.updated_at = new Date().toISOString();
-    } else {
-      config = {
-        id: Math.random().toString(36).substring(2),
-        tenant_id: tenantId,
-        keywords: item.keywords,
-        association_rule: item.association_rule,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      mockPackagingSettings.push(config);
-    }
-    return { data: config, error: null };
-  }
   return { data, error };
 }
 
@@ -3322,52 +2047,11 @@ export async function getSectorTransitionReport(
   } = {}
 ) {
   let historyData: any[] = [];
-  
-  if (isMockMode) {
-    historyData = [...mockOrderItemSectorHistory].filter(h => h.tenant_id === tenantId);
-  } else {
     const { data, error } = await getDbClient()
       .from('order_item_sector_history')
       .select('*, order_item:order_items(*, order:orders(*, customer:customers(*), product:products(*)), machine:production_machines(*))')
       .eq('tenant_id', tenantId);
-
-    if (error && shouldFallbackToMock(error)) {
-      historyData = [...mockOrderItemSectorHistory].filter(h => h.tenant_id === tenantId);
-    } else {
       historyData = data || [];
-    }
-  }
-
-  // Preencher dados em modo simulação (ou fallback)
-  if (isMockMode || historyData.length === 0 || !historyData[0]?.order_item) {
-    historyData = historyData.map(h => {
-      const orderItem = mockOrderItems.find(oi => oi.id === h.order_item_id) || null;
-      let order: any = null;
-      let customer: any = null;
-      let product: any = null;
-      if (orderItem) {
-        order = mockOrders.find(o => o.id === orderItem.order_id) || null;
-        if (order) {
-          customer = mockCustomers.find(c => c.id === order.customer_id) || null;
-          product = mockProducts.find(p => p.id === order.product_id) || null;
-        }
-      }
-      const machine = mockProductionMachines.find(m => m.id === h.machine_id) || null;
-
-      return {
-        ...h,
-        machine,
-        order_item: orderItem ? {
-          ...orderItem,
-          order: order ? {
-            ...order,
-            customer,
-            product
-          } : null
-        } : null
-      };
-    });
-  }
 
   // Aplicar filtros de pesquisa
   let filtered = historyData;
@@ -3555,17 +2239,7 @@ export interface ShippingTypeConfig {
   updated_at: string;
 }
 
-let mockShippingTypesConfig: ShippingTypeConfig[] = [
-  { id: 'st-01', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Entrega Própria', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'st-02', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Transportadora', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'st-03', tenant_id: 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', name: 'Retirada na Fábrica', status: 'ATIVO', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
 export async function getShippingTypesConfig(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockShippingTypesConfig.filter(s => s.tenant_id === tenantId);
-    return { data: list, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('shipping_types_config')
@@ -3582,17 +2256,6 @@ export async function createShippingTypeConfig(typeConfig: Omit<ShippingTypeConf
     tenant_id: typeConfig.tenant_id || tenantId
   };
 
-  if (isMockMode) {
-    const newConfig: ShippingTypeConfig = {
-      ...payload,
-      id: Math.random().toString(36).substring(2, 9),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    mockShippingTypesConfig.push(newConfig);
-    return { data: newConfig, error: null };
-  }
-
   const { data, error } = await getDbClient()
     .from('shipping_types_config')
     .insert([payload])
@@ -3603,10 +2266,6 @@ export async function createShippingTypeConfig(typeConfig: Omit<ShippingTypeConf
 }
 
 export async function deleteShippingTypeConfig(id: string) {
-  if (isMockMode) {
-    mockShippingTypesConfig = mockShippingTypesConfig.filter(s => s.id !== id);
-    return { error: null };
-  }
 
   const { error } = await getDbClient()
     .from('shipping_types_config')
@@ -3635,13 +2294,7 @@ export interface OrderShippingVolume {
   updated_at?: string;
 }
 
-let mockOrderShippingVolumes: OrderShippingVolume[] = [];
-
 export async function getOrderShippingVolumes(orderId: string) {
-  if (isMockMode) {
-    const list = mockOrderShippingVolumes.filter(v => v.order_id === orderId);
-    return { data: list, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_shipping_volumes')
     .select('*, packaging_type:packaging_material_types(*)')
@@ -3655,17 +2308,6 @@ export async function saveOrderShippingVolumes(
   volumes: Omit<OrderShippingVolume, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>[], 
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
 ) {
-  if (isMockMode) {
-    mockOrderShippingVolumes = mockOrderShippingVolumes.filter(v => v.order_id !== orderId);
-    for (const v of volumes) {
-      mockOrderShippingVolumes.push({
-        id: Math.random().toString(36).substring(2),
-        tenant_id: tenantId,
-        ...v
-      });
-    }
-    return { data: true, error: null };
-  }
 
   // Substituição completa dos volumes do pedido
   await getDbClient()
@@ -3699,9 +2341,6 @@ export async function saveOrderShippingVolumes(
 
 // Histórico de transições de etapas do Kanban
 export async function getOrderItemStageHistory(orderItemId: string) {
-  if (isMockMode) {
-    return { data: [], error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_item_stage_history')
     .select('*, from_stage:from_stage_id(*), to_stage:to_stage_id(*), changed_by:changed_by_profile_id(*)')
@@ -3711,9 +2350,6 @@ export async function getOrderItemStageHistory(orderItemId: string) {
 }
 
 export async function getAllStageHistory(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    return { data: [], error: null };
-  }
   const { data, error } = await getDbClient()
     .from('order_item_stage_history')
     .select('*, from_stage:from_stage_id(*), to_stage:to_stage_id(*), changed_by:changed_by_profile_id(*)')
@@ -3731,9 +2367,6 @@ export async function logNotesTransition(
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
   operatorId?: string | null
 ) {
-  if (isMockMode) {
-    return { data: null, error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_item_notes_history')
@@ -3752,9 +2385,6 @@ export async function logNotesTransition(
 }
 
 export async function getOrderItemNotesHistory(orderItemId: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    return { data: [], error: null };
-  }
 
   const { data, error } = await getDbClient()
     .from('order_item_notes_history')
@@ -3789,15 +2419,7 @@ export interface OrderItemShortage {
   created_at?: string;
 }
 
-let mockShortages: OrderItemShortage[] = [];
-
 export async function getOrderItemShortages(orderId?: string, orderItemId?: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    let res = mockShortages;
-    if (orderId) res = res.filter(s => s.order_id === orderId);
-    if (orderItemId) res = res.filter(s => s.order_item_id === orderItemId);
-    return { data: res, error: null };
-  }
 
   try {
     let query = getDbClient()
@@ -3876,11 +2498,6 @@ export async function saveOrderItemShortage(shortage: Partial<OrderItemShortage>
     created_at: new Date().toISOString()
   };
 
-  if (isMockMode) {
-    mockShortages.push(newShortage);
-    return { data: newShortage, error: null };
-  }
-
   try {
     const { data, error } = await getDbClient()
       .from('order_item_shortages')
@@ -3928,11 +2545,6 @@ export async function resolveOrderItemShortage(
     resolved_at: new Date().toISOString()
   };
 
-  if (isMockMode) {
-    mockShortages = mockShortages.map(s => s.id === shortageId ? { ...s, ...patch } : s);
-    return { data: mockShortages.find(s => s.id === shortageId), error: null };
-  }
-
   try {
     const { data, error } = await getDbClient()
       .from('order_item_shortages')
@@ -3962,6 +2574,4 @@ export async function resolveOrderItemShortage(
     return { data: { id: shortageId, ...patch }, error: null };
   }
 }
-
-
 

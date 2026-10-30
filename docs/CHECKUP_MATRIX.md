@@ -18,20 +18,20 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx` | 2026-10-30 | OK |
-| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-29 | OK |
+| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-30 | OK |
 | **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`) | 2026-10-27 | OK |
 | **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
-| **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-10-21 | OK |
-| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `orders.ts` | 2026-10-23 | OK |
+| **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-10-30 | OK |
+| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `orders.ts` | 2026-10-30 | OK |
 | **MOD-07** | Pedidos: Conferência Física na Expedição | `ConferencyModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
-| **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `orders.ts` | 2026-10-23 | OK |
-| **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `orders.ts` | 2026-10-18 | OK |
-| **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-10-17 | OK |
-| **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-10-17 | OK |
-| **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx` | 2026-10-15 | OK |
+| **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `orders.ts` | 2026-10-30 | OK |
+| **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts`, `orders.ts` | 2026-10-30 | OK |
+| **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-10-30 | OK |
+| **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-10-30 | OK |
+| **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx`, `suppliers.ts` | 2026-10-30 | OK |
 | **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-10-19 | OK |
-| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-10-30 | OK |
-| **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-10-30 | OK |
+| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-10-30 | OK |
+| **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, `sync_queue.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-10-30 | OK |
 | **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql` | 2026-10-30 | OK |
 
 Legenda de Status:
@@ -203,3 +203,4 @@ Legenda de Status:
 | **2026-10-29** | MOD-14, MOD-15 | APROVADO COM ÊXITO | Otimização anti-estouro de cotas Supabase: sincronização incremental rápida a cada 15 minutos (.github/workflows/sync-cron.yml), supressão de logs ruidosos, separação de catálogo diário (03:00) e trava de Page Visibility no monitor de status do banco. Puxar pedido manual (PV) 100% preservado. |
 | **2026-10-29** | MOD-02 | APROVADO COM ÊXITO | Eliminação definitiva do gargalo N+1 em order_item_packaging (de 904 requisições por carregamento de página para 1 única requisição em lote com getOrderItemPackagingBulk). Redução de ~96,7% no tráfego de borda do Supabase. |
 | **2026-10-30** | MOD-01, MOD-14, MOD-15, MOD-16 | APROVADO COM ÊXITO | Implementação da Central de Monitoramento, Telemetria Anti-Estouro e Governança (/monitoramento) exclusiva para junior.8350i@gmail.com, migração oficial do fluxo OAuth 2.0 Conta Azul v2 (login.contaazul.com/#/oauth/authorize e api-v2.contaazul.com/oauth/token + blindagem UUID de state no callback), índices anti-seq-scan em logs e sync_queue, Circuit Breaker OAuth + trava anti-cron duplicado (12 min), correção do cron diário (?mode=full) e busca direta de pedidos por número (termo_busca) sem restrição de data em getSaleIdByNumber. |
+| **2026-10-30** | MOD-01, MOD-02, MOD-05, MOD-06, MOD-08 a MOD-12, MOD-14, MOD-15 | APROVADO COM ÊXITO | Eliminação total de Mocks ativos e camada Sandbox morta (M1-A e M2-A): desativação de push reverso simulado em conta_azul.ts e sync_queue.ts, higienização no banco de 110 pedidos, 81 clientes, 9 produtos com conta_azul_id falso ca_* e 198 logs simulados (com backup JSON prévio), remoção completa de isMockMode/arrays mock*/shouldFallbackToMock em todos os serviços, exclusão de supabase.ts.bak e blindagem requireAdmin + erro HTTP 500 real em /api/config/conta-azul. |

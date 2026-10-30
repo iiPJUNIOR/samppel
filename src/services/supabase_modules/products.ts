@@ -1,4 +1,4 @@
-import { getDbClient, isMockMode, mockProducts, setMockProducts, enqueueSync } from '../supabaseClient';
+import { getDbClient } from '../supabaseClient';
 
 // Produtos & Estoque
 export interface Product {
@@ -73,7 +73,14 @@ function parseProductBindHandling(p: any): boolean {
   return !!p.bind_requires_handling;
 }
 
-function encodeProductDescription(desc: string | null | undefined, category: string | undefined | null, measure: string | undefined, customerId: string | undefined, bindToFirst: boolean | undefined = false, bindHandling: boolean | undefined = false): string {
+function encodeProductDescription(
+  desc: string | null | undefined,
+  category: string | undefined | null,
+  measure: string | undefined,
+  customerId: string | undefined,
+  bindToFirst: boolean | undefined = false,
+  bindHandling: boolean | undefined = false
+): string {
   let cleanDesc = (desc || '')
     .replace(/\s*\[CATEGORIA:\s*[A-Z_]+\]/gi, '')
     .replace(/\s*\[MEDIDA:\s*[^\]]+\]/gi, '')
@@ -106,7 +113,6 @@ function encodeProductDescription(desc: string | null | undefined, category: str
 }
 
 export async function getProducts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) return { data: mockProducts.filter(p => p.tenant_id === tenantId), error: null };
   const { data, error } = await getDbClient().from('products').select('*').eq('tenant_id', tenantId).order('name');
   if (data) {
     const mapped = data.map((p: any) => ({
@@ -144,30 +150,6 @@ export async function getProductsPaginated({
   tab = 'all',
   tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
 }: PaginatedProductsParams) {
-  if (isMockMode) {
-    let list = mockProducts.filter(p => p.tenant_id === tenantId);
-    if (tab === 'lisas') list = list.filter(p => p.category === 'LISAS');
-    else if (tab === 'custom_stocks') list = list.filter(p => p.category === 'PERSONALIZADA');
-    else if (tab === 'compra') list = list.filter(p => p.category === 'COMPRA');
-    else if (tab === 'sem_categoria') list = list.filter(p => !p.category || (p.category !== 'LISAS' && p.category !== 'PERSONALIZADA' && p.category !== 'COMPRA'));
-    
-    if (search) {
-      const s = search.toLowerCase();
-      list = list.filter(p => (p.name || '').toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s));
-    }
-    const totalCount = list.length;
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize;
-    return {
-      data: list.slice(from, to),
-      totalCount,
-      page,
-      pageSize,
-      totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
-      error: null
-    };
-  }
-
   let query = getDbClient()
     .from('products')
     .select('*, customer:customers(id, name, document)', { count: 'exact' })
@@ -231,17 +213,6 @@ export async function getProductsPaginated({
 }
 
 export async function getProductCategoryCounts(tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) {
-    const list = mockProducts.filter(p => p.tenant_id === tenantId);
-    return {
-      all: list.length,
-      lisas: list.filter(p => p.category === 'LISAS').length,
-      custom_stocks: list.filter(p => p.category === 'PERSONALIZADA').length,
-      compra: list.filter(p => p.category === 'COMPRA').length,
-      sem_categoria: list.filter(p => !p.category || (p.category !== 'LISAS' && p.category !== 'PERSONALIZADA' && p.category !== 'COMPRA')).length
-    };
-  }
-
   try {
     const client = getDbClient();
     const [allRes, compraRes, customRes, lisasRes] = await Promise.all([
@@ -290,11 +261,7 @@ export async function createProduct(product: any) {
     created_at: new Date().toISOString(),
     ...payload
   };
-  if (isMockMode) {
-    mockProducts.unshift(newProd);
-    await enqueueSync(newProd.tenant_id, 'PRODUCT', newProd.id, 'CREATE');
-    return { data: newProd, error: null };
-  }
+
   let { data, error } = await getDbClient().from('products').insert([newProd]).select().single();
   if (error && error.message?.includes('category')) {
     const { category: _, ...restProd } = newProd;
@@ -303,7 +270,6 @@ export async function createProduct(product: any) {
     error = retryRes.error;
   }
   if (!error && data) {
-    await enqueueSync(data.tenant_id, 'PRODUCT', data.id, 'CREATE');
     data = {
       ...data,
       category: parseProductCategory(data),
@@ -324,20 +290,10 @@ export async function createProduct(product: any) {
 }
 
 export async function updateProduct(id: string, updates: any) {
-  if (isMockMode) {
-    const updatedMocks = mockProducts.map(p => p.id === id ? { ...p, ...updates } : p);
-    setMockProducts(updatedMocks);
-    const updated = mockProducts.find(p => p.id === id);
-    if (updated) {
-      await enqueueSync(updated.tenant_id, 'PRODUCT', id, 'UPDATE');
-    }
-    return { data: updated, error: null };
-  }
-
   const category = updates.category !== undefined ? (updates.category || null) : undefined;
   const payload: any = { ...updates };
   payload.description = encodeProductDescription(payload.description, payload.category, payload.measure, payload.customer_id, payload.bind_to_first_item, payload.bind_requires_handling);
-  
+
   if (category !== undefined) {
     payload.category = category;
   }
@@ -362,7 +318,6 @@ export async function updateProduct(id: string, updates: any) {
     error = retryRes.error;
   }
   if (!error && data) {
-    await enqueueSync(data.tenant_id, 'PRODUCT', data.id, 'UPDATE');
     data = {
       ...data,
       category: parseProductCategory(data),
@@ -383,48 +338,28 @@ export async function updateProduct(id: string, updates: any) {
 }
 
 export async function deleteProduct(id: string) {
-  if (isMockMode) {
-    const idx = mockProducts.findIndex(p => p.id === id);
-    if (idx !== -1) mockProducts.splice(idx, 1);
-    return { data: null, error: null };
-  }
   const { data, error } = await getDbClient()
     .from('products')
     .delete()
     .eq('id', id)
     .select()
     .single();
-    
-  if (!error && data) {
-    await enqueueSync(data.tenant_id, 'PRODUCT', data.id, 'DELETE');
-  }
+
   return { data, error };
 }
 
 export async function adjustStock(
-  productId: string, 
-  quantity: number, 
-  type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO', 
-  description: string, 
-  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0', 
-  operatorId?: string | null, 
+  productId: string,
+  quantity: number,
+  type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'PEDIDO',
+  description: string,
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+  operatorId?: string | null,
   allowNegative = true
 ) {
   let delta = Number(quantity);
   if (type === 'SAIDA' && delta > 0) {
     delta = -delta;
-  }
-
-  if (isMockMode) {
-    const updatedMocks = mockProducts.map(p => {
-      if (p.id === productId) {
-        const newQty = Number(p.stock_quantity || 0) + delta;
-        return { ...p, stock_quantity: !allowNegative && newQty < 0 ? 0 : newQty };
-      }
-      return p;
-    });
-    setMockProducts(updatedMocks);
-    return { error: null };
   }
 
   const { data: prod, error: prodErr } = await getDbClient()
@@ -442,7 +377,7 @@ export async function adjustStock(
     const currentQty = Number(prod.stock_quantity || 0);
     const newQty = currentQty + delta;
     const finalQty = !allowNegative && newQty < 0 ? 0 : newQty;
-    
+
     const { error: updateErr } = await getDbClient()
       .from('products')
       .update({ stock_quantity: finalQty })
@@ -452,7 +387,7 @@ export async function adjustStock(
       console.error('Erro ao atualizar estoque:', updateErr);
       return { error: updateErr };
     }
-    
+
     const { error: txErr } = await getDbClient()
       .from('stock_transactions')
       .insert([{
@@ -465,7 +400,7 @@ export async function adjustStock(
       }]);
 
     if (txErr) {
-      console.warn('Aviso ao registrar transação de estoque:', txErr);
+      console.warn('Aviso ao registrar transacao de estoque:', txErr);
     }
   }
 
@@ -473,7 +408,6 @@ export async function adjustStock(
 }
 
 export async function getStockTransactions(productId: string, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
-  if (isMockMode) return { data: [], error: null };
   const { data, error } = await getDbClient()
     .from('stock_transactions')
     .select('*')
@@ -484,10 +418,6 @@ export async function getStockTransactions(productId: string, tenantId = 'd3b073
 }
 
 export async function checkProductStock(productId: string): Promise<number> {
-  if (isMockMode) {
-    const p = mockProducts.find(p => p.id === productId);
-    return p ? (p.stock_quantity || 0) : 0;
-  }
   const { data } = await getDbClient()
     .from('products')
     .select('stock_quantity')

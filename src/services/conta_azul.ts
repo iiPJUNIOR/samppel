@@ -83,35 +83,6 @@ export class ContaAzulService {
    * Troca o codigo de autorizacao por Tokens de Acesso e Atualizacao
    */
   public async exchangeCode(code: string, clientId: string, clientSecret: string, redirectUri: string): Promise<ContaAzulTokens> {
-    const isMock = false;
-    
-    await createIntegrationLog(
-      'OAUTH_CODE_EXCHANGE',
-      isMock ? 'SUCCESS' : 'PENDING_RETRY',
-      { client_id: clientId, redirect_uri: redirectUri },
-      null,
-      isMock ? 'Token simulado gerado.' : 'Solicitando token de autorizacao...',
-      this.tenantId
-    );
-
-    if (isMock) {
-      const tokens: ContaAzulTokens = {
-        access_token: `mock_access_${Math.random().toString(36).substring(2)}`,
-        refresh_token: `mock_refresh_${Math.random().toString(36).substring(2)}`,
-        expires_at: new Date(Date.now() + 3600 * 1000).toISOString()
-      };
-
-      await updateContaAzulConfig({
-        client_id: clientId,
-        client_secret: clientSecret,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expires_at: tokens.expires_at
-      }, this.tenantId);
-
-      return tokens;
-    }
-
     try {
       const cleanClientId = clientId.trim();
       const cleanClientSecret = clientSecret.trim();
@@ -194,11 +165,6 @@ export class ContaAzulService {
       throw new Error('Client_id e client_secret do Conta Azul sao obrigatorios.');
     }
 
-    const isMock = false;
-    if (isMock) {
-      return access_token || 'mock_access_token';
-    }
-
     if (!access_token || !refresh_token) {
       throw new Error('Conta Azul nao autenticado (tokens ausentes).');
     }
@@ -271,529 +237,33 @@ export class ContaAzulService {
   }
 
   /**
-   * Sincroniza Cliente para o Conta Azul (v2 /pessoas)
+   * Sincronizacao reversa (Portal -> Conta Azul) desativada por governanca (M1-A):
+   * o Conta Azul opera como fonte primaria de vendas e cadastros oficiais.
    */
-  public async syncCustomer(customer: any): Promise<string> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = true;
-
-    await createIntegrationLog(
-      'SYNC_CUSTOMER',
-      isMock ? 'SUCCESS' : 'PENDING_RETRY',
-      customer,
-      null,
-      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de pessoas do Conta Azul...',
-      this.tenantId
-    );
-
-    if (isMock) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return customer.conta_azul_id || `ca_cust_${Math.random().toString(36).substring(2, 8)}`;
-    }
-
-    try {
-      const token = await this.getValidAccessToken();
-      const documentClean = customer.document ? customer.document.replace(/\D/g, '') : '';
-      const payload = {
-        nome: customer.name,
-        email: customer.email,
-        telefone: customer.phone,
-        documento: documentClean,
-        tipo_pessoa: documentClean.length === 11 ? 'FISICA' : 'JURIDICA',
-        perfis: ['CLIENTE'],
-        endereco: customer.address ? {
-          logradouro: customer.address.split(',')[0] || customer.address,
-          numero: '',
-          complemento: '',
-          bairro: '',
-          cep: '',
-          cidade: null
-        } : undefined
-      };
-
-      let response;
-      if (customer.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${customer.conta_azul_id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro na API Conta Azul de Pessoas (Cliente): ${response.status} - ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const contaAzulId = resData.id || customer.conta_azul_id;
-
-      await createIntegrationLog(
-        'SYNC_CUSTOMER',
-        'SUCCESS',
-        payload,
-        resData,
-        null,
-        this.tenantId
-      );
-
-      return contaAzulId;
-    } catch (err: any) {
-      await createIntegrationLog(
-        'SYNC_CUSTOMER',
-        'ERROR',
-        customer,
-        null,
-        err.message || 'Falha na sincronizacao do cliente',
-        this.tenantId
-      );
-      throw err;
-    }
+  public async syncCustomer(_customer: any): Promise<string> {
+    throw new Error('Sincronizacao reversa (Portal -> Conta Azul) desativada: o Conta Azul opera como fonte primaria.');
   }
 
-  /**
-   * Sincroniza Fornecedor para o Conta Azul (v2 /pessoas)
-   */
-  public async syncSupplier(supplier: any): Promise<string> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = true;
-
-    await createIntegrationLog(
-      'SYNC_SUPPLIER',
-      isMock ? 'SUCCESS' : 'PENDING_RETRY',
-      supplier,
-      null,
-      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de pessoas do Conta Azul...',
-      this.tenantId
-    );
-
-    if (isMock) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return supplier.conta_azul_id || `ca_supp_${Math.random().toString(36).substring(2, 8)}`;
-    }
-
-    try {
-      const token = await this.getValidAccessToken();
-      const documentClean = supplier.document ? supplier.document.replace(/\D/g, '') : '';
-      const payload = {
-        nome: supplier.name,
-        email: supplier.email,
-        telefone: supplier.phone,
-        documento: documentClean,
-        tipo_pessoa: documentClean.length === 11 ? 'FISICA' : 'JURIDICA',
-        perfis: ['FORNECEDOR'],
-        endereco: supplier.address ? {
-          logradouro: supplier.address.split(',')[0] || supplier.address,
-          numero: '',
-          complemento: '',
-          bairro: '',
-          cep: '',
-          cidade: null
-        } : undefined
-      };
-
-      let response;
-      if (supplier.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas/${supplier.conta_azul_id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/pessoas`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro na API Conta Azul de Pessoas (Fornecedor): ${response.status} - ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const contaAzulId = resData.id || supplier.conta_azul_id;
-
-      await createIntegrationLog(
-        'SYNC_SUPPLIER',
-        'SUCCESS',
-        payload,
-        resData,
-        null,
-        this.tenantId
-      );
-
-      return contaAzulId;
-    } catch (err: any) {
-      await createIntegrationLog(
-        'SYNC_SUPPLIER',
-        'ERROR',
-        supplier,
-        null,
-        err.message || 'Falha na sincronizacao do fornecedor',
-        this.tenantId
-      );
-      throw err;
-    }
+  public async syncSupplier(_supplier: any): Promise<string> {
+    throw new Error('Sincronizacao reversa (Portal -> Conta Azul) desativada: o Conta Azul opera como fonte primaria.');
   }
 
-  /**
-   * Sincroniza Produto para o Conta Azul
-   */
-  public async syncProduct(product: any): Promise<string> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = true;
-
-    await createIntegrationLog(
-      'SYNC_PRODUCT',
-      isMock ? 'SUCCESS' : 'PENDING_RETRY',
-      product,
-      null,
-      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de produtos...',
-      this.tenantId
-    );
-
-    if (isMock) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return product.conta_azul_id || `ca_prod_${Math.random().toString(36).substring(2, 8)}`;
-    }
-
-    try {
-      const token = await this.getValidAccessToken();
-      const payload = {
-        name: product.name,
-        code: product.sku,
-        value: product.price,
-        description: product.description,
-        cost: product.price * 0.4,
-        stock_control: true,
-        stock_quantity: product.stock_quantity
-      };
-
-      let response;
-      if (product.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/products/${product.conta_azul_id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/products`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        throw new Error(`Erro na API Conta Azul de Produtos: ${response.statusText}`);
-      }
-
-      const resData = await response.json();
-      const contaAzulId = resData.id || product.conta_azul_id;
-
-      await createIntegrationLog(
-        'SYNC_PRODUCT',
-        'SUCCESS',
-        payload,
-        resData,
-        null,
-        this.tenantId
-      );
-
-      return contaAzulId;
-    } catch (err: any) {
-      await createIntegrationLog(
-        'SYNC_PRODUCT',
-        'ERROR',
-        product,
-        null,
-        err.message || 'Falha na sincronizacao do produto',
-        this.tenantId
-      );
-      throw err;
-    }
+  public async syncProduct(_product: any): Promise<string> {
+    throw new Error('Sincronizacao reversa (Portal -> Conta Azul) desativada: o Conta Azul opera como fonte primaria.');
   }
 
-  /**
-   * Sincroniza Pedido/Venda para o Conta Azul (v2 /venda)
-   */
-  public async syncOrder(order: any, customer: any, product: any): Promise<string> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = true;
-
-    await createIntegrationLog(
-      'SYNC_ORDER',
-      isMock ? 'SUCCESS' : 'PENDING_RETRY',
-      { order_id: order.id, customer_id: customer?.id, product_id: product?.id },
-      null,
-      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint de vendas do Conta Azul...',
-      this.tenantId
-    );
-
-    if (isMock) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return order.conta_azul_id || `ca_sale_${Math.random().toString(36).substring(2, 8)}`;
-    }
-
-    try {
-      const token = await this.getValidAccessToken();
-
-      if (!customer?.conta_azul_id) {
-        throw new Error('O cliente precisa estar sincronizado com o Conta Azul antes.');
-      }
-      if (!product?.conta_azul_id) {
-        throw new Error('O produto precisa estar sincronizado com o Conta Azul antes.');
-      }
-
-      let saleNumber = order.order_number;
-      if (order.pv_number) {
-        const numericPart = order.pv_number.replace(/\D/g, '');
-        if (numericPart) {
-          saleNumber = parseInt(numericPart, 10);
-        }
-      }
-
-      // Tenta obter o vendedor correspondente no Conta Azul
-      let vendorId = undefined;
-      try {
-        const sellersRes = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/vendedores`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (sellersRes.ok) {
-          const sellers = await sellersRes.json();
-          const matched = sellers.find((s: any) => s.nome?.toLowerCase() === order.seller_name?.toLowerCase());
-          if (matched) {
-            vendorId = matched.id;
-          }
-        }
-      } catch (e) {
-        console.error('Erro ao buscar vendedores:', e);
-      }
-
-      // DESDOBRAMENTO: Consultar os itens de pedido locais no Supabase para compor a payload da Conta Azul
-      const dbClient = supabaseAdmin || supabase;
-      if (!dbClient) throw new Error('Cliente Supabase nao inicializado');
-      
-      const { data: localItems } = await dbClient
-        .from('order_items')
-        .select('*, product:products(conta_azul_id, price)')
-        .eq('order_id', order.id)
-        .order('item_index', { ascending: true });
-
-      const apiItems = [];
-      if (localItems && localItems.length > 0) {
-        for (const item of localItems) {
-          let caProdId = item.product?.conta_azul_id;
-          if (!caProdId && item.product_id) {
-            const { data: prodFull } = await dbClient.from('products').select('*').eq('id', item.product_id).single();
-            if (prodFull) {
-              caProdId = await this.syncProduct(prodFull);
-            }
-          }
-          apiItems.push({
-            id_produto: caProdId || product.conta_azul_id,
-            quantidade: item.print_run || 1,
-            valor_unitario: item.product?.price || product.price || 0,
-            descricao: `Item: ${item.name}. Medidas: ${item.measure || ''}. Caixas: ${item.boxes_count || 0}.`
-          });
-        }
-      } else {
-        apiItems.push({
-          id_produto: product.conta_azul_id,
-          quantidade: order.print_run || 1,
-          valor_unitario: product.price || 0,
-          descricao: `Medidas: ${order.measure}. Caixas: ${order.boxes_count}.`
-        });
-      }
-
-      const payload = {
-        id_cliente: customer.conta_azul_id,
-        numero: saleNumber,
-        data_venda: (order.order_date || new Date().toISOString()).split('T')[0],
-        situacao: order.status === 'Pago' ? 'PAGO' : order.status === 'Faturado' ? 'FATURADO' : 'APROVADO',
-        observacoes: order.notes || '',
-        shipping_cost: order.freight_value || 0,
-        vendedor: vendorId ? { id: vendorId } : undefined,
-        itens: apiItems
-      };
-
-      let response;
-      if (order.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda/${order.conta_azul_id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/venda`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro na API Conta Azul de Vendas: ${response.status} - ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const contaAzulId = resData.id || order.conta_azul_id;
-
-      await createIntegrationLog(
-        'SYNC_ORDER',
-        'SUCCESS',
-        payload,
-        resData,
-        null,
-        this.tenantId
-      );
-
-      return contaAzulId;
-    } catch (err: any) {
-      await createIntegrationLog(
-        'SYNC_ORDER',
-        'ERROR',
-        order,
-        null,
-        err.message || 'Falha na sincronizacao do pedido',
-        this.tenantId
-      );
-      throw err;
-    }
+  public async syncOrder(_order: any, _customer: any, _product: any): Promise<string> {
+    throw new Error('Sincronizacao reversa (Portal -> Conta Azul) desativada: o Conta Azul opera como fonte primaria.');
   }
 
-  /**
-   * Sincroniza Transacao Financeira para o Conta Azul
-   */
-  public async syncFinancial(financial: any, order: any = null): Promise<string> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = true;
-
-    await createIntegrationLog(
-      'SYNC_FINANCIAL',
-      isMock ? 'SUCCESS' : 'PENDING_RETRY',
-      financial,
-      null,
-      isMock ? 'Executando sincronizacao em modo simulado...' : 'Chamando endpoint financeiro do Conta Azul...',
-      this.tenantId
-    );
-
-    if (isMock) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return financial.conta_azul_id || `ca_fin_${Math.random().toString(36).substring(2, 8)}`;
-    }
-
-    try {
-      const token = await this.getValidAccessToken();
-      const isIncome = financial.type === 'RECEITA';
-      const endpoint = isIncome ? 'receivables' : 'payables';
-
-      const payload = {
-        due_date: financial.due_date,
-        value: financial.amount,
-        description: financial.description,
-        category_id: isIncome ? 'receita-venda' : 'despesa-insumo',
-        payment_date: financial.payment_date,
-        received: financial.status === 'CONCILIADO',
-        paid: financial.status === 'CONCILIADO',
-        sale_id: order?.conta_azul_id || undefined
-      };
-
-      let response;
-      if (financial.conta_azul_id) {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/${endpoint}/${financial.conta_azul_id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      } else {
-        response = await fetch(`${CONTA_AZUL_API_URL}/v1/${endpoint}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      }
-
-      if (!response.ok) {
-        throw new Error(`Erro na API Conta Azul Financeira: ${response.statusText}`);
-      }
-
-      const resData = await response.json();
-      const contaAzulId = resData.id || financial.conta_azul_id;
-
-      await createIntegrationLog(
-        'SYNC_FINANCIAL',
-        'SUCCESS',
-        payload,
-        resData,
-        null,
-        this.tenantId
-      );
-
-      return contaAzulId;
-    } catch (err: any) {
-      await createIntegrationLog(
-        'SYNC_FINANCIAL',
-        'ERROR',
-        financial,
-        null,
-        err.message || 'Falha na sincronizacao financeira',
-        this.tenantId
-      );
-      throw err;
-    }
+  public async syncFinancial(_financial: any, _order: any): Promise<string> {
+    throw new Error('Sincronizacao reversa (Portal -> Conta Azul) desativada: o Conta Azul opera como fonte primaria.');
   }
 
   /**
    * Importa clientes do Conta Azul para o banco local (v2 /pessoas)
    */
   public async importCustomers(onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
-
-    if (isMock) {
-      onProgress?.('Carregando clientes simulados...', 100);
-      return { imported: 3, updated: 0 };
-    }
 
     try {
       onProgress?.('Autenticando e verificando tokens...', 5);
@@ -954,13 +424,6 @@ export class ContaAzulService {
    * O estoque físico gerenciado no Portal Samppel NUNCA é modificado por esta sincronização.
    */
   public async importProducts(onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number; total: number }> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
-
-    if (isMock) {
-      return { imported: 0, updated: 0, total: 0 };
-    }
-
     try {
       onProgress?.('Autenticando com Conta Azul...', 5);
       const token = await this.getValidAccessToken();
@@ -1537,13 +1000,6 @@ export class ContaAzulService {
    * Importa pedidos (vendas) do Conta Azul para o banco local (v2 /venda)
    */
   public async importOrders(startDate?: string, endDate?: string, onProgress?: (step: string, progress: number) => void): Promise<{ imported: number; updated: number }> {
-    const { data: config } = await getContaAzulConfig(this.tenantId);
-    const isMock = false;
-
-    if (isMock) {
-      return { imported: 2, updated: 0 };
-    }
-
     const MIN_SYNC_DATE = '2026-09-01';
     const effectiveStartDate = (startDate && startDate >= MIN_SYNC_DATE) ? startDate : MIN_SYNC_DATE;
 
