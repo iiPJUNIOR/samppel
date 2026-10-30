@@ -1,7 +1,8 @@
 import { getContaAzulConfig, updateContaAzulConfig, createIntegrationLog, supabase, supabaseAdmin } from './supabase';
 
 const CONTA_AZUL_API_URL = 'https://api-v2.contaazul.com';
-const CONTA_AZUL_AUTH_URL = 'https://auth.contaazul.com/oauth2';
+const CONTA_AZUL_LOGIN_URL = 'https://login.contaazul.com/#/oauth/authorize';
+const CONTA_AZUL_TOKEN_URL = 'https://api-v2.contaazul.com/oauth/token';
 
 function extractOpNumber(notes: string): string | null {
   if (!notes) return null;
@@ -68,10 +69,14 @@ export class ContaAzulService {
    * Gera a URL de autorizacao OAuth 2.0 do Conta Azul
    */
   public async getAuthorizationUrl(clientId: string, redirectUri: string, state: string): Promise<string> {
-    const scope = encodeURIComponent('openid profile aws.cognito.signin.user.admin');
-    return `https://auth.contaazul.com/login?redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}&client_id=${clientId}&scope=${scope}&state=${state}&response_type=code`;
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId.trim(),
+      redirect_uri: redirectUri.trim(),
+      state,
+      scope: 'openid profile aws.cognito.signin.user.admin'
+    });
+    return `${CONTA_AZUL_LOGIN_URL}?${params.toString()}`;
   }
 
   /**
@@ -108,8 +113,11 @@ export class ContaAzulService {
     }
 
     try {
-      const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-      const response = await fetch(`${CONTA_AZUL_AUTH_URL}/token`, {
+      const cleanClientId = clientId.trim();
+      const cleanClientSecret = clientSecret.trim();
+      const cleanRedirectUri = redirectUri.trim();
+      const basicAuth = Buffer.from(`${cleanClientId}:${cleanClientSecret}`).toString('base64');
+      const response = await fetch(CONTA_AZUL_TOKEN_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Basic ${basicAuth}`,
@@ -117,8 +125,10 @@ export class ContaAzulService {
         },
         body: new URLSearchParams({
           grant_type: 'authorization_code',
-          redirect_uri: redirectUri,
-          code
+          code: code.trim(),
+          redirect_uri: cleanRedirectUri,
+          client_id: cleanClientId,
+          client_secret: cleanClientSecret
         }).toString()
       });
 
@@ -202,8 +212,11 @@ export class ContaAzulService {
     }
 
     try {
-      const basicAuth = Buffer.from(`${clientIdVal}:${clientSecretVal}`).toString('base64');
-      const response = await fetch(`${CONTA_AZUL_AUTH_URL}/token`, {
+      const cleanClientId = clientIdVal.trim();
+      const cleanClientSecret = clientSecretVal.trim();
+      const cleanRefreshToken = refresh_token.trim();
+      const basicAuth = Buffer.from(`${cleanClientId}:${cleanClientSecret}`).toString('base64');
+      const response = await fetch(CONTA_AZUL_TOKEN_URL, {
         method: 'POST',
         headers: {
           'Authorization': `Basic ${basicAuth}`,
@@ -211,12 +224,16 @@ export class ContaAzulService {
         },
         body: new URLSearchParams({
           grant_type: 'refresh_token',
-          refresh_token
+          refresh_token: cleanRefreshToken,
+          client_id: cleanClientId,
+          client_secret: cleanClientSecret
         }).toString()
       });
 
       if (!response.ok) {
-        throw new Error(`Falha ao atualizar token: ${response.statusText}`);
+        const errBody = await response.text().catch(() => '');
+        const detail = errBody ? `${response.status} - ${errBody.substring(0, 220)}` : `${response.status} ${response.statusText}`.trim();
+        throw new Error(`Falha ao atualizar token (${detail})`);
       }
 
       const data = await response.json();
@@ -1557,7 +1574,7 @@ export class ContaAzulService {
 
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(`Erro ao buscar vendas do Conta Azul na página ${currentPage}: ${response.status} - ${errText}`);
+          throw new Error(this.formatSaleSearchError(response.status, errText, `importação em lote pág ${currentPage}`));
         }
 
         const resData = await response.json();
@@ -2163,6 +2180,37 @@ export class ContaAzulService {
     return { boxesCount, packagingType };
   }
 
+  private formatSaleSearchError(status: number, rawBody: string, context: string): string {
+    if (rawBody && (rawBody.includes('END_TRIAL') || rawBody.includes('elegível para uso da API'))) {
+      return 'Conta Azul bloqueou o acesso à API (status_conta: END_TRIAL). A conta autenticada no OAuth está com período de avaliação expirado (ex: conta de testes). Em Configurações > Integração, reconecte fazendo login na conta oficial ativa da Samppel.';
+    }
+    return `Erro ao buscar venda no Conta Azul (${context}, HTTP ${status}): ${rawBody}`;
+  }
+
+  private extractMatchingSaleId(salesPayload: any, cleanNumber: string): { saleId: string | null; count: number } {
+    const salesList = salesPayload?.itens || (Array.isArray(salesPayload) ? salesPayload : (salesPayload?.vendas || salesPayload?.data || []));
+    if (!Array.isArray(salesList) || salesList.length === 0) {
+      return { saleId: null, count: 0 };
+    }
+
+    const exactSale = salesList.find((s: any) => {
+      const rawNum = String(s.numero ?? s.venda?.numero ?? s.number ?? '').trim();
+      const digitsOnly = rawNum.replace(/\D/g, '');
+      return rawNum === cleanNumber || (digitsOnly !== '' && digitsOnly === cleanNumber);
+    });
+
+    if (!exactSale) {
+      return { saleId: null, count: salesList.length };
+    }
+
+    const saleId = exactSale.id || exactSale.uuid || exactSale.venda?.id;
+    if (!saleId) {
+      throw new Error(`ID da venda de número ${cleanNumber} não disponível na resposta da API.`);
+    }
+
+    return { saleId: String(saleId), count: salesList.length };
+  }
+
   async getSaleIdByNumber(orderNumber: string | number): Promise<string> {
     const token = await this.getValidAccessToken();
     const cleanNumber = String(orderNumber).replace(/\D/g, '');
@@ -2170,84 +2218,56 @@ export class ContaAzulService {
       throw new Error(`Número de pedido inválido: ${orderNumber}`);
     }
 
-    const now = new Date();
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    const size = 100;
 
-    // Mapeamento de intervalos de data do presente para o passado
-    // Cada janela é estritamente limitada com data_inicio e data_fim para
-    // garantir que o número de correspondências parciais por lote seja pequeno.
-    const intervals = [
-      // Janela 1: Últimos 30 dias (cobre 95% dos casos de uso de importação manual)
-      {
-        start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
-        end: now,
-        name: 'Últimos 30 dias'
-      },
-      // Janela 2: De 30 a 90 dias atrás (cobre pedidos recentes criados nos meses anteriores)
-      {
-        start: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
-        end: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
-        name: 'De 30 a 90 dias atrás'
-      },
-      // Janela 3: De 90 a 365 dias atrás (cobre o último ano completo)
-      {
-        start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000),
-        end: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
-        name: 'Último ano'
-      },
-      // Janela 4: Histórico geral antigo (desde 2020)
-      {
-        start: new Date('2020-01-01'),
-        end: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000),
-        name: 'Histórico antigo (desde 2020)'
+    // 1. Busca direta pelo número do pedido via termo_busca SEM filtro de data (independente de ano/mês)
+    for (let page = 1; page <= 15; page++) {
+      const directUrl = `${CONTA_AZUL_API_URL}/v1/venda/busca?termo_busca=${encodeURIComponent(cleanNumber)}&tamanho_pagina=${size}&pagina=${page}`;
+      const res = await fetch(directUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const rawErr = await res.text();
+        throw new Error(this.formatSaleSearchError(res.status, rawErr, `busca direta PV-${cleanNumber}, pág ${page}`));
       }
-    ];
 
-    for (const interval of intervals) {
-      let page = 1;
-      const size = 100;
-      let hasMore = true;
-      
-      while (hasMore) {
-        const url = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=${size}&pagina=${page}&data_inicio=${formatDate(interval.start)}&data_fim=${formatDate(interval.end)}`;
-        const res = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+      const payload = await res.json();
+      const { saleId, count } = this.extractMatchingSaleId(payload, cleanNumber);
+      if (saleId) {
+        return saleId;
+      }
 
-        if (!res.ok) {
-          throw new Error(`Erro ao buscar venda no Conta Azul (${interval.name}, pág ${page}): ${await res.text()}`);
-        }
-
-        const sales = await res.json();
-        const salesList = sales?.itens || (Array.isArray(sales) ? sales : (sales?.vendas || sales?.data || []));
-
-        if (salesList.length === 0) {
-          hasMore = false;
-          break;
-        }
-
-        const exactSale = salesList.find((s: any) => {
-          const numStr = String(s.numero || s.venda?.numero || s.number || '').trim();
-          return numStr === cleanNumber;
-        });
-
-        if (exactSale) {
-          const saleId = exactSale.id || exactSale.uuid || exactSale.venda?.id;
-          if (!saleId) {
-            throw new Error(`ID da venda de número ${cleanNumber} não disponível na API.`);
-          }
-          return saleId;
-        }
-
-        if (salesList.length < size) {
-          hasMore = false;
-        } else {
-          page++;
-        }
+      if (count < size) {
+        break;
       }
     }
 
-    throw new Error(`Pedido de número ${cleanNumber} não foi encontrado no Conta Azul.`);
+    // 2. Fallback geral sem restrição de data (ordenado da venda mais recente para a mais antiga em toda a base)
+    // Cobre cenários em que o indexador textual de termo_busca da Conta Azul ainda esteja processando venda recém-criada.
+    for (let page = 1; page <= 30; page++) {
+      const fallbackUrl = `${CONTA_AZUL_API_URL}/v1/venda/busca?tamanho_pagina=${size}&pagina=${page}&campo_ordenado_descendente=DATA`;
+      const res = await fetch(fallbackUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const rawErr = await res.text();
+        throw new Error(this.formatSaleSearchError(res.status, rawErr, `varredura geral sem limite de data, pág ${page}`));
+      }
+
+      const payload = await res.json();
+      const { saleId, count } = this.extractMatchingSaleId(payload, cleanNumber);
+      if (saleId) {
+        return saleId;
+      }
+
+      if (count < size) {
+        break;
+      }
+    }
+
+    throw new Error(`Pedido de número ${cleanNumber} não foi encontrado no Conta Azul (busca realizada em todo o histórico sem restrição de data).`);
   }
 
   async importSingleOrder(saleId: string, onProgress?: (step: string, progress: number) => void) {

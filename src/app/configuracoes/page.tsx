@@ -612,14 +612,27 @@ export default function ConfiguracoesPage() {
       alert('Por favor, salve seu Client ID e Client Secret primeiro.');
       return;
     }
-    
-    // Gera a URL de autorização do OAuth
+
+    const isLocalhost =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isLocalhost) {
+      const proceedLocal = window.confirm(
+        'Atencao: Voce esta acessando via localhost.\n\nO portal Conta Azul exige que a URL de redirecionamento seja identica a cadastrada no app (https://portalsamppel.vercel.app/api/auth/conta-azul/callback). Tentar autenticar a partir de localhost causara falha de redirect_uri na Conta Azul.\n\nRecomendamos abrir https://portalsamppel.vercel.app/configuracoes para conectar.\n\nDeseja prosseguir mesmo assim com localhost?'
+      );
+      if (!proceedLocal) return;
+    }
+
+    // Gera a URL oficial de autorização OAuth 2.0 da Conta Azul (v2)
     const redirectUri = `${window.location.origin}/api/auth/conta-azul/callback`;
-    
-    const scope = encodeURIComponent('openid profile aws.cognito.signin.user.admin');
-    const authUrl = `https://auth.contaazul.com/login?redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}&client_id=${clientId}&scope=${scope}&state=d3b07384-d113-4ec8-a5c6-e91bc4ff99e0&response_type=code`;
+    const tenantState = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId.trim(),
+      redirect_uri: redirectUri,
+      state: tenantState,
+      scope: 'openid profile aws.cognito.signin.user.admin'
+    });
+    const authUrl = `https://login.contaazul.com/#/oauth/authorize?${params.toString()}`;
 
     window.location.href = authUrl;
   };
@@ -3342,6 +3355,54 @@ export default function ConfiguracoesPage() {
       {/* TAB CONTENT: GERAL & SISTEMA */}
       {activeTab === 'sistema' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem' }}>
+          {user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com' && (
+            <div
+              className="card"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                borderLeft: '4px solid var(--primary)',
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    fontSize: '1.05rem',
+                    fontWeight: 700,
+                    margin: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    color: 'var(--text)',
+                  }}
+                >
+                  <Activity size={19} style={{ color: 'var(--primary)' }} />
+                  <span>Central de Monitoramento, Telemetria Anti-Estouro e Governanca</span>
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', margin: '0.3rem 0 0 0' }}>
+                  Painel exclusivo habilitado para junior.8350i@gmail.com: detector N+1 em tempo real, cotas de disco, bloat de tabelas, Circuit Breaker Conta Azul e acoes preventivas em 1 clique.
+                </p>
+              </div>
+              <Link
+                href="/monitoramento"
+                className="btn btn-primary"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  fontSize: '0.85rem',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <Activity size={15} />
+                <span>Abrir Central de Monitoramento</span>
+              </Link>
+            </div>
+          )}
           
           {/* 1. MONITOR DE SAÚDE E CONEXÃO SUPABASE */}
           <div className="card">
