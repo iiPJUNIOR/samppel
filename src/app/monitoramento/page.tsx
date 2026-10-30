@@ -9,8 +9,11 @@ import {
   Activity,
   AlertCircle,
   AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
   CheckCircle2,
   Clock,
+  Code2,
   Cpu,
   Database,
   ExternalLink,
@@ -34,6 +37,8 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
+import { InfoHint } from './InfoHint';
+import { MetricGuideKey } from './metricGuides';
 
 const OWNER_EMAIL = 'junior.8350i@gmail.com';
 
@@ -93,11 +98,15 @@ function SparklineChart({
   currentLabel,
   points,
   strokeVar = 'var(--primary)',
+  guideKey,
+  polarityHint,
 }: {
   title: string;
   currentLabel: string;
   points: number[];
   strokeVar?: string;
+  guideKey?: MetricGuideKey;
+  polarityHint?: string;
 }) {
   const width = 280;
   const height = 64;
@@ -126,9 +135,13 @@ function SparklineChart({
   return (
     <div className={styles.sparkChartBox}>
       <div className={styles.kpiHeader}>
-        <span className={styles.kpiLabel}>{title}</span>
+        <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+          <span>{title}</span>
+          {guideKey && <InfoHint guideKey={guideKey} />}
+        </span>
         <span className={styles.monoCell}>{currentLabel}</span>
       </div>
+      {polarityHint && <span className={styles.kpiPolarityHint}>{polarityHint}</span>}
       {points.length === 0 ? (
         <div className={styles.metaText}>Aguardando serie de snapshots...</div>
       ) : (
@@ -373,6 +386,9 @@ export default function MonitoramentoPage() {
       ? styles.badgeDanger
       : styles.badgeWarning;
 
+  const freeShield = intel.freeTierShield || null;
+  const freePillars: any[] = Array.isArray(freeShield?.pillars) ? freeShield.pillars : [];
+
   return (
     <div className={styles.pageWrapper}>
       {/* ── CABECALHO PRINCIPAL ─────────────────────────────────────────── */}
@@ -387,10 +403,13 @@ export default function MonitoramentoPage() {
               Projeto: {intel.environment?.supabaseProjectRef || 'cywbfcrtuawsgtbsjnnb'}
             </span>
             {data && (
-              <span className={styles.metaText}>
-                RPC: {data.rpcLatencyMs ?? 0}ms |{' '}
-                {data.cached ? `Cache (${data.cacheAgeSec}s)` : 'Coleta Direta'} |{' '}
-                {formatDateTime(telemetry.collected_at)}
+              <span className={`${styles.metaText} ${styles.labelWithInfo}`}>
+                <span>
+                  RPC: {data.rpcLatencyMs ?? 0}ms |{' '}
+                  {data.cached ? `Cache (${data.cacheAgeSec}s)` : 'Coleta Direta'} |{' '}
+                  {formatDateTime(telemetry.collected_at)}
+                </span>
+                <InfoHint guideKey="rpc_latency_cache" />
               </span>
             )}
           </div>
@@ -399,20 +418,23 @@ export default function MonitoramentoPage() {
             <span>Central de Monitoramento, Telemetria Anti-Estouro e Governanca</span>
           </h1>
           <p className={styles.pageSubtitle}>
-            Vigilancia preventiva de cotas Supabase, detector de tempestades N+1, eficiencia de indices, Circuit Breaker Conta Azul e resposta em 1 clique com auto-consumo zero.
+            Vigilancia preventiva de cotas gratuitas (Supabase + Vercel), explicacao didatica em cada indicador (i) e receitas diretas de codigo/banco para nunca precisar pagar upgrade desnecessario ao Plano Pro.
           </p>
         </div>
 
         <div className={styles.headerControls}>
-          <button
-            type="button"
-            onClick={() => setAutoRefresh5m((v) => !v)}
-            className={autoRefresh5m ? styles.btnPrimary : styles.btnSecondary}
-            title="Atualiza a cada 5 min apenas enquanto esta aba estiver visivel"
-          >
-            <Clock size={15} />
-            <span>Auto 5m: {autoRefresh5m ? 'Ativo' : 'Pausado'}</span>
-          </button>
+          <span className={styles.labelWithInfo}>
+            <button
+              type="button"
+              onClick={() => setAutoRefresh5m((v) => !v)}
+              className={autoRefresh5m ? styles.btnPrimary : styles.btnSecondary}
+              title="Atualiza a cada 5 min apenas enquanto esta aba estiver visivel"
+            >
+              <Clock size={15} />
+              <span>Auto 5m: {autoRefresh5m ? 'Ativo' : 'Pausado'}</span>
+            </button>
+            <InfoHint guideKey="auto_refresh_5m" />
+          </span>
 
           <button
             type="button"
@@ -566,15 +588,144 @@ export default function MonitoramentoPage() {
               ================================================================ */}
           {activeTab === 'overview' && (
             <>
+              {/* ── RADAR EXPLICITO ANTI-UPGRADE PRO (PRECISO AGIR AGORA?) ── */}
+              {freeShield && (
+                <section
+                  className={`${styles.verdictPanel} ${
+                    freeShield.overallVerdict === 'AGIR_AGORA'
+                      ? styles.verdictUrgent
+                      : freeShield.overallVerdict === 'PREVENTIVO'
+                      ? styles.verdictPreventive
+                      : styles.verdictSafe
+                  }`}
+                >
+                  <div className={styles.verdictHeadlineRow}>
+                    <div>
+                      <div className={styles.ownerPillRow}>
+                        <span
+                          className={`${styles.badge} ${
+                            freeShield.overallVerdict === 'AGIR_AGORA'
+                              ? styles.badgeDanger
+                              : freeShield.overallVerdict === 'PREVENTIVO'
+                              ? styles.badgeWarning
+                              : styles.badgeSuccess
+                          }`}
+                        >
+                          {freeShield.overallVerdict === 'AGIR_AGORA' ? (
+                            <AlertTriangle size={13} />
+                          ) : (
+                            <CheckCircle2 size={13} />
+                          )}
+                          <span>{freeShield.verdictBadgeLabel}</span>
+                        </span>
+                        <span className={`${styles.badge} ${styles.badgeNeutral}`}>
+                          Radar Anti-Upgrade Pro ({freeShield.safePillarsCount}/
+                          {freeShield.totalPillarsCount} pilares com folga no Free)
+                        </span>
+                        <InfoHint guideKey="section_free_shield" />
+                      </div>
+                      <h2 className={styles.verdictHeadlineText}>{freeShield.headline}</h2>
+                      <p className={styles.verdictSubText}>{freeShield.subheadline}</p>
+                    </div>
+                  </div>
+
+                  {freePillars.length > 0 && (
+                    <div className={styles.pillarsGrid}>
+                      {freePillars.map((p: any) => {
+                        const pillarCls =
+                          p.status === 'AGIR_AGORA'
+                            ? styles.pillarUrgent
+                            : p.status === 'PREVENTIVO'
+                            ? styles.pillarPreventive
+                            : styles.pillarSafe;
+                        const statusBadgeCls =
+                          p.status === 'AGIR_AGORA'
+                            ? styles.badgeDanger
+                            : p.status === 'PREVENTIVO'
+                            ? styles.badgeWarning
+                            : styles.badgeSuccess;
+
+                        return (
+                          <div key={p.id} className={`${styles.pillarCard} ${pillarCls}`}>
+                            <div className={styles.pillarTop}>
+                              <div className={styles.pillarTitleRow}>
+                                <span className={`${styles.pillarTitle} ${styles.labelWithInfo}`}>
+                                  <span>{p.title}</span>
+                                  <InfoHint guideKey={p.guideKey} />
+                                </span>
+                              </div>
+
+                              <div className={styles.ownerPillRow}>
+                                <span className={`${styles.badge} ${statusBadgeCls}`}>
+                                  {p.statusLabel}
+                                </span>
+                                <span className={`${styles.badge} ${styles.badgeNeutral}`}>
+                                  {p.limitLabel}
+                                </span>
+                              </div>
+
+                              <span className={styles.kpiPolarityHint}>{p.directionLabel}</span>
+
+                              <div className={styles.pillarValue}>{p.currentValue}</div>
+                              <div className={styles.pillarMeta}>
+                                <strong>Margem atual:</strong> {p.headroomLabel}
+                                <br />
+                                <strong>Gatilho de acao:</strong> {p.triggerRule}
+                              </div>
+                            </div>
+
+                            <div className={styles.pillarCodeTip}>
+                              <strong>Resolver no codigo/banco (sem Pro):</strong> {p.codeFix}
+                            </div>
+
+                            {(p.actionKey || p.linkPath) && (
+                              <div className={styles.ownerPillRow}>
+                                {p.actionKey && (
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(actionBusy)}
+                                    onClick={() => executeAction(p.actionKey)}
+                                    className={`${styles.btnPrimary} ${styles.btnSmall}`}
+                                  >
+                                    <Play size={12} />
+                                    <span>{p.actionLabel || 'Executar Agora'}</span>
+                                  </button>
+                                )}
+                                {p.linkPath && (
+                                  <Link
+                                    href={p.linkPath}
+                                    className={`${styles.btnSecondary} ${styles.btnSmall}`}
+                                  >
+                                    <span>{p.linkLabel || 'Abrir'}</span>
+                                    <ExternalLink size={12} />
+                                  </Link>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
+
               <div className={styles.kpiGrid}>
                 {/* KPI 1: Health Score */}
                 <div className={styles.kpiCard}>
                   <div className={styles.kpiHeader}>
-                    <span className={styles.kpiLabel}>Score de Saude Geral</span>
+                    <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                      <span>Score de Saude Geral</span>
+                      <InfoHint guideKey="kpi_health_score" />
+                    </span>
                     <span className={`${styles.badge} ${healthBadgeClass}`}>
                       {intel.healthStatus || 'ANALISANDO'}
                     </span>
                   </div>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowUpRight size={12} />
+                    <span>Bom ser ALTO (Meta: 85 a 100)</span>
+                  </span>
                   <div className={styles.kpiValue}>{intel.healthScore ?? 100}/100</div>
                   <div className={styles.kpiSubtext}>
                     <span>{diagnostics.length} apontamento(s) ativo(s)</span>
@@ -585,8 +736,11 @@ export default function MonitoramentoPage() {
                 {/* KPI 2: Disco & Cota */}
                 <div className={styles.kpiCard}>
                   <div className={styles.kpiHeader}>
-                    <span className={styles.kpiLabel}>
-                      Disco Postgres ({planTier === 'free' ? 'Plano Free 500 MB' : 'Plano Pro 8 GB'})
+                    <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                      <span>
+                        Disco ({planTier === 'free' ? 'Free 500 MB' : 'Pro 8 GB'})
+                      </span>
+                      <InfoHint guideKey="kpi_db_disk" />
                     </span>
                     <button
                       type="button"
@@ -596,6 +750,10 @@ export default function MonitoramentoPage() {
                       Simular {planTier === 'free' ? 'Pro' : 'Free'}
                     </button>
                   </div>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowDownRight size={12} />
+                    <span>Bom ser BAIXO (Agir so &gt;= 325 MB)</span>
+                  </span>
                   <div className={styles.kpiValue}>{db.db_size_pretty || '0 MB'}</div>
                   <div className={styles.progressTrack}>
                     <div
@@ -620,9 +778,16 @@ export default function MonitoramentoPage() {
                 {/* KPI 3: Velocidade SQL / Anti-Egress */}
                 <div className={styles.kpiCard}>
                   <div className={styles.kpiHeader}>
-                    <span className={styles.kpiLabel}>Ritmo de Consultas & Linhas</span>
+                    <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                      <span>Ritmo de Consultas & Linhas</span>
+                      <InfoHint guideKey="kpi_query_velocity" />
+                    </span>
                     <Zap size={16} />
                   </div>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowDownRight size={12} />
+                    <span>Bom ser BAIXO (Economiza 5 GB Egress)</span>
+                  </span>
                   <div className={styles.kpiValue}>
                     {formatNumber(intel.velocity?.callsPerMin ?? 0)}/min
                   </div>
@@ -637,9 +802,15 @@ export default function MonitoramentoPage() {
                 {/* KPI 4: Pool de Conexoes & RAM Cache */}
                 <div className={styles.kpiCard}>
                   <div className={styles.kpiHeader}>
-                    <span className={styles.kpiLabel}>Conexoes & Cache Hit RAM</span>
+                    <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                      <span>Conexoes & Cache Hit RAM</span>
+                      <InfoHint guideKey="kpi_connections_ram" />
+                    </span>
                     <Cpu size={16} />
                   </div>
+                  <span className={styles.kpiPolarityHint}>
+                    <span>Conexoes: BAIXO | RAM: ALTO (&gt;=98%)</span>
+                  </span>
                   <div className={styles.kpiValue}>
                     {db.total_connections ?? 0}/{db.max_connections ?? 60}
                   </div>
@@ -664,7 +835,10 @@ export default function MonitoramentoPage() {
                 {/* KPI 5: Integracao Conta Azul & Filas */}
                 <div className={styles.kpiCard}>
                   <div className={styles.kpiHeader}>
-                    <span className={styles.kpiLabel}>Conta Azul, Crons & Outbox</span>
+                    <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                      <span>Conta Azul, Crons & Outbox</span>
+                      <InfoHint guideKey="kpi_ca_integration" />
+                    </span>
                     <span
                       className={`${styles.badge} ${
                         integration.cron_and_circuit?.is_circuit_open
@@ -681,6 +855,10 @@ export default function MonitoramentoPage() {
                         : 'Token Ativo'}
                     </span>
                   </div>
+                  <span className={styles.kpiPolarityHint}>
+                    <CheckCircle2 size={12} />
+                    <span>Erros e Falhas: Bom ser ZERO (0)</span>
+                  </span>
                   <div className={styles.kpiValue}>
                     {formatNumber(integration.logs?.last_24h_error ?? 0)} erros/24h
                   </div>
@@ -703,10 +881,11 @@ export default function MonitoramentoPage() {
                   <div>
                     <h2 className={styles.sectionTitle}>
                       <ShieldAlert size={18} />
-                      <span>Diagnosticos Preventivos e Acoes Recomendadas</span>
+                      <span>Diagnosticos Preventivos e Receitas de Codigo Anti-Estouro</span>
+                      <InfoHint guideKey="section_diagnostics" />
                     </h2>
                     <p className={styles.sectionSubtitle}>
-                      Motor de regras analisa em tempo real padroes de N+1, loops de erro OAuth/END_TRIAL, bloat em tabelas e riscos de cota antes de qualquer interrupcao.
+                      Mostra explicitamente se voce precisa agir agora ou nao, e traz a receita exata de codigo/banco para resolver sem gastar com upgrade de plano.
                     </p>
                   </div>
                   {intel.velocity?.estimatedDaysToFreeLimit && (
@@ -718,7 +897,7 @@ export default function MonitoramentoPage() {
 
                 {diagnostics.length === 0 ? (
                   <div className={styles.emptyState}>
-                    Todos os indicadores auditados operam em estado nominal. Nenhum gargalo ou anomalia detectado.
+                    Nenhuma acao necessaria! Todos os indicadores auditados operam em estado nominal dentro do Plano Free.
                   </div>
                 ) : (
                   <div className={styles.diagnosticsList}>
@@ -735,11 +914,29 @@ export default function MonitoramentoPage() {
                           : d.severity === 'ATENCAO'
                           ? styles.badgeWarning
                           : styles.badgeInfo;
+                      const actionUrgencyBadge =
+                        d.actionRequired === 'AGIR_AGORA'
+                          ? {
+                              cls: styles.badgeDanger,
+                              label: 'PRECISA AGIR AGORA',
+                            }
+                          : d.actionRequired === 'PREVENTIVO'
+                          ? {
+                              cls: styles.badgeWarning,
+                              label: 'ACAO PREVENTIVA (SEM RISCO IMEDIATO)',
+                            }
+                          : {
+                              cls: styles.badgeSuccess,
+                              label: 'NENHUMA ACAO EXIGIDA',
+                            };
 
                       return (
                         <div key={d.id} className={`${styles.diagnosticItem} ${borderClass}`}>
                           <div className={styles.diagnosticBody}>
                             <div className={styles.diagnosticTopRow}>
+                              <span className={`${styles.badge} ${actionUrgencyBadge.cls}`}>
+                                {actionUrgencyBadge.label}
+                              </span>
                               <span className={`${styles.badge} ${pillClass}`}>{d.severity}</span>
                               <span className={`${styles.badge} ${styles.badgeNeutral}`}>
                                 {d.category}
@@ -750,6 +947,22 @@ export default function MonitoramentoPage() {
                             </div>
                             <h3 className={styles.diagnosticTitle}>{d.title}</h3>
                             <p className={styles.diagnosticDesc}>{d.description}</p>
+                            {d.codeSolution && (
+                              <div className={styles.diagnosticCodeRecipe}>
+                                <strong>
+                                  <Code2
+                                    size={13}
+                                    style={{
+                                      display: 'inline',
+                                      verticalAlign: 'text-bottom',
+                                      marginRight: '0.3rem',
+                                    }}
+                                  />
+                                  Como resolver no codigo / banco (Sem pagar o Pro):{' '}
+                                </strong>
+                                {d.codeSolution}
+                              </div>
+                            )}
                           </div>
 
                           <div className={styles.diagnosticActions}>
@@ -799,6 +1012,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <Activity size={18} />
                       <span>Serie Temporal de Telemetria (Snapshots Automaticos de 15 min)</span>
+                      <InfoHint guideKey="section_sparklines" />
                     </h2>
                     <p className={styles.sectionSubtitle}>
                       Historico leve armazenado localmente com retencao automatica de 30 dias (menos de 300 KB em disco).
@@ -821,24 +1035,32 @@ export default function MonitoramentoPage() {
                     currentLabel={db.db_size_pretty || '0 MB'}
                     points={dbSizeSeries}
                     strokeVar="var(--primary)"
+                    guideKey="spark_db_size"
+                    polarityHint="Bom ser BAIXO e estavel (linha reta)"
                   />
                   <SparklineChart
                     title="Total Acumulado de Chamadas SQL"
                     currentLabel={formatNumber(queries.total_raw_calls ?? 0)}
                     points={callsSeries}
                     strokeVar="var(--info)"
+                    guideKey="spark_sql_calls"
+                    polarityHint="Bom subir devagar (salto vertical = N+1)"
                   />
                   <SparklineChart
                     title="Conexoes Ativas Simultaneas"
                     currentLabel={`${db.active_connections ?? 0} ativa(s)`}
                     points={connSeries}
                     strokeVar="var(--success)"
+                    guideKey="spark_active_conn"
+                    polarityHint="Bom ser BAIXO (Ideal: 1 a 10)"
                   />
                   <SparklineChart
                     title="Erros Conta Azul (Janela Movel 24h)"
                     currentLabel={`${integration.logs?.last_24h_error ?? 0} erro(s)`}
                     points={errSeries}
                     strokeVar="var(--danger)"
+                    guideKey="spark_ca_errors"
+                    polarityHint="Bom ser ZERO (0 erros)"
                   />
                 </div>
               </section>
@@ -855,6 +1077,7 @@ export default function MonitoramentoPage() {
                   <h2 className={styles.sectionTitle}>
                     <Zap size={18} />
                     <span>Raio-X do pg_stat_statements & Detector Anti-N+1</span>
+                    <InfoHint guideKey="section_n1_detector" />
                   </h2>
                   <p className={styles.sectionSubtitle}>
                     Identifica instantaneamente loops de consultas repetidas (como o incidente historico de 1,5 milhao de leituras em order_item_packaging) e gargalos de CPU/Egress.
@@ -863,10 +1086,13 @@ export default function MonitoramentoPage() {
 
                 <div className={styles.headerControls}>
                   <span className={`${styles.badge} ${styles.badgeNeutral}`}>
-                    Linha de Base:{' '}
-                    {queries.baseline_reset_at
-                      ? formatDateTime(queries.baseline_reset_at)
-                      : 'Acumulado desde o boot do Postgres'}
+                    <span>
+                      Linha de Base:{' '}
+                      {queries.baseline_reset_at
+                        ? formatDateTime(queries.baseline_reset_at)
+                        : 'Acumulado desde o boot do Postgres'}
+                    </span>
+                    <InfoHint guideKey="baseline_reset" />
                   </span>
                   <button
                     type="button"
@@ -941,13 +1167,48 @@ export default function MonitoramentoPage() {
                   <table className={styles.dataTable}>
                     <thead>
                       <tr>
-                        <th>Risco N+1</th>
-                        <th>Chamadas (Desde Reset)</th>
-                        <th>Bruto Total</th>
-                        <th>Linhas Retornadas</th>
-                        <th>Tempo Total (ms)</th>
-                        <th>Media / Pico (ms)</th>
-                        <th>Consulta SQL Capturada</th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Risco N+1</span>
+                            <InfoHint guideKey="col_n1_risk" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Chamadas (Desde Reset)</span>
+                            <InfoHint guideKey="col_calls_since_reset" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Bruto Total</span>
+                            <InfoHint guideKey="col_raw_calls" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Linhas Retornadas</span>
+                            <InfoHint guideKey="col_rows_returned" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Tempo Total (ms)</span>
+                            <InfoHint guideKey="col_total_time_ms" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Media / Pico (ms)</span>
+                            <InfoHint guideKey="col_mean_max_ms" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Consulta SQL Capturada</span>
+                            <InfoHint guideKey="col_sql_preview" />
+                          </span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1004,7 +1265,14 @@ export default function MonitoramentoPage() {
             <>
               <div className={styles.kpiGrid}>
                 <div className={styles.kpiCard}>
-                  <span className={styles.kpiLabel}>Tamanho Fisico Total Postgres</span>
+                  <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                    <span>Tamanho Fisico Total Postgres</span>
+                    <InfoHint guideKey="storage_kpi_db_size" />
+                  </span>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowDownRight size={12} />
+                    <span>Bom ser BAIXO (Teto Free: 500 MB)</span>
+                  </span>
                   <div className={styles.kpiValue}>{db.db_size_pretty || '0 MB'}</div>
                   <div className={styles.kpiSubtext}>
                     <span>{formatBytesClient(db.db_size_bytes)} exatos</span>
@@ -1012,7 +1280,14 @@ export default function MonitoramentoPage() {
                 </div>
 
                 <div className={styles.kpiCard}>
-                  <span className={styles.kpiLabel}>Supabase Storage (Arquivos/Buckets)</span>
+                  <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                    <span>Supabase Storage (Arquivos/Buckets)</span>
+                    <InfoHint guideKey="storage_kpi_buckets" />
+                  </span>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowDownRight size={12} />
+                    <span>Bom ser BAIXO (Teto Free: 1 GB)</span>
+                  </span>
                   <div className={styles.kpiValue}>
                     {formatBytesClient(db.storage_bytes || 0)}
                   </div>
@@ -1023,7 +1298,14 @@ export default function MonitoramentoPage() {
                 </div>
 
                 <div className={styles.kpiCard}>
-                  <span className={styles.kpiLabel}>Buffer Cache Hit (Tabelas / Indices)</span>
+                  <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                    <span>Buffer Cache Hit (Tabelas / Indices)</span>
+                    <InfoHint guideKey="storage_kpi_cache_hit" />
+                  </span>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowUpRight size={12} />
+                    <span>Bom ser ALTO (Meta: 98% a 100%)</span>
+                  </span>
                   <div className={styles.kpiValue}>{db.cache_hit_ratio ?? 100}%</div>
                   <div className={styles.kpiSubtext}>
                     <span>Indices Hit: {db.index_hit_ratio ?? 100}%</span>
@@ -1031,7 +1313,14 @@ export default function MonitoramentoPage() {
                 </div>
 
                 <div className={styles.kpiCard}>
-                  <span className={styles.kpiLabel}>Indices Sem Uso (idx_scan = 0)</span>
+                  <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                    <span>Indices Sem Uso (idx_scan = 0)</span>
+                    <InfoHint guideKey="storage_kpi_unused_idx" />
+                  </span>
+                  <span className={styles.kpiPolarityHint}>
+                    <ArrowDownRight size={12} />
+                    <span>Bom ser BAIXO ou ZERO</span>
+                  </span>
                   <div className={styles.kpiValue}>
                     {Array.isArray(tables.unused_indexes) ? tables.unused_indexes.length : 0}
                   </div>
@@ -1049,7 +1338,7 @@ export default function MonitoramentoPage() {
                       <span>Anatomia das 25 Maiores Tabelas, Bloat & Uso de Indices</span>
                     </h2>
                     <p className={styles.sectionSubtitle}>
-                      Monitora ocupacao fisica, dead tuples (bloat aguardando VACUUM), proporcao de varreduras sequenciais (Seq Scan) vs indice e volume de escritas.
+                      Passe o mouse no icone (i) de cada coluna para saber se o valor deve ser alto ou baixo e quando criar indice ou limpar dados.
                     </p>
                   </div>
 
@@ -1078,14 +1367,54 @@ export default function MonitoramentoPage() {
                     <thead>
                       <tr>
                         <th>Schema.Tabela</th>
-                        <th>Tamanho Total</th>
-                        <th>Dados / Indices</th>
-                        <th>Linhas Vivas / Mortas</th>
-                        <th>Bloat %</th>
-                        <th>Eficiencia de Indice</th>
-                        <th>Seq Scan / Idx Scan</th>
-                        <th>Churn (INS / UPD / DEL)</th>
-                        <th>Ultimo Autovacuum</th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Tamanho Total</span>
+                            <InfoHint guideKey="col_table_total_size" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Dados / Indices</span>
+                            <InfoHint guideKey="col_data_vs_index" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Linhas Vivas / Mortas</span>
+                            <InfoHint guideKey="col_live_dead_rows" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Bloat %</span>
+                            <InfoHint guideKey="col_bloat_pct" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Eficiencia de Indice</span>
+                            <InfoHint guideKey="col_idx_efficiency" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Seq Scan / Idx Scan</span>
+                            <InfoHint guideKey="col_seq_vs_idx_scan" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Churn (INS / UPD / DEL)</span>
+                            <InfoHint guideKey="col_table_churn" />
+                          </span>
+                        </th>
+                        <th>
+                          <span className={styles.thWithInfo}>
+                            <span>Ultimo Autovacuum</span>
+                            <InfoHint guideKey="col_last_autovacuum" />
+                          </span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1159,6 +1488,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <Filter size={18} />
                       <span>Indices Secundarios Sem Leituras Registradas (idx_scan = 0)</span>
+                      <InfoHint guideKey="section_unused_indexes" />
                     </h2>
                     <p className={styles.sectionSubtitle}>
                       Indices nao-unicos no schema public que ainda nao foram utilizados pelo planejador de consultas (exclui chaves primarias, constraints UNIQUE e os novos indices recem-criados).
@@ -1205,6 +1535,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <KeyRound size={18} />
                       <span>Credenciais OAuth2 & Validador Cognito Conta Azul</span>
+                      <InfoHint guideKey="section_ca_oauth" />
                     </h2>
                     <span
                       className={`${styles.badge} ${
@@ -1284,6 +1615,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <ShieldAlert size={18} />
                       <span>Circuit Breaker & Trava Anti-Cron Duplicado (12 min)</span>
+                      <InfoHint guideKey="section_circuit_breaker" />
                     </h2>
                     <span
                       className={`${styles.badge} ${
@@ -1318,7 +1650,10 @@ export default function MonitoramentoPage() {
                       </span>
                     </div>
                     <div className={styles.kvRow}>
-                      <span className={styles.kvKey}>Crons Duplicados Bloqueados</span>
+                      <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                        <span>Crons Duplicados Bloqueados</span>
+                        <InfoHint guideKey="cb_dup_blocked" />
+                      </span>
                       <span className={styles.kvVal}>
                         {formatNumber(
                           integration.cron_and_circuit?.duplicate_cron_blocked_count ?? 0
@@ -1326,7 +1661,10 @@ export default function MonitoramentoPage() {
                       </span>
                     </div>
                     <div className={styles.kvRow}>
-                      <span className={styles.kvKey}>Falhas OAuth Consecutivas</span>
+                      <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                        <span>Falhas OAuth Consecutivas</span>
+                        <InfoHint guideKey="cb_oauth_failures" />
+                      </span>
                       <span className={styles.kvVal}>
                         {integration.cron_and_circuit?.oauth_consecutive_failures ?? 0} / 3
                       </span>
@@ -1354,6 +1692,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <Layers size={18} />
                       <span>Fila Outbox de Sincronizacao Reversa (sync_queue)</span>
+                      <InfoHint guideKey="section_sync_queue" />
                     </h2>
                     <p className={styles.sectionSubtitle}>
                       Pendentes: {integration.sync_queue?.pending ?? 0} | Em Processamento:{' '}
@@ -1471,6 +1810,7 @@ export default function MonitoramentoPage() {
                       <h2 className={styles.sectionTitle}>
                         <FileWarning size={18} />
                         <span>Erros Agrupados em Logs ({integration.logs?.total_size_pretty || '0 KB'})</span>
+                        <InfoHint guideKey="section_grouped_errors" />
                       </h2>
                       <p className={styles.sectionSubtitle}>
                         Total: {formatNumber(integration.logs?.total_count ?? 0)} linhas (
@@ -1541,6 +1881,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <Clock size={18} />
                       <span>Auditoria de Disparos de Cron (/api/sync/cron)</span>
+                      <InfoHint guideKey="section_cron_audit" />
                     </h2>
                     <p className={styles.sectionSubtitle}>
                       Ultimas 30 chamadas recebidas pelo endpoint automatico, identificando qual agendador disparou e quais duplicidades foram bloqueadas.
@@ -1613,7 +1954,10 @@ export default function MonitoramentoPage() {
 
                 <div className={styles.kvList}>
                   <div className={styles.kvRow}>
-                    <span className={styles.kvKey}>Validade PAT Supabase</span>
+                    <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                      <span>Validade PAT Supabase</span>
+                      <InfoHint guideKey="gov_pat_validity" />
+                    </span>
                     <span className={styles.kvVal}>
                       <span
                         className={`${styles.badge} ${
@@ -1633,7 +1977,10 @@ export default function MonitoramentoPage() {
                     </span>
                   </div>
                   <div className={styles.kvRow}>
-                    <span className={styles.kvKey}>CRON_SECRET</span>
+                    <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                      <span>CRON_SECRET</span>
+                      <InfoHint guideKey="gov_cron_secret" />
+                    </span>
                     <span className={styles.kvVal}>
                       {intel.environment?.hasCronSecret ? 'Configurada' : 'Nao definida'}
                     </span>
@@ -1645,7 +1992,10 @@ export default function MonitoramentoPage() {
                     </span>
                   </div>
                   <div className={styles.kvRow}>
-                    <span className={styles.kvKey}>Tabelas Publicas sem RLS</span>
+                    <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                      <span>Tabelas Publicas sem RLS</span>
+                      <InfoHint guideKey="gov_rls_exposed" />
+                    </span>
                     <span className={styles.kvVal}>
                       <span
                         className={`${styles.badge} ${
@@ -1673,6 +2023,7 @@ export default function MonitoramentoPage() {
                   <h2 className={styles.sectionTitle}>
                     <Server size={18} />
                     <span>Sessoes Auth & Pool por Role</span>
+                    <InfoHint guideKey="gov_active_sessions" />
                   </h2>
                 </div>
 
@@ -1691,7 +2042,10 @@ export default function MonitoramentoPage() {
                     </span>
                   </div>
                   <div className={styles.kvRow}>
-                    <span className={styles.kvKey}>Tabela auth.refresh_tokens</span>
+                    <span className={`${styles.kvKey} ${styles.labelWithInfo}`}>
+                      <span>Tabela auth.refresh_tokens</span>
+                      <InfoHint guideKey="gov_refresh_tokens" />
+                    </span>
                     <span className={styles.kvVal}>
                       {formatNumber(governance.auth_stats?.refresh_tokens_count ?? 0)} (
                       {governance.auth_stats?.refresh_tokens_size || '0 KB'})
@@ -1741,6 +2095,7 @@ export default function MonitoramentoPage() {
                   <h2 className={styles.sectionTitle}>
                     <CheckCircle2 size={18} />
                     <span>Sanity Checks de Dados de Negocio</span>
+                    <InfoHint guideKey="section_business_sanity" />
                   </h2>
                 </div>
 
@@ -1830,6 +2185,7 @@ export default function MonitoramentoPage() {
                     <h2 className={styles.sectionTitle}>
                       <Wrench size={18} />
                       <span>Central de Playbooks Preventivos e Corretivos em 1 Clique</span>
+                      <InfoHint guideKey="section_playbooks" />
                     </h2>
                     <p className={styles.sectionSubtitle}>
                       Todas as operacoes rodam via RPC SECURITY DEFINER restrita ao service_role, sem expor comandos destrutivos ao cliente publico.
@@ -1837,7 +2193,10 @@ export default function MonitoramentoPage() {
                   </div>
 
                   <div className={styles.headerControls}>
-                    <span className={styles.kpiLabel}>Janela de Retencao para Limpezas:</span>
+                    <span className={`${styles.kpiLabel} ${styles.labelWithInfo}`}>
+                      <span>Janela de Retencao para Limpezas:</span>
+                      <InfoHint guideKey="retention_window" />
+                    </span>
                     <select
                       value={retentionHours}
                       onChange={(e) => setRetentionHours(Number(e.target.value))}
