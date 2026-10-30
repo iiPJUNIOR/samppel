@@ -228,3 +228,65 @@ export async function sendDailyMorningReport(details: {
     html
   });
 }
+
+/**
+ * Envia alerta preventivo da Central de Monitoramento (Circuit Breaker OAuth, Risco de Cota ou Gargalo N+1)
+ */
+export async function sendMonitoringAnomalyAlert(details: {
+  title: string;
+  severity: 'CRITICO' | 'ATENCAO';
+  category: string;
+  description: string;
+  recommendedAction: string;
+  metrics?: Record<string, string | number>;
+}) {
+  const time = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const borderColor = details.severity === 'CRITICO' ? '#dc2626' : '#d97706';
+  const headerBg = details.severity === 'CRITICO' ? '#7f1d1d' : '#78350f';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://portalsamppel.vercel.app';
+
+  const metricsRows = details.metrics
+    ? Object.entries(details.metrics)
+        .map(
+          ([k, v]) =>
+            `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #334155;font-size:12px;"><span style="color:#94a3b8;">${k}</span><strong style="color:#f8fafc;">${v}</strong></div>`
+        )
+        .join('')
+    : '';
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; margin: 0;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #1e293b; border-radius: 12px; border: 1px solid ${borderColor}; overflow: hidden;">
+    <div style="background-color: ${headerBg}; padding: 18px 24px; color: #ffffff;">
+      <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">[${details.severity}] ${details.category}</div>
+      <h1 style="margin: 4px 0 0 0; font-size: 18px; font-weight: 700;">${details.title}</h1>
+    </div>
+    <div style="padding: 24px; color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+      <p style="margin-top: 0;">${details.description}</p>
+      ${metricsRows ? `<div style="background-color:#0f172a;padding:12px 16px;border-radius:8px;margin:16px 0;">${metricsRows}</div>` : ''}
+      <div style="background-color: #0f172a; border-left: 4px solid #3b82f6; padding: 12px 14px; border-radius: 6px; margin: 16px 0; font-size: 13px;">
+        <strong style="color: #f8fafc;">Ação Recomendada:</strong><br/>
+        ${details.recommendedAction}
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <a href="${appUrl}/monitoramento" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">Abrir Central de Monitoramento</a>
+      </div>
+    </div>
+    <div style="padding: 14px 24px; background-color: #0f172a; border-top: 1px solid #334155; font-size: 12px; color: #64748b; text-align: center;">
+      Emitido em ${time} para ${DEFAULT_RECIPIENT} | Central de Monitoramento Samppel
+    </div>
+  </div>
+</body>
+</html>`;
+
+  return sendEmail({
+    to: DEFAULT_RECIPIENT,
+    subject: `[${details.severity}] ${details.title} - Monitoramento Samppel`,
+    html
+  });
+}

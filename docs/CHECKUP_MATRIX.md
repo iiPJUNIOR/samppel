@@ -17,7 +17,7 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts` | 2026-10-27 | OK |
+| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx` | 2026-10-30 | OK |
 | **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-29 | OK |
 | **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`) | 2026-10-27 | OK |
 | **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
@@ -30,8 +30,9 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-10-17 | OK |
 | **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx` | 2026-10-15 | OK |
 | **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-10-19 | OK |
-| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-10-29 | OK |
-| **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, rotas em `api/sync/`, `.github/workflows/` | 2026-10-29 | OK |
+| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-10-30 | OK |
+| **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-10-30 | OK |
+| **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql` | 2026-10-30 | OK |
 
 Legenda de Status:
 * **OK:** Funcionalidade auditada, sem erros de compilação, tipos ou lógica aparente.
@@ -173,13 +174,24 @@ Legenda de Status:
   * Integridade estrutural das configurações.
 
 ### MOD-15: Integração Conta Azul
-* **Responsabilidade:** Sincronização bidirecional de pedidos, clientes e lançamentos financeiros com a API do Conta Azul.
-* **Arquivos-Chave:** [conta_azul.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/conta_azul.ts), rotas em [src/app/api/sync/](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/sync/).
-* **Onde se conecta:** APIs OAuth2 do Conta Azul e tabelas locais `orders`, `financial_transactions`.
-* **Módulos que Dependem Dele:** MOD-02 (Importação de Pedidos), MOD-09 (Financeiro).
+* **Responsabilidade:** Sincronização bidirecional de pedidos, clientes e lançamentos financeiros com a API do Conta Azul, busca manual direta por número do PV independente de janela de datas (`termo_busca`), trava anti-cron duplicado (12 min) e Circuit Breaker OAuth2/`END_TRIAL`.
+* **Arquivos-Chave:** [conta_azul.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/conta_azul.ts), [callback/route.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/auth/conta-azul/callback/route.ts), rotas em [src/app/api/sync/](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/sync/), [vercel.json](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/vercel.json).
+* **Onde se conecta:** Gateway OAuth2 v2 da Conta Azul (`login.contaazul.com/#/oauth/authorize` e `api-v2.contaazul.com/oauth/token`), API REST v2 (`api-v2.contaazul.com/v1`) e tabelas locais `orders`, `financial_transactions`, `system_monitoring_state`.
+* **Módulos que Dependem Dele:** MOD-02 (Importação de Pedidos), MOD-09 (Financeiro), MOD-16 (Monitoramento).
 * **Critérios de Validação:**
-  * Renovação e integridade do token de autenticação.
+  * Renovação e integridade do token de autenticação com captura detalhada de status/corpo HTTP.
+  * Importação manual por número do PV funcionando independente da data de emissão do pedido.
   * Validação de sincronismo sem sobrescrever dados manuais locais indevidamente.
+
+### MOD-16: Central de Monitoramento, Telemetria Anti-Estouro e Governança
+* **Responsabilidade:** Monitoramento consolidado em 1 única chamada RPC (`get_system_monitoring_telemetry`) de consumo Supabase (disco, storage, pool de conexões, cache hit), detector N+1 (`pg_stat_statements` com linha de base resetável), anatomia de tabelas/bloat/índices, saúde OAuth/Crons/Filas Conta Azul, governança de segurança (validade PAT `04/01/2027`, RLS, sessões Auth, sanity checks operacionais) e playbooks corretivos em 1 clique. Acesso restrito exclusivamente a `junior.8350i@gmail.com`.
+* **Arquivos-Chave:** [monitoramento/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/monitoramento/page.tsx), [monitoring.module.css](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/monitoramento/monitoring.module.css), [api/admin/monitoring/route.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/admin/monitoring/route.ts), [serverAuth.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/lib/serverAuth.ts), [supabase_monitoring_center.sql](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/supabase/supabase_monitoring_center.sql), [rollback_monitoring_center.sql](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/supabase/rollback_monitoring_center.sql).
+* **Onde se conecta:** Catálogos internos do Postgres (`pg_stat_statements`, `pg_stat_activity`, `pg_stat_user_tables`, `pg_stat_user_indexes`), tabelas `system_monitoring_state` e `system_monitoring_snapshots` (`service_role` only).
+* **Módulos que Dependem Dele:** Folha administrativa de observabilidade e governança (audita MOD-01 a MOD-15 sem interferir no fluxo operacional).
+* **Critérios de Validação:**
+  * Bloqueio estrito HTTP 403 e guard de interface para qualquer usuário diferente de `junior.8350i@gmail.com`.
+  * Cache em memória de 60s e zero polling oculto em background (auto-consumo nulo).
+  * Execução segura dos playbooks de manutenção via `execute_monitoring_maintenance`.
 
 ---
 
@@ -190,3 +202,4 @@ Legenda de Status:
 | **2026-10-23** | MOD-01 até MOD-15 | APROVADO COM ÊXITO | Baseline inicial criada. Correções em MOD-04, MOD-06 e MOD-07 (Saldos e Créditos) validadas e 100% integradas. Zero erros no TypeScript e compilação Next.js estável. |
 | **2026-10-29** | MOD-14, MOD-15 | APROVADO COM ÊXITO | Otimização anti-estouro de cotas Supabase: sincronização incremental rápida a cada 15 minutos (.github/workflows/sync-cron.yml), supressão de logs ruidosos, separação de catálogo diário (03:00) e trava de Page Visibility no monitor de status do banco. Puxar pedido manual (PV) 100% preservado. |
 | **2026-10-29** | MOD-02 | APROVADO COM ÊXITO | Eliminação definitiva do gargalo N+1 em order_item_packaging (de 904 requisições por carregamento de página para 1 única requisição em lote com getOrderItemPackagingBulk). Redução de ~96,7% no tráfego de borda do Supabase. |
+| **2026-10-30** | MOD-01, MOD-14, MOD-15, MOD-16 | APROVADO COM ÊXITO | Implementação da Central de Monitoramento, Telemetria Anti-Estouro e Governança (/monitoramento) exclusiva para junior.8350i@gmail.com, migração oficial do fluxo OAuth 2.0 Conta Azul v2 (login.contaazul.com/#/oauth/authorize e api-v2.contaazul.com/oauth/token + blindagem UUID de state no callback), índices anti-seq-scan em logs e sync_queue, Circuit Breaker OAuth + trava anti-cron duplicado (12 min), correção do cron diário (?mode=full) e busca direta de pedidos por número (termo_busca) sem restrição de data em getSaleIdByNumber. |

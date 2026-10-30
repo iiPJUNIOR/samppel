@@ -101,6 +101,37 @@ export async function requireAdmin(request: NextRequest): Promise<{ authorized: 
   return { authorized: true, user, profile };
 }
 
+export const OWNER_MONITORING_EMAIL = 'junior.8350i@gmail.com';
+
+/**
+ * Exige exclusivamente o usuario proprietario da Central de Monitoramento (junior.8350i@gmail.com)
+ */
+export async function requireMonitoringOwner(
+  request: NextRequest
+): Promise<{ authorized: true; user: any } | { authorized: false; response: NextResponse }> {
+  const { user, error } = await getAuthenticatedUser(request);
+
+  if (error || !user) {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: error || 'Autenticação necessária.' }, { status: 401 })
+    };
+  }
+
+  const email = user.email?.toLowerCase().trim();
+  if (email !== OWNER_MONITORING_EMAIL) {
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { error: 'Acesso restrito exclusivamente a junior.8350i@gmail.com.' },
+        { status: 403 }
+      )
+    };
+  }
+
+  return { authorized: true, user };
+}
+
 /**
  * Exige qualquer usuário autenticado ativo no sistema
  */

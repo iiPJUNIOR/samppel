@@ -157,10 +157,29 @@ function sanitizeLogData(data: any): any {
   return sanitized;
 }
 
+function capErrorPayload(data: any, depth = 0): any {
+  if (data === null || data === undefined) return null;
+  if (typeof data === 'string') {
+    return data.length > 1200 ? data.substring(0, 1200) + '... [truncado]' : data;
+  }
+  if (typeof data !== 'object') return data;
+  if (depth > 2) return '[objeto aninhado compactado]';
+  if (Array.isArray(data)) {
+    return { total_items: data.length, sample: data.slice(0, 3).map((item) => capErrorPayload(item, depth + 1)) };
+  }
+  const out: Record<string, any> = {};
+  const keys = Object.keys(data).slice(0, 20);
+  for (const k of keys) {
+    out[k] = capErrorPayload(data[k], depth + 1);
+  }
+  return out;
+}
+
 export async function createIntegrationLog(action: string, status: 'SUCCESS' | 'ERROR' | 'PENDING_RETRY', payload: any, response: any, errorMessage: string | null = null, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   // Em caso de sucesso, compacta o payload para não inflar a ingestão de logs e egress no Supabase
-  const finalPayload = status === 'SUCCESS' ? sanitizeLogData(payload) : payload;
-  const finalResponse = status === 'SUCCESS' ? sanitizeLogData(response) : response;
+  const finalPayload = status === 'SUCCESS' ? sanitizeLogData(payload) : capErrorPayload(payload);
+  const finalResponse = status === 'SUCCESS' ? sanitizeLogData(response) : capErrorPayload(response);
+  const cappedError = errorMessage && errorMessage.length > 1500 ? errorMessage.substring(0, 1500) + '... [truncado]' : errorMessage;
 
   const log = {
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
@@ -169,7 +188,7 @@ export async function createIntegrationLog(action: string, status: 'SUCCESS' | '
     status,
     payload: finalPayload,
     response: finalResponse,
-    error_message: errorMessage,
+    error_message: cappedError,
     created_at: new Date().toISOString()
   };
   if (isMockMode) {

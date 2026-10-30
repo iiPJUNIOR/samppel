@@ -38,6 +38,14 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // 3.5 Restricao exclusiva da Central de Monitoramento para junior.8350i@gmail.com
+        if (pathname === '/monitoramento' || pathname?.startsWith('/monitoramento/')) {
+          if (user.email?.toLowerCase().trim() !== 'junior.8350i@gmail.com') {
+            router.push('/dashboard');
+            return;
+          }
+        }
+
         // 4. Regras de navegação padrão por papel
         if (user.is_factory_account) {
           if (pathname !== '/pedidos') {
@@ -356,6 +364,66 @@ export default function AppGuard({ children }: { children: React.ReactNode }) {
             }}
           >
             <span>Ir para o Dashboard</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Restricao exclusiva da Central de Monitoramento (/monitoramento) para junior.8350i@gmail.com
+  if (
+    user &&
+    (pathname === '/monitoramento' || pathname?.startsWith('/monitoramento/')) &&
+    user.email?.toLowerCase().trim() !== 'junior.8350i@gmail.com'
+  ) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '80vh',
+        width: '100%',
+        padding: '2rem',
+        textAlign: 'center',
+        fontFamily: 'var(--font-sans)'
+      }}>
+        <div style={{
+          maxWidth: '480px',
+          width: '100%',
+          backgroundColor: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '16px',
+          padding: '2.5rem 2rem',
+          boxShadow: 'var(--shadow-md)'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: 'var(--danger-bg)',
+            color: 'var(--danger)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.25rem auto'
+          }}>
+            <ShieldAlert size={34} />
+          </div>
+
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text)', margin: '0 0 0.5rem 0' }}>
+            Acesso Exclusivo do Proprietario
+          </h2>
+
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0 0 1.5rem 0', lineHeight: '1.5' }}>
+            A Central de Monitoramento e Telemetria Anti-Estouro e restrita exclusivamente a conta principal de infraestrutura.
+          </p>
+
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600 }}
+          >
+            Voltar ao Dashboard
           </button>
         </div>
       </div>

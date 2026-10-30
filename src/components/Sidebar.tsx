@@ -20,6 +20,7 @@ import {
   Menu,
   X,
   Coins,
+  Activity,
 } from 'lucide-react';
 
 interface NavItem {
@@ -146,6 +147,12 @@ export default function Sidebar() {
       allowedRoles: ['Administrador', 'Produção', 'Fábrica', 'Vendedor', 'Comercial', 'Financeiro', 'Expedição', 'Estoque']
     },
     {
+      label: 'Monitoramento',
+      path: '/monitoramento',
+      icon: <Activity size={17} />,
+      allowedRoles: ['Administrador']
+    },
+    {
       label: 'Configurações',
       path: '/configuracoes',
       icon: <Settings size={17} />,
@@ -156,6 +163,9 @@ export default function Sidebar() {
   if (!user) return null;
 
   const visibleNavItems = navItems.filter(item => {
+    if (item.path === '/monitoramento') {
+      return user.email?.toLowerCase().trim() === 'junior.8350i@gmail.com';
+    }
     if (user.is_factory_account) {
       return item.path === '/pedidos';
     }

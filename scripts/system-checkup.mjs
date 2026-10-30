@@ -30,7 +30,11 @@ const requiredFiles = [
   'src/app/pedidos/saldos/page.tsx',
   'src/app/financeiro/page.tsx',
   'src/app/clientes/page.tsx',
-  'src/app/produtos/page.tsx'
+  'src/app/produtos/page.tsx',
+  'src/app/monitoramento/page.tsx',
+  'src/app/api/admin/monitoring/route.ts',
+  'supabase/supabase_monitoring_center.sql',
+  'supabase/rollback_monitoring_center.sql'
 ];
 
 let missingFiles = [];
@@ -62,7 +66,8 @@ const routes = [
   'fornecedores',
   'relatorios',
   'configuracoes',
-  'operador-perfil'
+  'operador-perfil',
+  'monitoramento'
 ];
 
 let invalidRoutes = [];

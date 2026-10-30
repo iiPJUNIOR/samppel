@@ -32,6 +32,8 @@
   ],
   "exclude": [
     "node_modules",
+    "backup_*",
+    "backup_20261030_pre_monitoring",
     "backup_pre_coleta_fields",
     "temp_backup",
     "temp_frontend_backup",
