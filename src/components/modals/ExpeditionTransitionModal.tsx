@@ -96,8 +96,9 @@ export function ExpeditionTransitionModal(props: any) {
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Package size={15} style={{ color: 'var(--primary)' }} />
                       <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)' }}>
-                        📦 Agrupar Itens na Mesma Caixa / Frete
+                        Agrupar Itens na Mesma Caixa / Frete
                       </span>
                     </div>
                   </div>
@@ -265,9 +266,14 @@ export function ExpeditionTransitionModal(props: any) {
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '280px', overflowY: 'auto', paddingRight: '4px' }}>
                     {[expeditionTransitionItem, ...expeditionSiblings.filter(s => expeditionSelectedSiblings.includes(s.id))].map((itm: any) => {
+                      const isCliche = `${itm?.name || ''} ${itm?.product?.name || ''}`
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .toLowerCase()
+                        .includes('cliche');
                       const itemData = expeditionItemConferencyMap[itm.id] || { producedQuantity: itm.print_run || 0, adjustmentAction: 'CREDITO_PROXIMO_PEDIDO' };
                       const orderedQty = itm.print_run || 0;
-                      const diffQty = itemData.producedQuantity - orderedQty;
+                      const diffQty = isCliche ? 0 : (itemData.producedQuantity - orderedQty);
 
                       return (
                         <div key={itm.id} style={{
@@ -288,58 +294,73 @@ export function ExpeditionTransitionModal(props: any) {
                             </span>
                           </div>
 
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', alignItems: 'center' }}>
-                            <div className="form-group" style={{ margin: 0 }}>
-                              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Qtd Produzida Final *</label>
-                              <input
-                                type="number"
-                                min="0"
-                                required
-                                className="form-input"
-                                value={itemData.producedQuantity}
-                                onChange={(e) => updateExpeditionItemConferency(itm.id, 'producedQuantity', Number(e.target.value))}
-                                style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }}
-                              />
+                          {isCliche ? (
+                            <div style={{
+                              fontSize: '0.74rem',
+                              color: 'var(--text-muted)',
+                              backgroundColor: 'var(--surface)',
+                              border: '1px dashed var(--border)',
+                              borderRadius: '4px',
+                              padding: '0.4rem 0.55rem'
+                            }}>
+                              Item técnico (Clichê) — isento de conferência de sobra ou falta de tiragem.
                             </div>
+                          ) : (
+                            <>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', alignItems: 'center' }}>
+                                <div className="form-group" style={{ margin: 0 }}>
+                                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Qtd Produzida Final *</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    required
+                                    className="form-input"
+                                    value={itemData.producedQuantity}
+                                    onChange={(e) => updateExpeditionItemConferency(itm.id, 'producedQuantity', Number(e.target.value))}
+                                    style={{ padding: '0.35rem 0.5rem', fontSize: '0.8rem' }}
+                                  />
+                                </div>
 
-                            <div>
-                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>Saldo Calculado:</span>
-                              {diffQty === 0 ? (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>0 (Sem sobras/faltas)</span>
-                              ) : diffQty > 0 ? (
-                                <span style={{ fontSize: '0.75rem', color: 'hsl(142.1, 76.2%, 36.3%)', fontWeight: 700 }}>+{diffQty.toLocaleString('pt-BR')} un (Sobra)</span>
-                              ) : (
-                                <span style={{ fontSize: '0.75rem', color: 'hsl(346.8, 77.2%, 49.8%)', fontWeight: 700 }}>{diffQty.toLocaleString('pt-BR')} un (Falta)</span>
+                                <div>
+                                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>Saldo Calculado:</span>
+                                  {diffQty === 0 ? (
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>0 (Sem sobras/faltas)</span>
+                                  ) : diffQty > 0 ? (
+                                    <span style={{ fontSize: '0.75rem', color: 'hsl(142.1, 76.2%, 36.3%)', fontWeight: 700 }}>+{diffQty.toLocaleString('pt-BR')} un (Sobra)</span>
+                                  ) : (
+                                    <span style={{ fontSize: '0.75rem', color: 'hsl(346.8, 77.2%, 49.8%)', fontWeight: 700 }}>{diffQty.toLocaleString('pt-BR')} un (Falta)</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {diffQty !== 0 && (
+                                <div className="form-group" style={{ margin: 0 }}>
+                                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Tratamento do Saldo (Cliente) *</label>
+                                  <select
+                                    className="form-select"
+                                    value={itemData.adjustmentAction}
+                                    onChange={(e) => updateExpeditionItemConferency(itm.id, 'adjustmentAction', e.target.value)}
+                                    style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                                  >
+                                    {diffQty > 0 ? (
+                                      <>
+                                        <option value="CREDITO_PROXIMO_PEDIDO">Sobra Enviada — Abater no Próximo Pedido</option>
+                                        <option value="GUARDAR_ESTOQUE_CLIENTE">Guardar no Estoque de Personalizados (Fábrica)</option>
+                                        <option value="COBRADO_ADICIONAL">Cobrar Valor Adicional do Cliente</option>
+                                        <option value="OUTRO">Cortesia Gratuita (Brinde — Não Abater no Próximo Pedido)</option>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <option value="PENDENCIA_ENTREGA">Falta a Entregar — Somar/Produzir no Próximo Pedido</option>
+                                        <option value="REPRODUCAO_PENDENTE">Programar Reprodução Pendente (Lote Corretivo)</option>
+                                        <option value="CANCELADO_DESCONTO">Gerar Desconto Proporcional no Faturamento</option>
+                                        <option value="OUTRO">Outro / Tratar Manualmente (Sem Gerar Saldo)</option>
+                                      </>
+                                    )}
+                                  </select>
+                                </div>
                               )}
-                            </div>
-                          </div>
-
-                          {diffQty !== 0 && (
-                            <div className="form-group" style={{ margin: 0 }}>
-                              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.72rem' }}>Tratamento do Saldo (Cliente) *</label>
-                              <select
-                                className="form-select"
-                                value={itemData.adjustmentAction}
-                                onChange={(e) => updateExpeditionItemConferency(itm.id, 'adjustmentAction', e.target.value)}
-                                style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
-                              >
-                                {diffQty > 0 ? (
-                                  <>
-                                    <option value="CREDITO_PROXIMO_PEDIDO">Crédito para o Próximo Pedido</option>
-                                    <option value="GUARDAR_ESTOQUE_CLIENTE">Guardar no Estoque de Personalizados (Fábrica)</option>
-                                    <option value="COBRADO_ADICIONAL">Cobrar Valor Adicional do Cliente</option>
-                                    <option value="OUTRO">Cortesia</option>
-                                  </>
-                                ) : (
-                                  <>
-                                    <option value="PENDENCIA_ENTREGA">Registrar Pendência de Entrega (Gerar Crédito)</option>
-                                    <option value="REPRODUCAO_PENDENTE">Programar Reprodução Pendente (Lote Corretivo)</option>
-                                    <option value="CANCELADO_DESCONTO">Gerar Desconto Proporcional no Faturamento</option>
-                                    <option value="OUTRO">Outro / Tratar Manualmente</option>
-                                  </>
-                                )}
-                              </select>
-                            </div>
+                            </>
                           )}
                         </div>
                       );
@@ -396,12 +417,17 @@ export function ExpeditionTransitionModal(props: any) {
 
                     // 1. Processar Ocorrências e Crédito/Débito Individual para Cada Item Selecionado
                     for (const itm of activeItemsToMove) {
+                      const isCliche = `${itm?.name || ''} ${itm?.product?.name || ''}`
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .toLowerCase()
+                        .includes('cliche');
                       const itemData = expeditionItemConferencyMap[itm.id] || {
                         producedQuantity: itm.print_run || 0,
                         adjustmentAction: 'CREDITO_PROXIMO_PEDIDO'
                       };
                       const orderedQty = itm.print_run || 0;
-                      const diffQty = itemData.producedQuantity - orderedQty;
+                      const diffQty = isCliche ? 0 : (itemData.producedQuantity - orderedQty);
 
                       const updates: any = {
                         over_short_quantity: diffQty,

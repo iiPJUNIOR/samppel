@@ -779,7 +779,7 @@ export interface OrderBalanceAdjustment {
   produced_quantity: number;
   difference_quantity: number;
   adjustment_type: 'SOBRA' | 'FALTA';
-  action_taken: 'GUARDAR_ESTOQUE_CLIENTE' | 'CREDITO_PROXIMO_PEDIDO' | 'CANCELADO_DESCONTO' | 'COBRADO_ADICIONAL' | 'REPRODUCAO_PENDENTE' | 'OUTRO';
+  action_taken: 'GUARDAR_ESTOQUE_CLIENTE' | 'CREDITO_PROXIMO_PEDIDO' | 'PENDENCIA_ENTREGA' | 'CANCELADO_DESCONTO' | 'COBRADO_ADICIONAL' | 'REPRODUCAO_PENDENTE' | 'OUTRO';
   notes: string | null;
   created_by_name?: string | null;
   created_at: string;
@@ -864,8 +864,29 @@ export async function getOrderBalanceAdjustments(orderId?: string, customerId?: 
   return { data, error };
 }
 
+export function isClicheName(name?: string | null): boolean {
+  if (!name) return false;
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .includes('cliche');
+}
+
 export async function createOrderBalanceAdjustment(adjustment: Omit<OrderBalanceAdjustment, 'id' | 'created_at'>) {
   const tenantId = adjustment.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+
+  // Trava Anti-Cliche: itens tecnicos de Cliche nao geram saldo de sobra/falta
+  if (adjustment.product_id) {
+    const { data: prodCheck } = await getDbClient()
+      .from('products')
+      .select('name')
+      .eq('id', adjustment.product_id)
+      .maybeSingle();
+    if (isClicheName(prodCheck?.name)) {
+      return { data: null, error: null };
+    }
+  }
 
   const { data, error } = await getDbClient()
     .from('order_balance_adjustments')
@@ -893,7 +914,7 @@ export async function createOrderBalanceAdjustment(adjustment: Omit<OrderBalance
       );
     }
 
-    if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(data.action_taken)) {
+    if (['CREDITO_PROXIMO_PEDIDO', 'PENDENCIA_ENTREGA', 'REPRODUCAO_PENDENTE'].includes(data.action_taken) && data.difference_quantity !== 0) {
       const type = data.difference_quantity > 0 ? 'CORTESIA_SOBRA' : 'PENDENCIA_ENTREGA';
       const qty = Math.abs(data.difference_quantity);
       await createCustomerStockCredit({
@@ -932,8 +953,55 @@ export async function getCustomerStockCredits(customerId?: string, status?: stri
 
 export async function createCustomerStockCredit(credit: Omit<CustomerStockCredit, 'id' | 'created_at' | 'updated_at'>) {
   const tenantId = credit.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+  const db = getDbClient();
 
-  const { data, error } = await getDbClient()
+  // 1. Trava Anti-Cliche: impede geracao de credito/falta sobre itens de Cliche
+  if (credit.product_id) {
+    const { data: prodCheck } = await db
+      .from('products')
+      .select('name')
+      .eq('id', credit.product_id)
+      .maybeSingle();
+    if (isClicheName(prodCheck?.name)) {
+      return { data: null, error: null };
+    }
+  }
+
+  // 2. Protecao Anti-Duplicidade por source_adjustment_id
+  if (credit.source_adjustment_id) {
+    const { data: existingByAdj } = await db
+      .from('customer_stock_credits')
+      .select('*, customer:customers(*), product:products(*)')
+      .eq('source_adjustment_id', credit.source_adjustment_id)
+      .maybeSingle();
+    if (existingByAdj) {
+      return { data: existingByAdj, error: null };
+    }
+  }
+
+  // 3. Protecao Anti-Duplicidade em janela de 60s para chamadas concorrentes sem source_adjustment_id
+  const recentWindowIso = new Date(Date.now() - 60 * 1000).toISOString();
+  let dupQuery = db
+    .from('customer_stock_credits')
+    .select('*, customer:customers(*), product:products(*)')
+    .eq('tenant_id', tenantId)
+    .eq('customer_id', credit.customer_id)
+    .eq('product_id', credit.product_id)
+    .eq('credit_type', credit.credit_type)
+    .eq('original_quantity', credit.original_quantity)
+    .eq('status', 'ATIVO')
+    .gte('created_at', recentWindowIso);
+
+  if (credit.source_order_id) {
+    dupQuery = dupQuery.eq('source_order_id', credit.source_order_id);
+  }
+
+  const { data: recentDup } = await dupQuery.limit(1).maybeSingle();
+  if (recentDup) {
+    return { data: recentDup, error: null };
+  }
+
+  const { data, error } = await db
     .from('customer_stock_credits')
     .insert([{ ...credit, tenant_id: tenantId }])
     .select('*, customer:customers(*), product:products(*)')

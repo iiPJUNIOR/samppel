@@ -42,7 +42,7 @@ export function ProductionAlertModal(props: any) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
               <AlertCircle size={24} style={{ color: productionAlertData.credit_type === 'PENDENCIA_ENTREGA' ? 'var(--danger)' : 'var(--success)' }} />
               <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
-                {productionAlertData.credit_type === 'PENDENCIA_ENTREGA' ? 'Falta a Entregar (Saldo Acumulado)' : 'Cortesia/Bonificação Pendente (Saldo Acumulado)'}
+                {productionAlertData.credit_type === 'PENDENCIA_ENTREGA' ? 'Falta a Entregar (+ Produzir)' : 'Excedente Enviado (- Abater no Pedido)'}
               </h2>
             </div>
 
@@ -85,11 +85,11 @@ export function ProductionAlertModal(props: any) {
                     <br />
                     {productionAlertData.original_quantity && productionAlertData.original_quantity !== productionAlertData.remaining_quantity ? (
                       <>
-                        No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, houve um excedente original de <strong>{Number(productionAlertData.original_quantity).toLocaleString('pt-BR')} unidades</strong> enviado como cortesia, restando atualmente <strong>{Number(productionAlertData.remaining_quantity || 0).toLocaleString('pt-BR')} unidades de saldo ativo</strong>.
+                        No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, houve um excedente original de <strong>{Number(productionAlertData.original_quantity).toLocaleString('pt-BR')} unidades</strong> enviado a mais, restando atualmente <strong>{Number(productionAlertData.remaining_quantity || 0).toLocaleString('pt-BR')} unidades de saldo ativo a abater</strong>.
                       </>
                     ) : (
                       <>
-                        No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, sobrou um excedente que foi enviado como <strong>cortesia/bonificação de {Number(productionAlertData.remaining_quantity || 0).toLocaleString('pt-BR')} unidades</strong> ao cliente.
+                        No pedido anterior <strong>{productionAlertData.source_order?.pv_number || 'PV de origem'}</strong> deste mesmo produto, houve um <strong>excedente enviado de {Number(productionAlertData.remaining_quantity || 0).toLocaleString('pt-BR')} unidades</strong> registrado para abatimento no próximo pedido do cliente.
                       </>
                     )}
                   </p>

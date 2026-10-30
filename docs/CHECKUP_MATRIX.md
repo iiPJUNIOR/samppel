@@ -20,11 +20,11 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx` | 2026-10-30 | OK |
 | **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-30 | OK |
 | **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`) | 2026-10-27 | OK |
-| **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
+| **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-10-30 | OK |
 | **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-10-30 | OK |
-| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `orders.ts` | 2026-10-30 | OK |
+| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-10-30 | OK |
 | **MOD-07** | Pedidos: Conferência Física na Expedição | `ConferencyModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
-| **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `orders.ts` | 2026-10-30 | OK |
+| **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `api/admin/saldos`, `orders.ts` | 2026-10-30 | OK |
 | **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts`, `orders.ts` | 2026-10-30 | OK |
 | **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-10-30 | OK |
 | **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-10-30 | OK |
@@ -112,14 +112,14 @@ Legenda de Status:
   * Gravar `over_short_quantity` e marcar `adjustment_resolved: true`.
 
 ### MOD-08: Saldos e Créditos de Clientes
-* **Responsabilidade:** Visualização e gestão centralizada de créditos de falta, cortesias de sobras e estoque de personalizados por cliente/produto.
-* **Arquivos-Chave:** [saldos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/pedidos/saldos/page.tsx), [orders.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/orders.ts#L1535-L1620).
+* **Responsabilidade:** Visualização e gestão centralizada de faltas a entregar (`+ Produzir`), excedentes enviados (`- Abater`), histórico completo de conferência da expedição (`order_balance_adjustments`), estoque personalizado guardado na fábrica e cancelamento/exclusão administrativa auditável de saldos.
+* **Arquivos-Chave:** [saldos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/pedidos/saldos/page.tsx), [api/admin/saldos/route.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/admin/saldos/route.ts), [orders.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/orders.ts#L757-L1020), [supabase_saldos_creditos_fix.sql](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/supabase/supabase_saldos_creditos_fix.sql).
 * **Onde se conecta:** Tabelas `customer_stock_credits`, `customer_product_stock`, `order_balance_adjustments`.
 * **Módulos que Dependem Dele:** MOD-04 (Alerta de Produção), MOD-06 (Expedição).
 * **Critérios de Validação:**
-  * Exibição clara de Quantidade Original vs Saldo Disponível.
-  * Filtros por cliente e produto.
-  * Permissão restrita a Administrador e Supervisão Comercial.
+  * Exibição clara de Quantidade Original vs Saldo Disponível e padronização visual com `ProductionAlertModal` (vermelho para falta `+ Produzir`, verde para excedente `- Abater`).
+  * Trava anti-Clichê e proteção anti-duplicidade em banco e serviço (`idx_customer_stock_credits_unique_source_adj`).
+  * Cancelamento/Exclusão de saldo restrito estritamente a `Administrador` via `requireAdmin`.
 
 ### MOD-09: Financeiro - Contas e Conciliação
 * **Responsabilidade:** Contas a receber, contas a pagar, controle de parcelas e status de pagamento de pedidos.
@@ -204,3 +204,4 @@ Legenda de Status:
 | **2026-10-29** | MOD-02 | APROVADO COM ÊXITO | Eliminação definitiva do gargalo N+1 em order_item_packaging (de 904 requisições por carregamento de página para 1 única requisição em lote com getOrderItemPackagingBulk). Redução de ~96,7% no tráfego de borda do Supabase. |
 | **2026-10-30** | MOD-01, MOD-14, MOD-15, MOD-16 | APROVADO COM ÊXITO | Implementação da Central de Monitoramento, Telemetria Anti-Estouro e Governança (/monitoramento) exclusiva para junior.8350i@gmail.com, migração oficial do fluxo OAuth 2.0 Conta Azul v2 (login.contaazul.com/#/oauth/authorize e api-v2.contaazul.com/oauth/token + blindagem UUID de state no callback), índices anti-seq-scan em logs e sync_queue, Circuit Breaker OAuth + trava anti-cron duplicado (12 min), correção do cron diário (?mode=full) e busca direta de pedidos por número (termo_busca) sem restrição de data em getSaleIdByNumber. |
 | **2026-10-30** | MOD-01, MOD-02, MOD-05, MOD-06, MOD-08 a MOD-12, MOD-14, MOD-15 | APROVADO COM ÊXITO | Eliminação total de Mocks ativos e camada Sandbox morta (M1-A e M2-A): desativação de push reverso simulado em conta_azul.ts e sync_queue.ts, higienização no banco de 110 pedidos, 81 clientes, 9 produtos com conta_azul_id falso ca_* e 198 logs simulados (com backup JSON prévio), remoção completa de isMockMode/arrays mock*/shouldFallbackToMock em todos os serviços, exclusão de supabase.ts.bak e blindagem requireAdmin + erro HTTP 500 real em /api/config/conta-azul. |
+| **2026-10-30** | MOD-04, MOD-06, MOD-08 | APROVADO COM ÊXITO | Saneamento completo de Saldos & Créditos de Clientes: remoção dos 4 clones duplicados em customer_stock_credits, correção do PV-1832 (Clichê 422 un -> Sacola Parda 423 un), trava anti-Clichê e anti-duplicidade (banco + serviço), inclusão de PENDENCIA_ENTREGA na CHECK constraint de order_balance_adjustments, distinção explícita entre Sobra a Abater e Cortesia Gratuita (Brinde), padronização de cores/rótulos com ProductionAlertModal, correção do prefixo PV duplicado, habilitação da aba Histórico Completo da Expedição e endpoint/modal de Cancelar ou Excluir Saldo exclusivo para Administrador (/api/admin/saldos). |
