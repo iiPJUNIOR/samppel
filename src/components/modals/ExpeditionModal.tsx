@@ -36,7 +36,7 @@ export function ExpeditionModal(props: any) {
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
-            width: '100%', maxWidth: '580px', border: '1px solid var(--border)',
+            width: '100%', maxWidth: '580px', maxHeight: '90vh', border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-xl)', overflow: 'hidden', display: 'flex', flexDirection: 'column'
           }}>
             <div style={{
@@ -57,7 +57,7 @@ export function ExpeditionModal(props: any) {
               </button>
             </div>
 
-            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="modal-scroll" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', flex: 1 }}>
               <div style={{ backgroundColor: 'hsla(0, 84.2%, 60.2%, 0.08)', padding: '0.85rem', borderRadius: '8px', border: '1px solid hsla(0, 84.2%, 60.2%, 0.3)' }}>
                 <div style={{ fontWeight: 800, color: 'hsl(0, 84.2%, 45%)', fontSize: '0.9rem' }}>
                   ⚠️ Ocorrência Registrada: {expeditionTargetShortage.shortage_quantity.toLocaleString('pt-BR')} un em Falta

@@ -32,7 +32,7 @@ export function PackagingModal(props: any) {
           backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
           justifyContent: 'center', zIndex: 3000, padding: '1rem'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
             padding: '1.5rem', maxWidth: '720px', width: '100%',
             maxHeight: '90vh', overflowY: 'auto',

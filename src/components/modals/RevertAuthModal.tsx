@@ -60,7 +60,7 @@ export function RevertAuthModal(props: any) {
               backdropFilter: 'blur(6px)'
             }}
           >
-            <div style={{
+            <div className="modal-scroll" style={{
               backgroundColor: 'var(--surface)',
               borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--border)',
@@ -68,8 +68,9 @@ export function RevertAuthModal(props: any) {
               boxShadow: 'var(--shadow-premium)',
               width: '100%',
               maxWidth: '480px',
-              animation: 'fadeIn 0.2s ease',
-              overflow: 'hidden'
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              animation: 'fadeIn 0.2s ease'
             }}>
 
               {/* Header */}

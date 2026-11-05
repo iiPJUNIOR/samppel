@@ -205,7 +205,7 @@ export function SplitCardModal({
         </div>
 
         {/* Corpo com scroll */}
-        <div style={{ padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="modal-scroll" style={{ padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           
           {/* Dados do Card Original */}
           <div

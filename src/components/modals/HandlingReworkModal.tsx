@@ -22,9 +22,10 @@ export function HandlingReworkModal({
       backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center',
       justifyContent: 'center', zIndex: 500000, padding: '1rem', backdropFilter: 'blur(4px)'
     }}>
-      <div style={{
+      <div className="modal-scroll" style={{
         backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
         padding: '1.5rem', maxWidth: '480px', width: '100%',
+        maxHeight: '90vh', overflowY: 'auto',
         border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
         animation: 'fadeIn 0.2s ease',
         display: 'flex',

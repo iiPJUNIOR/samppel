@@ -670,6 +670,8 @@
 .modalCard {
   width: 100%;
   max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
   background-color: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

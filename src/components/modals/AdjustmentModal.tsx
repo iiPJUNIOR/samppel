@@ -42,12 +42,14 @@ export function AdjustmentModal(props: any) {
       padding: '1rem',
       backdropFilter: 'blur(3px)'
     }}>
-      <div style={{
+      <div className="modal-scroll" style={{
         backgroundColor: 'var(--surface)',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--border)',
         width: '100%',
         maxWidth: '500px',
+        maxHeight: '90vh',
+        overflowY: 'auto',
         padding: '1.5rem',
         boxShadow: 'var(--shadow-lg)',
         display: 'flex',

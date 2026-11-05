@@ -27,15 +27,16 @@ export function DeleteConfirmModal({
   return (
     <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div
-        className="modal-content"
+        className="modal-content modal-scroll"
         style={{
           maxWidth: '520px',
           width: '90%',
+          maxHeight: '90vh',
+          overflowY: 'auto',
           backgroundColor: 'var(--surface)',
           borderRadius: 'var(--radius-lg, 12px)',
           boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
-          border: '2px solid var(--danger)',
-          overflow: 'hidden'
+          border: '2px solid var(--danger)'
         }}
       >
         {/* Header com Alerta */}

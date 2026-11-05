@@ -76,7 +76,7 @@ export function MachineCrudModal(props: any) {
             </div>
 
             {/* Corpo */}
-            <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="modal-scroll" style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
               {/* Form */}
               <form onSubmit={handleSaveMachineForm} style={{

@@ -343,13 +343,15 @@ export default function FinanceiroPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-premium)',
             width: '100%',
             maxWidth: '500px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{

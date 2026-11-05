@@ -208,6 +208,7 @@ export function MoveStageModal(props: any) {
         boxShadow: 'var(--shadow-premium)',
         width: '100%',
         maxWidth: '440px',
+        maxHeight: '90vh',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -304,7 +305,7 @@ export function MoveStageModal(props: any) {
 
         {/* PASSO 1: SELECAO DA ETAPA DE DESTINO */}
         {step === 'STAGE' && (
-          <div style={{ padding: '0.85rem 1.15rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '380px', overflowY: 'auto' }}>
+          <div className="modal-scroll" style={{ padding: '0.85rem 1.15rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, maxHeight: '380px', overflowY: 'auto' }}>
             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               {isFactoryUser 
                 ? 'Selecione a etapa de destino (sera solicitado o PIN):' 
@@ -372,7 +373,7 @@ export function MoveStageModal(props: any) {
 
         {/* PASSO 2: AUTENTICACAO OBRIGATORIA POR PIN (APENAS PARA PERFIL FABRICA) */}
         {step === 'PIN' && isFactoryUser && (
-          <form onSubmit={handleConfirmMoveWithPin} style={{ padding: '1rem 1.15rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <form className="modal-scroll" onSubmit={handleConfirmMoveWithPin} style={{ padding: '1rem 1.15rem', display: 'flex', flexDirection: 'column', gap: '0.85rem', overflowY: 'auto', flex: 1 }}>
             {errorMsg && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: '0.5rem',

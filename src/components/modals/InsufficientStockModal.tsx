@@ -28,7 +28,7 @@ export function InsufficientStockModal(props: any) {
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
-            width: '100%', maxWidth: '550px',
+            width: '100%', maxWidth: '550px', maxHeight: '90vh',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
             border: '1px solid var(--border)', overflow: 'hidden',
             display: 'flex', flexDirection: 'column'
@@ -54,7 +54,7 @@ export function InsufficientStockModal(props: any) {
               </div>
             </div>
 
-            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
+            <div className="modal-scroll" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1, overflowY: 'auto' }}>
               <p style={{ fontSize: '0.9rem', lineHeight: 1.5, margin: 0 }}>
                 Os itens abaixo não possuem estoque suficiente. <strong>Selecione os que você deseja forçar o avanço</strong> (o estoque ficará negativo). Os que não forem selecionados <strong>permanecerão em Pedidos</strong>.
               </p>

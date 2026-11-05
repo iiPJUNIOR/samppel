@@ -117,9 +117,11 @@ export default function OperatorAuthModal({
       zIndex: 200000,
       padding: '1rem'
     }}>
-      <div className="modal-content card" style={{
+      <div className="modal-content card modal-scroll" style={{
         maxWidth: '420px',
         width: '100%',
+        maxHeight: '90vh',
+        overflowY: 'auto',
         backgroundColor: 'var(--surface)',
         borderRadius: 'var(--radius-lg)',
         padding: '2rem',

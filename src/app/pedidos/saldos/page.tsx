@@ -731,12 +731,15 @@ export default function SaldosCreditosPage() {
           }}
         >
           <div
+            className="modal-scroll"
             style={{
               backgroundColor: 'var(--surface)',
               borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--border)',
               maxWidth: '500px',
               width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
               padding: '1.5rem',
               boxShadow: 'var(--shadow-xl)',
               display: 'flex',

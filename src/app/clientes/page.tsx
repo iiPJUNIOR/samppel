@@ -949,13 +949,15 @@ export default function ClientesPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-premium)',
             width: '100%',
             maxWidth: '500px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{
@@ -1094,9 +1096,10 @@ export default function ClientesPage() {
           backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
           justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
             padding: '2rem', maxWidth: '520px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease', textAlign: 'left'
           }}>
@@ -1203,9 +1206,10 @@ export default function ClientesPage() {
           backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
           justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
             padding: '2rem', maxWidth: '420px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease', textAlign: 'center'
           }}>

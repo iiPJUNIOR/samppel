@@ -2373,7 +2373,7 @@ export default function ConfiguracoesPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div className="card no-scrollbar" style={{
+          <div className="card modal-scroll" style={{
             width: '100%',
             maxWidth: '650px',
             backgroundColor: 'var(--surface)',
@@ -2382,9 +2382,7 @@ export default function ConfiguracoesPage() {
             padding: '2rem',
             position: 'relative',
             maxHeight: '90vh',
-            overflowY: 'auto',
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none'
+            overflowY: 'auto'
           }}>
             <button
               onClick={() => setSelectedOperatorForPermissions(null)}
@@ -2788,7 +2786,7 @@ export default function ConfiguracoesPage() {
                   </div>
                 </div>
 
-                <div className="table-responsive no-scrollbar" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <div className="table-responsive modal-scroll" style={{ maxHeight: '40vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
                   <table className="table" style={{ margin: 0 }}>
                     <thead>
                       <tr style={{ backgroundColor: 'var(--background)' }}>
@@ -3678,9 +3676,10 @@ export default function ConfiguracoesPage() {
           alignItems: 'center', justifyContent: 'center', zIndex: 200000,
           backdropFilter: 'blur(4px)', padding: '1rem'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
             padding: '1.75rem', maxWidth: '480px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'center'
           }}>
@@ -3739,9 +3738,10 @@ export default function ConfiguracoesPage() {
           alignItems: 'center', justifyContent: 'center', zIndex: 200000,
           backdropFilter: 'blur(4px)', padding: '1rem'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
             padding: '1.75rem', maxWidth: '460px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'center'
           }}>
@@ -3817,9 +3817,11 @@ export default function ConfiguracoesPage() {
           padding: '1rem',
           backdropFilter: 'blur(4px)'
         }}>
-          <div className="card" style={{
+          <div className="card modal-scroll" style={{
             width: '100%',
             maxWidth: '500px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             backgroundColor: 'var(--surface)',
             borderRadius: '16px',
             padding: '2.25rem 2rem',

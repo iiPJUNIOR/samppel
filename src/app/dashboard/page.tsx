@@ -660,7 +660,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Lista */}
-            <div style={{ overflowY: 'auto', padding: '1rem' }}>
+            <div className="modal-scroll" style={{ overflowY: 'auto', padding: '1rem' }}>
               <div className="table-responsive">
                 <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
@@ -723,9 +723,10 @@ export default function DashboardPage() {
           backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center',
           justifyContent: 'center', zIndex: 3000, padding: '1rem', backdropFilter: 'blur(4px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg)',
             padding: '2rem', maxWidth: '420px', width: '100%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease', textAlign: 'center'
           }}>
@@ -881,7 +882,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Conteúdo */}
-            <div style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div className="modal-scroll" style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {!selectedOrderDetails.first_payment_date && (
                 <div style={{
                   backgroundColor: 'var(--danger-bg)',

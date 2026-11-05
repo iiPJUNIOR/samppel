@@ -36,7 +36,7 @@ export function ShortageModal(props: any) {
         }}>
           <div style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
-            width: '100%', maxWidth: '520px', border: '1px solid var(--border)',
+            width: '100%', maxWidth: '520px', maxHeight: '90vh', border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-xl)', overflow: 'hidden', display: 'flex', flexDirection: 'column'
           }}>
             <div style={{
@@ -57,7 +57,7 @@ export function ShortageModal(props: any) {
               </button>
             </div>
 
-            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="modal-scroll" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', flex: 1 }}>
               <div style={{ backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '0.8rem' }}>
                 <div>Produto: <strong>{shortageItem.name}</strong></div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>

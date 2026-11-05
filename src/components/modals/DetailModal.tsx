@@ -376,7 +376,7 @@ export function DetailModal(props: any) {
               </button>
             </header>
 
-            <form onSubmit={handleSubmit} style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
+            <form className="modal-scroll" onSubmit={handleSubmit} style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
 
                 {/* Seleção do Destino Inicial */}

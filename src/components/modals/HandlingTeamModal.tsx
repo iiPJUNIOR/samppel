@@ -464,7 +464,7 @@ export function HandlingTeamModal(props: any) {
             </div>
           </div>
 
-          <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="modal-scroll" style={{ overflowY: 'auto', flex: 1, paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
             {/* Seletor de Itens Irmãos do Pedido (quando houver múltiplos) */}
             {allSiblingItems.length > 1 && (
@@ -1228,6 +1228,7 @@ export function HandlingTeamModal(props: any) {
             borderRadius: 'var(--radius-lg, 12px)',
             maxWidth: '520px',
             width: '100%',
+            maxHeight: '90vh',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-xl)',
             overflow: 'hidden',
@@ -1260,7 +1261,7 @@ export function HandlingTeamModal(props: any) {
             </div>
 
             {/* Corpo do Submodal */}
-            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div className="modal-scroll" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', flex: 1 }}>
               <div style={{ fontSize: '0.84rem', color: 'var(--text)', lineHeight: 1.5 }}>
                 A quantidade retornada (<strong>{reconciliationData.returnedQty.toLocaleString('pt-BR')} un</strong>) é menor do que a quantidade que a equipe retirou (<strong>{reconciliationData.withdrawnQty.toLocaleString('pt-BR')} un</strong>).
               </div>
@@ -1455,7 +1456,7 @@ export function HandlingTeamModal(props: any) {
             </div>
 
             {/* Lista de Registros */}
-            <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div className="modal-scroll" style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {loadingHistory ? (
                 <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                   Carregando registros de auditoria...

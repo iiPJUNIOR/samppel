@@ -1104,7 +1104,7 @@ export default function ProdutosPage() {
           padding: '1rem',
           backdropFilter: 'blur(4px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)',
             borderRadius: 'var(--radius-lg)',
             width: '100%',
@@ -1293,13 +1293,15 @@ export default function ProdutosPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-premium)',
             width: '100%',
             maxWidth: '500px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{
@@ -1491,13 +1493,15 @@ export default function ProdutosPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-premium)',
             width: '100%',
             maxWidth: '480px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{
@@ -1681,9 +1685,10 @@ export default function ProdutosPage() {
           alignItems: 'center', justifyContent: 'center', zIndex: 200000,
           backdropFilter: 'blur(4px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 12px)',
             padding: '1.75rem', maxWidth: '460px', width: '90%',
+            maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center'
           }}>
@@ -1730,7 +1735,7 @@ export default function ProdutosPage() {
               </button>
             </div>
             
-            <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1 }}>
+            <div className="modal-scroll" style={{ padding: '1.5rem', overflowY: 'auto', flex: 1 }}>
               {historyLoading ? (
                 <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Carregando extrato...</div>
               ) : stockHistory.length === 0 ? (
@@ -1783,13 +1788,15 @@ export default function ProdutosPage() {
           padding: '1rem',
           backdropFilter: 'blur(3px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-premium)',
             width: '100%',
             maxWidth: '520px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             animation: 'fadeIn 0.25s ease'
           }}>
             <header style={{

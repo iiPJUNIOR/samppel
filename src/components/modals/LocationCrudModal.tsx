@@ -35,9 +35,9 @@ export function LocationCrudModal(props: any) {
           alignItems: 'center', justifyContent: 'center', zIndex: 200000,
           backdropFilter: 'blur(4px)'
         }}>
-          <div style={{
+          <div className="modal-scroll" style={{
             backgroundColor: 'var(--surface)', borderRadius: 'var(--radius-lg, 16px)',
-            maxWidth: '560px', width: '92%', overflow: 'hidden',
+            maxWidth: '560px', width: '92%', maxHeight: '90vh', overflowY: 'auto',
             border: '1px solid var(--border)', boxShadow: 'var(--shadow-xl)',
             animation: 'fadeIn 0.2s ease', color: 'var(--text)'
           }}>

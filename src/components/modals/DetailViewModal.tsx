@@ -266,7 +266,7 @@ export function DetailViewModal(props: any) {
               </div>
 
               {/* Corpo com Scroll Padrão */}
-              <div style={{ overflowY: 'auto', flex: 1, padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+              <div className="modal-scroll" style={{ overflowY: 'auto', flex: 1, padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
                 {!isReleased && (
                   <div style={{
                     backgroundColor: 'var(--danger-bg)',
