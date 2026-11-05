@@ -1815,8 +1815,12 @@ export default function ProdutosPage() {
                             {tx.type}
                           </span>
                         </td>
-                        <td style={{ fontWeight: 'bold', color: tx.quantity > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                          {tx.quantity > 0 ? `+${tx.quantity}` : tx.quantity}
+                        <td style={{ fontWeight: 'bold', color: tx.type === 'SAIDA' || tx.quantity < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                          {tx.type === 'SAIDA'
+                            ? `-${Math.abs(Number(tx.quantity || 0)).toLocaleString('pt-BR')}`
+                            : tx.quantity > 0
+                              ? `+${Number(tx.quantity).toLocaleString('pt-BR')}`
+                              : tx.quantity}
                         </td>
                         <td style={{ maxWidth: '300px', whiteSpace: 'normal' }}>{tx.description || '---'}</td>
                       </tr>

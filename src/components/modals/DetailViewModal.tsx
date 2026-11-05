@@ -11,6 +11,7 @@ import {
 import Image from 'next/image';
 import { SplitCardModal } from './SplitCardModal';
 import { RevertSplitModal } from './RevertSplitModal';
+import { adjustStock, getProducts, deleteOrder, updateOrder, updateOrderItem } from '@/services/supabase';
 
 export function DetailViewModal(props: any) {
   const {
@@ -62,12 +63,150 @@ export function DetailViewModal(props: any) {
 
   const [isSplitCardModalOpen, setIsSplitCardModalOpen] = useState(false);
   const [isRevertSplitModalOpen, setIsRevertSplitModalOpen] = useState(false);
+  const [isUndoTransformModalOpen, setIsUndoTransformModalOpen] = useState(false);
+  const [undoTransformReason, setUndoTransformReason] = useState('');
+  const [undoTransformKeepCard, setUndoTransformKeepCard] = useState(true);
+  const [isUndoingTransform, setIsUndoingTransform] = useState(false);
 
   const isSplitChild = !!detailItem?.split_from_item_id || (detailItem?.friendly_id && detailItem.friendly_id.endsWith('.1'));
   const isSplitParent = !!detailItem?.split_at || (detailItem?.friendly_id && detailItem.friendly_id.endsWith('.2'));
   const isCardSplit = isSplitChild || isSplitParent;
 
   const order = detailItem.order || {};
+  const allTransformNotes = [detailItem?.notes, order?.notes, order?.internal_notes].filter(Boolean).join('\n');
+  const isSacoTransformCard =
+    /\[SACO_TO_SACOLA\|/i.test(allTransformNotes) ||
+    /Transformacao de Saco para Sacola/i.test(allTransformNotes) ||
+    /Gerado via Transformacao Saco\s*->\s*Sacola/i.test(allTransformNotes);
+  const isTransformReverted = /\[TRANSFORMACAO_DESFEITA\]/i.test(allTransformNotes);
+
+  const parsedSacoId = allTransformNotes.match(/SACO_ID:([^|\]]+)/i)?.[1]?.trim() || null;
+  const parsedSacolaId = allTransformNotes.match(/SACOLA_ID:([^|\]]+)/i)?.[1]?.trim() || detailItem?.product_id || order?.product_id || null;
+  const parsedQtyMatch = allTransformNotes.match(/QTY:(\d+)/i)?.[1];
+  const parsedTransformQty = parsedQtyMatch ? Number(parsedQtyMatch) : Number(detailItem?.print_run || order?.print_run || 0);
+  const parsedSacoName = allTransformNotes.match(/Origem\s*\(Saco\)\s*:\s*([^\n\r]+)/i)?.[1]?.trim() || 'Produto Saco (Origem)';
+  const parsedSacolaName = allTransformNotes.match(/Destino\s*\(Sacola\)\s*:\s*([^\n\r]+)/i)?.[1]?.trim() || detailItem?.name || order?.art_name || 'Produto Sacola (Destino)';
+
+  const handleConfirmUndoSacoTransform = async () => {
+    if (isUndoingTransform || isTransformReverted) return;
+    const qty = Math.abs(Number(parsedTransformQty || 0));
+    if (qty <= 0) {
+      alert('Quantidade da transformacao invalida para estorno.');
+      return;
+    }
+
+    setIsUndoingTransform(true);
+    try {
+      const tenantId = user?.tenant_id || detailItem?.tenant_id || order?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const nowPtBr = new Date().toLocaleString('pt-BR');
+      const responsibleLabel = user?.full_name || user?.email || 'Usuario do Sistema';
+      const reasonText = undoTransformReason.trim() || 'Estorno solicitado no card';
+      const cardCode = detailItem?.friendly_id || order?.pv_number || order?.op_number || 'Card';
+
+      let targetSacoId = parsedSacoId;
+      let targetSacolaId = parsedSacolaId;
+
+      if (!targetSacoId || !targetSacolaId) {
+        const { data: allProds } = await getProducts(tenantId);
+        const cleanSacoName = parsedSacoName.replace(/\s*\[SKU:.*\]$/i, '').trim().toLowerCase();
+        const cleanSacolaName = parsedSacolaName.replace(/\s*\[SKU:.*\]$/i, '').trim().toLowerCase();
+        if (!targetSacoId && allProds) {
+          const foundSaco = allProds.find((p: any) => (p.name || '').trim().toLowerCase() === cleanSacoName);
+          if (foundSaco) targetSacoId = foundSaco.id;
+        }
+        if (!targetSacolaId && allProds) {
+          const foundSacola = allProds.find((p: any) => (p.name || '').trim().toLowerCase() === cleanSacolaName);
+          if (foundSacola) targetSacolaId = foundSacola.id;
+        }
+      }
+
+      if (!targetSacoId) {
+        throw new Error('Nao foi possivel localizar o produto Saco de origem no catalogo para devolver o estoque.');
+      }
+      if (!targetSacolaId) {
+        throw new Error('Nao foi possivel localizar o produto Sacola de destino no catalogo para estornar o estoque.');
+      }
+
+      // 1. Devolver estoque ao Saco (+ENTRADA)
+      const entradaSacoDesc = `ESTORNO / DESFAZER Transformacao Saco -> Sacola [Card ${cardCode}] | Devolvido da Sacola: ${parsedSacolaName} | Motivo: ${reasonText} (${responsibleLabel} em ${nowPtBr})`;
+      const { error: errSaco } = await adjustStock(
+        targetSacoId,
+        qty,
+        'ENTRADA',
+        entradaSacoDesc,
+        tenantId,
+        user?.id || null
+      );
+      if (errSaco) {
+        throw new Error('Erro ao devolver estoque ao Saco: ' + ((errSaco as any)?.message || errSaco));
+      }
+
+      // 2. Retirar estoque da Sacola (-SAIDA)
+      const saidaSacolaDesc = `ESTORNO / DESFAZER Transformacao Saco -> Sacola [Card ${cardCode}] | Retornado para Saco: ${parsedSacoName} | Motivo: ${reasonText} (${responsibleLabel} em ${nowPtBr})`;
+      const { error: errSacola } = await adjustStock(
+        targetSacolaId,
+        -qty,
+        'SAIDA',
+        saidaSacolaDesc,
+        tenantId,
+        user?.id || null
+      );
+      if (errSacola) {
+        throw new Error('Erro ao estornar estoque da Sacola: ' + ((errSacola as any)?.message || errSacola));
+      }
+
+      // 3. Registrar rastreabilidade no card (mover para CANCELADOS) ou excluir
+      const targetOrderId = order?.id || detailItem?.order_id;
+      if (undoTransformKeepCard) {
+        const cancelStage = (stages || []).find((s: any) => (s.name || '').toUpperCase().includes('CANCEL'));
+        const auditBlock = [
+          `--- ESTORNO DE TRANSFORMACAO (SACO -> SACOLA) ---`,
+          `[TRANSFORMACAO_DESFEITA]`,
+          `Data/Hora do Estorno: ${nowPtBr}`,
+          `Responsavel: ${responsibleLabel}`,
+          `Motivo: ${reasonText}`,
+          `Estoque Revertido: +${qty.toLocaleString('pt-BR')} un devolvidas para "${parsedSacoName}" (ENTRADA) e -${qty.toLocaleString('pt-BR')} un retiradas de "${parsedSacolaName}" (SAIDA).`
+        ].join('\n');
+
+        const updatedItemNotes = [detailItem?.notes, auditBlock].filter(Boolean).join('\n\n');
+        const updatedOrderInternalNotes = [order?.internal_notes, auditBlock].filter(Boolean).join('\n\n');
+
+        await updateOrderItem(detailItem.id, {
+          stage_id: cancelStage ? cancelStage.id : detailItem.stage_id,
+          status: 'Cancelado',
+          notes: updatedItemNotes
+        });
+
+        if (targetOrderId) {
+          await updateOrder(targetOrderId, {
+            stage_id: cancelStage ? cancelStage.id : order.stage_id,
+            status: 'Cancelado',
+            notes: updatedItemNotes,
+            internal_notes: updatedOrderInternalNotes
+          });
+        }
+      } else if (targetOrderId) {
+        await deleteOrder(targetOrderId);
+      }
+
+      setIsUndoTransformModalOpen(false);
+      setIsDetailModalOpen(false);
+      if (showToast) {
+        showToast(
+          `Transformação desfeita! +${qty.toLocaleString('pt-BR')} un devolvidas ao Saco e -${qty.toLocaleString('pt-BR')} un estornadas da Sacola (tudo registrado no extrato).`,
+          'success'
+        );
+      }
+      if (typeof props.fetchAllData === 'function') {
+        props.fetchAllData();
+      }
+    } catch (err: any) {
+      console.error('Erro ao desfazer transformacao Saco -> Sacola:', err);
+      alert('Falha ao desfazer transformacao: ' + (err.message || 'Erro inesperado.'));
+    } finally {
+      setIsUndoingTransform(false);
+    }
+  };
         const customer = order.customer || {};
         const currentStage = stages.find(s => s.id === detailItem.stage_id);
         const itemAdjs = adjustments.filter(a => a.order_item_id === detailItem.id);
@@ -284,6 +423,110 @@ export function DetailViewModal(props: any) {
                     <AlertTriangle size={16} />
                     <span>Atenção: Este pedido está Bloqueado (Aguardando Pagamento/Sinal).</span>
                   </div>
+                )}
+
+                {isSacoTransformCard && (
+                  <section
+                    style={{
+                      border: `1.5px solid ${isTransformReverted ? 'rgba(239, 68, 68, 0.45)' : 'rgba(139, 92, 246, 0.45)'}`,
+                      borderRadius: 'var(--radius-md, 10px)',
+                      padding: '0.9rem 1.15rem',
+                      backgroundColor: isTransformReverted
+                        ? 'rgba(239, 68, 68, 0.06)'
+                        : 'rgba(139, 92, 246, 0.06)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.65rem'
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '0.5rem',
+                        borderBottom: '1px solid var(--border)',
+                        paddingBottom: '0.5rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <ArrowRightLeft size={16} style={{ color: isTransformReverted ? 'var(--danger)' : '#8b5cf6' }} />
+                        <span
+                          style={{
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            color: isTransformReverted ? 'var(--danger)' : '#7c3aed',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em'
+                          }}
+                        >
+                          {isTransformReverted
+                            ? 'Transformacao Saco -> Sacola (Desfeita / Estornada)'
+                            : 'Card de Transformacao (Saco -> Sacola)'}
+                        </span>
+                      </div>
+
+                      {!isTransformReverted ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsUndoTransformModalOpen(true)}
+                          className="btn btn-secondary"
+                          style={{
+                            fontSize: '0.76rem',
+                            padding: '0.32rem 0.75rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            borderColor: 'var(--danger)',
+                            color: 'var(--danger)',
+                            fontWeight: 700,
+                            backgroundColor: 'rgba(239, 68, 68, 0.08)'
+                          }}
+                        >
+                          <Undo2 size={14} />
+                          <span>Desfazer Transformação (Saco -&gt; Sacola)</span>
+                        </button>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '99px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.14)',
+                            color: 'var(--danger)',
+                            border: '1px solid rgba(239, 68, 68, 0.35)'
+                          }}
+                        >
+                          Estoque ja devolvido e registrado no extrato
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid-responsive-3" style={{ gap: '0.65rem', fontSize: '0.8rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                          Origem (Saco Baixado)
+                        </span>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{parsedSacoName}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                          Destino (Sacola Alimentada)
+                        </span>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{parsedSacolaName}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                          Quantidade Transformada
+                        </span>
+                        <span style={{ fontWeight: 800, color: isTransformReverted ? 'var(--danger)' : '#7c3aed' }}>
+                          {Number(parsedTransformQty || 0).toLocaleString('pt-BR')} un
+                        </span>
+                      </div>
+                    </div>
+                  </section>
                 )}
 
                 {/* Card 1: Dados do Pedido (Full Width) */}
@@ -1295,6 +1538,29 @@ export function DetailViewModal(props: any) {
                       <span>Reverter Divisão</span>
                     </button>
                   )}
+
+                  {isSacoTransformCard && !isTransformReverted && (
+                    <button
+                      type="button"
+                      onClick={() => setIsUndoTransformModalOpen(true)}
+                      className="btn btn-secondary"
+                      style={{
+                        fontSize: '0.8rem',
+                        padding: '0.4rem 0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        borderColor: 'var(--danger)',
+                        color: 'var(--danger)',
+                        fontWeight: 700,
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)'
+                      }}
+                      title="Desfazer a transformação de Saco para Sacola, estornando os estoques com registro no extrato"
+                    >
+                      <Undo2 size={14} />
+                      <span>Desfazer Transformação</span>
+                    </button>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1386,6 +1652,235 @@ export function DetailViewModal(props: any) {
                   }
                 }}
               />
+            )}
+
+            {/* Modal de Confirmacao: Desfazer Transformacao Saco -> Sacola */}
+            {isUndoTransformModalOpen && (
+              <div
+                onClick={(e) => {
+                  if (e.target === e.currentTarget && !isUndoingTransform) setIsUndoTransformModalOpen(false);
+                }}
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 100001,
+                  backgroundColor: 'rgba(0, 0, 0, 0.68)',
+                  backdropFilter: 'blur(4px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '1rem'
+                }}
+              >
+                <div
+                  className="modal-scroll"
+                  style={{
+                    backgroundColor: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-lg, 12px)',
+                    boxShadow: 'var(--shadow-premium)',
+                    width: '100%',
+                    maxWidth: '580px',
+                    maxHeight: '90vh',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '1rem 1.35rem',
+                      borderBottom: '1px solid var(--border)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <Undo2 size={18} style={{ color: 'var(--danger)' }} />
+                      <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--text)' }}>
+                        Desfazer Transformação (Saco -&gt; Sacola)
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => !isUndoingTransform && setIsUndoTransformModalOpen(false)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.35rem', color: 'var(--text-muted)' }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+
+                  <div style={{ padding: '1.25rem 1.35rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div
+                      style={{
+                        padding: '0.85rem 1rem',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.07)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        fontSize: '0.83rem',
+                        color: 'var(--text)',
+                        lineHeight: 1.5
+                      }}
+                    >
+                      Ao confirmar, o sistema fará o <strong>estorno completo e rastreável</strong> desta transformação nos extratos de estoque:
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', fontSize: '0.82rem' }}>
+                      <div
+                        style={{
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '0.5rem'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#059669', textTransform: 'uppercase' }}>
+                            1. Devolve ao Estoque do Saco (ENTRADA)
+                          </div>
+                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>{parsedSacoName}</div>
+                        </div>
+                        <span style={{ fontWeight: 800, color: '#059669', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
+                          +{Number(parsedTransformQty || 0).toLocaleString('pt-BR')} un
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '0.5rem'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--danger)', textTransform: 'uppercase' }}>
+                            2. Retira do Estoque da Sacola (SAIDA)
+                          </div>
+                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>{parsedSacolaName}</div>
+                        </div>
+                        <span style={{ fontWeight: 800, color: 'var(--danger)', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
+                          -{Number(parsedTransformQty || 0).toLocaleString('pt-BR')} un
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                        Motivo do Estorno (Ficará gravado no Extrato e no Card)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Ex: Teste de producao, quantidade digitada errada, sacola incorreta..."
+                        value={undoTransformReason}
+                        onChange={(e) => setUndoTransformReason(e.target.value)}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text)' }}>
+                        Como deseja tratar este Card após desfazer o estoque?
+                      </span>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '0.5rem',
+                          padding: '0.6rem 0.75rem',
+                          borderRadius: 'var(--radius-sm)',
+                          border: `1.5px solid ${undoTransformKeepCard ? 'var(--primary)' : 'var(--border)'}`,
+                          backgroundColor: undoTransformKeepCard ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                          cursor: 'pointer',
+                          fontSize: '0.78rem'
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          checked={undoTransformKeepCard}
+                          onChange={() => setUndoTransformKeepCard(true)}
+                          style={{ marginTop: '2px' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>
+                            Mover card para CANCELADOS mantendo o histórico registrado (Recomendado)
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            O card sai de &quot;Ir para Manuseio&quot; e fica arquivado em CANCELADOS com data, responsável e motivo do estorno.
+                          </div>
+                        </div>
+                      </label>
+
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '0.5rem',
+                          padding: '0.6rem 0.75rem',
+                          borderRadius: 'var(--radius-sm)',
+                          border: `1.5px solid ${!undoTransformKeepCard ? 'var(--danger)' : 'var(--border)'}`,
+                          backgroundColor: !undoTransformKeepCard ? 'rgba(239, 68, 68, 0.06)' : 'transparent',
+                          cursor: 'pointer',
+                          fontSize: '0.78rem'
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          checked={!undoTransformKeepCard}
+                          onChange={() => setUndoTransformKeepCard(false)}
+                          style={{ marginTop: '2px' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>
+                            Excluir o card do quadro de Pedidos
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            Remove o card da tela de Pedidos (o histórico do estorno permanece gravado no Extrato de Movimentações do Saco e da Sacola).
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '0.9rem 1.35rem',
+                      borderTop: '1px solid var(--border)',
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                      gap: '0.6rem'
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setIsUndoTransformModalOpen(false)}
+                      disabled={isUndoingTransform}
+                      className="btn btn-secondary"
+                    >
+                      Voltar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmUndoSacoTransform}
+                      disabled={isUndoingTransform}
+                      className="btn btn-danger"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700 }}
+                    >
+                      <Undo2 size={14} />
+                      <span>{isUndoingTransform ? 'Estornando Estoques...' : 'Confirmar e Desfazer Transformação'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         );

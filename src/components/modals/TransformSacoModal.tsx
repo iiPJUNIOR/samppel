@@ -323,15 +323,19 @@ export default function TransformSacoModal({
         console.warn('Usando stage_id padrao para Ir para Manuseio');
       }
 
-      const todayIso = new Date().toISOString().split('T')[0];
+      const nowIso = new Date().toISOString();
+      const nowPtBr = new Date().toLocaleString('pt-BR');
+      const todayIso = nowIso.split('T')[0];
       const pvCode = formattedPvNumber;
       const rawDigits = cardNumber.replace(/\D/g, '');
       const numericOrderNum = rawDigits ? parseInt(rawDigits.slice(0, 8), 10) : Math.floor(Date.now() / 1000) % 1000000;
       const finalMeasure = measure.trim() || extractMeasureFromProduct(selectedSacolaProduct) || extractMeasureFromProduct(sourceProduct);
+      const traceTag = `[SACO_TO_SACOLA|SACO_ID:${sourceProduct.id}|SACOLA_ID:${selectedSacolaProduct.id}|QTY:${qty}]`;
       const cardNotes = [
         `Transformacao de Saco para Sacola (${qty.toLocaleString('pt-BR')} un)`,
-        `Origem (Saco): ${sourceProduct.name}`,
-        `Destino (Sacola): ${selectedSacolaProduct.name}`,
+        `Origem (Saco): ${sourceProduct.name}${sourceProduct.sku ? ` [SKU: ${sourceProduct.sku}]` : ''}`,
+        `Destino (Sacola): ${selectedSacolaProduct.name}${selectedSacolaProduct.sku ? ` [SKU: ${selectedSacolaProduct.sku}]` : ''}`,
+        `Registrado por: ${authLabel} em ${nowPtBr}`,
         notes.trim() ? `Observacao: ${notes.trim()}` : ''
       ]
         .filter(Boolean)
@@ -357,14 +361,14 @@ export default function TransformSacoModal({
         production_sector: 'Manuseio',
         physical_location: 'Salão',
         stage_id: targetStageId,
-        order_date: new Date().toISOString(),
+        order_date: nowIso,
         first_payment_date: todayIso,
         production_start_date: todayIso,
         installments_total: 1,
         installments_paid: 1,
         over_short_quantity: 0,
         notes: cardNotes,
-        internal_notes: `Gerado via Transformacao Saco -> Sacola (${authLabel})`
+        internal_notes: `Gerado via Transformacao Saco -> Sacola (${authLabel} em ${nowPtBr})\n${traceTag}`
       };
 
       const { data: createdOrder, error: orderErr } = await createOrder(orderPayload);
