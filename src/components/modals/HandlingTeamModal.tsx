@@ -6,7 +6,7 @@ import {
   Info, Package, Truck, MapPin, FileText, Calendar, DollarSign, 
   CreditCard, Check, AlertCircle, Save, CheckCircle2, Factory,
   Clock, Printer, PenTool, TrendingUp, HelpCircle, History,
-  ArrowRight, RotateCcw
+  ArrowRight, RotateCcw, Split
 } from 'lucide-react';
 import Image from 'next/image';
 import { 
@@ -14,12 +14,14 @@ import {
   saveHandlingDivergence,
   getHandlingDivergencesForItem,
   saveOrderItemShortage,
+  finalizePartialHandlingAndSplitToCompleted,
   type HandlingDivergenceRecord
 } from '@/services/supabase_modules/orders';
 
 export function HandlingTeamModal(props: any) {
   const {
     executeSaveHandlingTeam,
+    fetchAllData,
     handleSwitchHandlingModalItem,
     handlingTeamAllocations,
     handlingTeamModalItem,
@@ -41,10 +43,12 @@ export function HandlingTeamModal(props: any) {
     setShortageNotes,
     setShortageQty,
     setShortageReason,
-    stages
+    showToast,
+    stages,
+    user
   } = props;
 
-  // Estados de Conciliação (Falta vs. Pendência)
+  // Estados de Conciliação (Finalizar Parcial p/ Concluído vs. Pendência vs. Falta)
   const [isReconciliationModalOpen, setIsReconciliationModalOpen] = useState(false);
   const [reconciliationData, setReconciliationData] = useState<{
     allocationIndex: number;
@@ -55,7 +59,11 @@ export function HandlingTeamModal(props: any) {
     difference: number;
     returnDate: string;
   } | null>(null);
-  const [reconciliationChoice, setReconciliationChoice] = useState<'PENDENCIA' | 'FALTA'>('PENDENCIA');
+  const [reconciliationChoice, setReconciliationChoice] = useState<'CONCLUIR_E_NOVO_CARD' | 'PENDENCIA' | 'FALTA'>('CONCLUIR_E_NOVO_CARD');
+  const [partialDeliveredQty, setPartialDeliveredQty] = useState<number>(0);
+  const [remainderDestination, setRemainderDestination] = useState<'SAME_TEAM' | 'OTHER_TEAM' | 'IR_PARA_MANUSEIO'>('SAME_TEAM');
+  const [remainderTeamId, setRemainderTeamId] = useState<string>('');
+  const [giveImmediateStockEntry, setGiveImmediateStockEntry] = useState<boolean>(true);
   const [reconciliationNotes, setReconciliationNotes] = useState('');
   const [savingReconciliation, setSavingReconciliation] = useState(false);
 
@@ -186,6 +194,7 @@ export function HandlingTeamModal(props: any) {
 
     // Cenário 2: Faltou Quantidade (diferença > 0) -> Abre Submodal de Conciliação
     if (difference > 0) {
+      const otherTeams = (handlingTeams || []).filter((t: any) => t.status === 'ATIVO' && t.id !== alloc.handling_team_id);
       setReconciliationData({
         allocationIndex: idx,
         allocation: alloc,
@@ -195,7 +204,11 @@ export function HandlingTeamModal(props: any) {
         difference,
         returnDate
       });
-      setReconciliationChoice('PENDENCIA');
+      setPartialDeliveredQty(returnedQty > 0 && returnedQty < withdrawnQty ? returnedQty : Math.floor(withdrawnQty / 2));
+      setRemainderDestination('SAME_TEAM');
+      setRemainderTeamId(otherTeams[0]?.id || alloc.handling_team_id || '');
+      setGiveImmediateStockEntry(true);
+      setReconciliationChoice('CONCLUIR_E_NOVO_CARD');
       setReconciliationNotes('');
       setIsReconciliationModalOpen(true);
       return;
@@ -241,6 +254,44 @@ export function HandlingTeamModal(props: any) {
     }
   };
 
+  // Abre diretamente o modal de Finalização Parcial -> Concluído (+Estoque) + Novo Card do Saldo
+  const handleOpenPartialFinalizeModal = (idx: number) => {
+    const alloc = handlingTeamAllocations[idx];
+    if (!alloc?.handling_team_id) {
+      alert('Por favor, selecione a equipe de manuseio antes de finalizar a entrega.');
+      return;
+    }
+
+    const withdrawnQty = Number(alloc.quantity || totalItemQty || 0);
+    if (withdrawnQty <= 1) {
+      alert('A quantidade da remessa deve ser maior que 1 unidade para permitir entrega parcial.');
+      return;
+    }
+
+    const returnDate = alloc.return_date || alloc.completed_at || new Date().toISOString().slice(0, 10);
+    const typedReturn = Number(alloc.return_quantity || 0);
+    const initialDelivered = typedReturn > 0 && typedReturn < withdrawnQty ? typedReturn : Math.floor(withdrawnQty * 0.8);
+    const diff = Math.max(1, withdrawnQty - initialDelivered);
+    const otherTeams = (handlingTeams || []).filter((t: any) => t.status === 'ATIVO' && t.id !== alloc.handling_team_id);
+
+    setReconciliationData({
+      allocationIndex: idx,
+      allocation: alloc,
+      withdrawnQty,
+      returnedQty: initialDelivered,
+      pendingBalance: withdrawnQty,
+      difference: diff,
+      returnDate
+    });
+    setPartialDeliveredQty(initialDelivered);
+    setRemainderDestination('SAME_TEAM');
+    setRemainderTeamId(otherTeams[0]?.id || alloc.handling_team_id || '');
+    setGiveImmediateStockEntry(true);
+    setReconciliationChoice('CONCLUIR_E_NOVO_CARD');
+    setReconciliationNotes('');
+    setIsReconciliationModalOpen(true);
+  };
+
   // Confirma a resolução do Submodal de Conciliação
   const handleConfirmReconciliation = async () => {
     if (!reconciliationData) return;
@@ -249,6 +300,86 @@ export function HandlingTeamModal(props: any) {
     try {
       const { allocationIndex, allocation, withdrawnQty, returnedQty, difference, returnDate } = reconciliationData;
       const formattedDate = formatarDataPtBr(returnDate);
+
+      if (reconciliationChoice === 'CONCLUIR_E_NOVO_CARD') {
+        const effectiveDelivered = Number(partialDeliveredQty || returnedQty || 0);
+        const itemTotal = Number(handlingTeamModalItem.print_run || handlingTeamModalItem.quantity || withdrawnQty || 0);
+        if (effectiveDelivered <= 0 || effectiveDelivered >= itemTotal) {
+          alert(`Informe uma quantidade entregue válida entre 1 e ${(itemTotal - 1).toLocaleString('pt-BR')} unidades.`);
+          setSavingReconciliation(false);
+          return;
+        }
+
+        if (remainderDestination === 'OTHER_TEAM' && !remainderTeamId) {
+          alert('Selecione a outra equipe de manuseio que receberá o novo card com o saldo faltante.');
+          setSavingReconciliation(false);
+          return;
+        }
+
+        const concluidoStage = (stages || []).find((s: any) => s.name === 'Concluído');
+        const manuseioStage = (stages || []).find((s: any) => s.name === 'Manuseio');
+        const irParaManuseioStage = (stages || []).find((s: any) => s.name.toLowerCase().includes('ir para manuseio'));
+
+        if (!concluidoStage) {
+          alert('Etapa "Concluído" não encontrada no quadro Kanban.');
+          setSavingReconciliation(false);
+          return;
+        }
+
+        const originTeamObj = (handlingTeams || []).find((t: any) => t.id === allocation.handling_team_id);
+        const destTeamObj = (handlingTeams || []).find((t: any) => t.id === (remainderDestination === 'SAME_TEAM' ? allocation.handling_team_id : remainderTeamId));
+
+        const res = await finalizePartialHandlingAndSplitToCompleted({
+          originalItem: handlingTeamModalItem,
+          allocationIndex,
+          allAllocations: handlingTeamAllocations,
+          deliveredQuantity: effectiveDelivered,
+          concluidoStageId: concluidoStage.id,
+          manuseioStageId: manuseioStage?.id || handlingTeamModalItem.stage_id,
+          irParaManuseioStageId: irParaManuseioStage?.id,
+          remainderDestination,
+          remainderTeamId: remainderDestination === 'OTHER_TEAM' ? remainderTeamId : allocation.handling_team_id,
+          originTeamName: originTeamObj?.name || 'Equipe Atual',
+          destinationTeamName: destTeamObj?.name || 'Outra Equipe',
+          operatorId: user?.id || null,
+          operatorName: user?.full_name || user?.email || 'Operador',
+          giveImmediateStockEntry,
+          notes: reconciliationNotes,
+          tenantId: user?.tenant_id || handlingTeamModalItem.tenant_id
+        });
+
+        if (res.error || !res.data) {
+          throw res.error || new Error('Falha ao finalizar entrega parcial e gerar novo card.');
+        }
+
+        const { completedCard, remainderCard, deliveredQuantity: delivQty, remainingQuantity: remQty, stockEntered } = res.data;
+
+        setIsReconciliationModalOpen(false);
+        setReconciliationData(null);
+        setIsHandlingTeamModalOpen(false);
+        setHandlingTeamModalItem(null);
+        setHandlingTeamModalTargetStageId('');
+        resetAllBypasses();
+
+        if (typeof fetchAllData === 'function') {
+          await fetchAllData();
+        }
+
+        const stockMsg = stockEntered ? ` (+${delivQty.toLocaleString('pt-BR')} un adicionadas ao Estoque)` : '';
+        if (typeof showToast === 'function') {
+          showToast(
+            `Entrega de ${delivQty.toLocaleString('pt-BR')} un enviada p/ Concluído (${completedCard.friendly_id})${stockMsg} e novo card ${remainderCard.friendly_id} (${remQty.toLocaleString('pt-BR')} un) gerado!`,
+            'success'
+          );
+        } else {
+          alert(
+            `Operação concluída com sucesso!\n\n` +
+            `1) Card Concluído: ${completedCard.friendly_id} (${delivQty.toLocaleString('pt-BR')} un)${stockMsg}\n` +
+            `2) Novo Card do Saldo Faltante: ${remainderCard.friendly_id} (${remQty.toLocaleString('pt-BR')} un)`
+          );
+        }
+        return;
+      }
 
       if (reconciliationChoice === 'PENDENCIA') {
         // OPÇÃO A: Registrar como Pendência
@@ -1064,6 +1195,51 @@ export function HandlingTeamModal(props: any) {
                       </div>
                     </div>
 
+                    {/* BOTÃO DIRETO: FINALIZAR ENTREGA PARCIAL -> ENVIAR P/ CONCLUÍDO (+ESTOQUE) + GERAR OUTRO CARD COM O SALDO QUE FALTOU */}
+                    {!isCompleted && Number(alloc.quantity || totalItemQty || 0) > 1 && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        backgroundColor: 'hsla(142, 71%, 45%, 0.08)',
+                        border: '1px solid hsla(142, 71%, 45%, 0.35)',
+                        borderRadius: 'var(--radius-xs)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.74rem', color: 'var(--text)' }}>
+                          <Split size={14} style={{ color: 'hsl(142, 71%, 35%)', flexShrink: 0 }} />
+                          <span>
+                            <strong>Entrega Parcial Urgente?</strong> Envie o que já foi entregue direto p/ <strong>Concluído (+Estoque)</strong> e gere outro card com o que faltou:
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPartialFinalizeModal(idx)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.35rem 0.75rem',
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            borderRadius: 'var(--radius-xs, 5px)',
+                            border: '1px solid hsl(142, 71%, 35%)',
+                            backgroundColor: 'hsl(142, 71%, 38%)',
+                            color: '#ffffff',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)'
+                          }}
+                          title="Finalizar a parte entregue enviando direto para Concluído (com entrada imediata no estoque) e gerar outro card separado para o saldo que faltou"
+                        >
+                          <CheckCircle2 size={13} />
+                          <span>Finalizar Entrega Parcial -&gt; Concluído (+Estoque)</span>
+                        </button>
+                      </div>
+                    )}
+
                     {/* TIPOS DE SERVIÇO DE MANUSEIO (SIGLAS: CA, CC, DB, RBC, RF) */}
                     <div style={{
                       display: 'flex',
@@ -1216,198 +1392,410 @@ export function HandlingTeamModal(props: any) {
         </div>
       </div>
 
-      {/* SUBMODAL DE CONCILIAÇÃO (FALTA VS. PENDÊNCIA) */}
-      {isReconciliationModalOpen && reconciliationData && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', zIndex: 510000, padding: '1rem', backdropFilter: 'blur(3px)'
-        }}>
+      {/* SUBMODAL DE CONCILIAÇÃO (FINALIZAR PARCIAL P/ CONCLUÍDO + NOVO CARD vs. PENDÊNCIA vs. FALTA) */}
+      {isReconciliationModalOpen && reconciliationData && (() => {
+        const itemTotalQty = Number(handlingTeamModalItem.print_run || handlingTeamModalItem.quantity || reconciliationData.withdrawnQty || 0);
+        const effectiveDelivered = reconciliationChoice === 'CONCLUIR_E_NOVO_CARD'
+          ? Number(partialDeliveredQty || reconciliationData.returnedQty || 0)
+          : Number(reconciliationData.returnedQty || 0);
+        const effectiveRemaining = Math.max(0, itemTotalQty - effectiveDelivered);
+        const baseCardId = (handlingTeamModalItem.friendly_id || handlingTeamModalItem.order?.op_number || handlingTeamModalItem.order?.pv_number || 'CARD').trim();
+        const originTeamObj = (handlingTeams || []).find((t: any) => t.id === reconciliationData.allocation?.handling_team_id);
+        const originTeamName = originTeamObj?.name || 'Equipe Atual';
+        const activeTeams = (handlingTeams || []).filter((t: any) => t.status === 'ATIVO');
+
+        return (
           <div style={{
-            backgroundColor: 'var(--surface)',
-            borderRadius: 'var(--radius-lg, 12px)',
-            maxWidth: '520px',
-            width: '100%',
-            maxHeight: '90vh',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-xl)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column'
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', zIndex: 510000, padding: '1rem', backdropFilter: 'blur(3px)'
           }}>
-            {/* Cabeçalho do Submodal */}
             <div style={{
-              padding: '1rem 1.25rem',
-              borderBottom: '1px solid var(--border)',
+              backgroundColor: 'var(--surface)',
+              borderRadius: 'var(--radius-lg, 12px)',
+              maxWidth: '610px',
+              width: '100%',
+              maxHeight: '90vh',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-xl)',
+              overflow: 'hidden',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: 'hsla(45, 93%, 47%, 0.08)'
+              flexDirection: 'column'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'hsl(45, 93%, 35%)', fontWeight: 800 }}>
-                <AlertCircle size={20} />
-                <span>Conciliação de Retorno de Manuseio</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsReconciliationModalOpen(false);
-                  setReconciliationData(null);
-                }}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Corpo do Submodal */}
-            <div className="modal-scroll" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', flex: 1 }}>
-              <div style={{ fontSize: '0.84rem', color: 'var(--text)', lineHeight: 1.5 }}>
-                A quantidade retornada (<strong>{reconciliationData.returnedQty.toLocaleString('pt-BR')} un</strong>) é menor do que a quantidade que a equipe retirou (<strong>{reconciliationData.withdrawnQty.toLocaleString('pt-BR')} un</strong>).
-              </div>
-
-              {/* Card de Resumo das Quantidades */}
+              {/* Cabeçalho do Submodal */}
               <div style={{
-                backgroundColor: 'var(--background)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm, 6px)',
-                padding: '0.75rem',
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr 1.2fr',
-                gap: '0.5rem',
-                fontSize: '0.76rem'
+                padding: '1rem 1.25rem',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: reconciliationChoice === 'CONCLUIR_E_NOVO_CARD' ? 'hsla(142, 71%, 45%, 0.08)' : 'hsla(45, 93%, 47%, 0.08)'
               }}>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>Qtd Retirada</span>
-                  <strong style={{ color: 'var(--text)' }}>{reconciliationData.withdrawnQty.toLocaleString('pt-BR')} un</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: reconciliationChoice === 'CONCLUIR_E_NOVO_CARD' ? 'hsl(142, 71%, 32%)' : 'hsl(45, 93%, 35%)', fontWeight: 800 }}>
+                  {reconciliationChoice === 'CONCLUIR_E_NOVO_CARD' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+                  <span>Finalizar Entrega Parcial / Conciliação de Retorno</span>
                 </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>Qtd Retornada</span>
-                  <strong style={{ color: 'hsl(142, 71%, 35%)' }}>{reconciliationData.returnedQty.toLocaleString('pt-BR')} un</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>Diferença Restante</span>
-                  <strong style={{ color: 'hsl(0, 84%, 45%)' }}>{reconciliationData.difference.toLocaleString('pt-BR')} un</strong>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReconciliationModalOpen(false);
+                    setReconciliationData(null);
+                  }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                >
+                  <X size={20} />
+                </button>
               </div>
 
-              {/* Opções de Seleção */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text)' }}>
-                  Selecione como deseja tratar as {reconciliationData.difference.toLocaleString('pt-BR')} unidades restantes:
-                </span>
+              {/* Corpo do Submodal */}
+              <div className="modal-scroll" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.9rem', overflowY: 'auto', flex: 1 }}>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text)', lineHeight: 1.45 }}>
+                  Remessa enviada para <strong>{originTeamName}</strong> com <strong>{itemTotalQty.toLocaleString('pt-BR')} un</strong>. Informe ou confirme a quantidade entregue agora e escolha como deseja tratar o saldo restante:
+                </div>
 
-                {/* OPÇÃO A: Registrar como Pendência */}
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '0.65rem',
+                {/* Card de Resumo e Ajuste Rápido da Quantidade Entregue */}
+                <div style={{
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm, 6px)',
                   padding: '0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  border: `1.5px solid ${reconciliationChoice === 'PENDENCIA' ? 'var(--primary)' : 'var(--border)'}`,
-                  backgroundColor: reconciliationChoice === 'PENDENCIA' ? 'rgba(var(--primary-rgb), 0.05)' : 'var(--surface)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}>
-                  <input
-                    type="radio"
-                    name="reconciliation_type"
-                    checked={reconciliationChoice === 'PENDENCIA'}
-                    onChange={() => setReconciliationChoice('PENDENCIA')}
-                    style={{ marginTop: '3px', cursor: 'pointer' }}
-                  />
-                  <div>
-                    <strong style={{ fontSize: '0.84rem', color: 'var(--text)', display: 'block' }}>
-                      Opção A: Registrar como Pendência (Manter com a Equipe)
-                    </strong>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4, display: 'block', marginTop: '2px' }}>
-                      Mantém o fluxo ativo. Cria automaticamente uma nova linha de entrega vinculada à equipe contendo as {reconciliationData.difference.toLocaleString('pt-BR')} un restantes e deixando a data de retorno em branco, aguardando a próxima conferência.
-                    </span>
-                  </div>
-                </label>
-
-                {/* OPÇÃO B: Registrar como Falta */}
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1.25fr 1.15fr',
                   gap: '0.65rem',
-                  padding: '0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  border: `1.5px solid ${reconciliationChoice === 'FALTA' ? 'hsl(0, 84%, 60%)' : 'var(--border)'}`,
-                  backgroundColor: reconciliationChoice === 'FALTA' ? 'hsla(0, 84%, 60%, 0.05)' : 'var(--surface)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
+                  alignItems: 'center',
+                  fontSize: '0.76rem'
                 }}>
-                  <input
-                    type="radio"
-                    name="reconciliation_type"
-                    checked={reconciliationChoice === 'FALTA'}
-                    onChange={() => setReconciliationChoice('FALTA')}
-                    style={{ marginTop: '3px', cursor: 'pointer' }}
-                  />
                   <div>
-                    <strong style={{ fontSize: '0.84rem', color: 'hsl(0, 84%, 45%)', display: 'block' }}>
-                      Opção B: Registrar como Falta Definitiva
-                    </strong>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4, display: 'block', marginTop: '2px' }}>
-                      Finaliza aquela entrega/lote permanentemente. A diferença de {reconciliationData.difference.toLocaleString('pt-BR')} un é convertida em um registro definitivo de perda/extravio no histórico e integrada para acerto na Expedição.
-                    </span>
+                    <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>Qtd Enviada</span>
+                    <strong style={{ color: 'var(--text)', fontSize: '0.9rem' }}>{itemTotalQty.toLocaleString('pt-BR')} un</strong>
                   </div>
-                </label>
+                  <div>
+                    <span style={{ color: 'hsl(142, 71%, 32%)', display: 'block', fontSize: '0.68rem', fontWeight: 700 }}>Qtd Entregue Agora (un)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={Math.max(1, itemTotalQty - 1)}
+                      className="form-input"
+                      style={{ padding: '0.28rem 0.5rem', fontSize: '0.85rem', fontWeight: 800, marginTop: '2px', borderColor: 'hsl(142, 71%, 40%)' }}
+                      value={partialDeliveredQty || ''}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setPartialDeliveredQty(val);
+                        setReconciliationData((prev: any) => prev ? {
+                          ...prev,
+                          returnedQty: val,
+                          difference: Math.max(0, itemTotalQty - val)
+                        } : prev);
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>Saldo que Faltou</span>
+                    <strong style={{ color: 'hsl(0, 84%, 45%)', fontSize: '0.9rem' }}>{effectiveRemaining.toLocaleString('pt-BR')} un</strong>
+                  </div>
+                </div>
+
+                {/* Opções de Seleção */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text)' }}>
+                    Escolha a ação para esta entrega parcial:
+                  </span>
+
+                  {/* OPÇÃO PRINCIPAL (NOVO): Finalizar Entrega -> Enviar p/ Concluído (+Estoque) + Gerar Outro Card para o Saldo */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.65rem',
+                    padding: '0.85rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: `2px solid ${reconciliationChoice === 'CONCLUIR_E_NOVO_CARD' ? 'hsl(142, 71%, 38%)' : 'var(--border)'}`,
+                    backgroundColor: reconciliationChoice === 'CONCLUIR_E_NOVO_CARD' ? 'hsla(142, 71%, 45%, 0.06)' : 'var(--surface)',
+                    transition: 'all 0.15s ease'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="reconciliation_type"
+                        checked={reconciliationChoice === 'CONCLUIR_E_NOVO_CARD'}
+                        onChange={() => setReconciliationChoice('CONCLUIR_E_NOVO_CARD')}
+                        style={{ marginTop: '3px', cursor: 'pointer' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                          <strong style={{ fontSize: '0.85rem', color: 'hsl(142, 71%, 30%)' }}>
+                            Finalizar Entrega e Enviar p/ Concluído (+Estoque) + Gerar Outro Card com o que Faltou
+                          </strong>
+                          <span style={{
+                            fontSize: '0.64rem',
+                            fontWeight: 800,
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: 'hsl(142, 71%, 38%)',
+                            color: '#fff',
+                            textTransform: 'uppercase'
+                          }}>
+                            Entrada Imediata
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                          Fecha imediatamente o card <strong>{baseCardId}.1 ({effectiveDelivered.toLocaleString('pt-BR')} un)</strong> enviando direto para <strong>Concluído</strong> (dando entrada positiva imediata no estoque) e gera outro card separado <strong>{baseCardId}.2 ({effectiveRemaining.toLocaleString('pt-BR')} un)</strong> com o que faltou.
+                        </span>
+                      </div>
+                    </label>
+
+                    {reconciliationChoice === 'CONCLUIR_E_NOVO_CARD' && (
+                      <div style={{
+                        marginLeft: '1.45rem',
+                        padding: '0.75rem',
+                        borderRadius: 'var(--radius-xs, 6px)',
+                        backgroundColor: 'var(--background)',
+                        border: '1px solid var(--border)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.65rem'
+                      }}>
+                        {/* Resumo Visual dos 2 Cards */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.73rem' }}>
+                          <div style={{
+                            padding: '0.5rem 0.65rem',
+                            borderRadius: '5px',
+                            backgroundColor: 'hsla(142, 71%, 45%, 0.1)',
+                            border: '1px solid hsla(142, 71%, 45%, 0.3)'
+                          }}>
+                            <div style={{ fontWeight: 800, color: 'hsl(142, 71%, 30%)' }}>
+                              Card {baseCardId}.1 -&gt; CONCLUÍDO
+                            </div>
+                            <div style={{ color: 'var(--text)', fontWeight: 700, marginTop: '2px' }}>
+                              +{effectiveDelivered.toLocaleString('pt-BR')} un no Estoque
+                            </div>
+                          </div>
+
+                          <div style={{
+                            padding: '0.5rem 0.65rem',
+                            borderRadius: '5px',
+                            backgroundColor: 'hsla(217, 91%, 60%, 0.1)',
+                            border: '1px solid hsla(217, 91%, 60%, 0.3)'
+                          }}>
+                            <div style={{ fontWeight: 800, color: 'hsl(217, 91%, 40%)' }}>
+                              Novo Card {baseCardId}.2 -&gt; SALDO
+                            </div>
+                            <div style={{ color: 'var(--text)', fontWeight: 700, marginTop: '2px' }}>
+                              {effectiveRemaining.toLocaleString('pt-BR')} un que faltaram
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Seleção da Equipe para o Novo Card (.2) */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          <span style={{ fontSize: '0.73rem', fontWeight: 800, color: 'var(--text)' }}>
+                            Para quem vai o novo card ({baseCardId}.2 com {effectiveRemaining.toLocaleString('pt-BR')} un)?
+                          </span>
+
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text)' }}>
+                            <input
+                              type="radio"
+                              name="remainder_dest"
+                              checked={remainderDestination === 'SAME_TEAM'}
+                              onChange={() => setRemainderDestination('SAME_TEAM')}
+                            />
+                            <span><strong>Mesma Equipe ({originTeamName})</strong> — Mantém em Manuseio com a mesma equipe</span>
+                          </label>
+
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text)' }}>
+                            <input
+                              type="radio"
+                              name="remainder_dest"
+                              checked={remainderDestination === 'OTHER_TEAM'}
+                              onChange={() => setRemainderDestination('OTHER_TEAM')}
+                            />
+                            <span><strong>Outra Equipe de Manuseio</strong> — Escolher outra equipe para o novo card</span>
+                          </label>
+
+                          {remainderDestination === 'OTHER_TEAM' && (
+                            <div style={{ marginLeft: '1.35rem', marginTop: '2px' }}>
+                              <select
+                                className="form-input"
+                                style={{ padding: '0.35rem 0.5rem', fontSize: '0.76rem', width: '100%' }}
+                                value={remainderTeamId}
+                                onChange={(e) => setRemainderTeamId(e.target.value)}
+                              >
+                                <option value="">Selecione a equipe para o novo card de {effectiveRemaining.toLocaleString('pt-BR')} un...</option>
+                                {activeTeams.map((t: any) => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.name}{t.id === reconciliationData.allocation?.handling_team_id ? ' (Equipe Atual)' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text)' }}>
+                            <input
+                              type="radio"
+                              name="remainder_dest"
+                              checked={remainderDestination === 'IR_PARA_MANUSEIO'}
+                              onChange={() => setRemainderDestination('IR_PARA_MANUSEIO')}
+                            />
+                            <span><strong>Enviar para &quot;Ir para Manuseio&quot;</strong> — Definir equipe depois</span>
+                          </label>
+                        </div>
+
+                        {/* Checkbox de Entrada Imediata no Estoque */}
+                        {handlingTeamModalItem?.product_id && (
+                          <label style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.45rem',
+                            fontSize: '0.74rem',
+                            fontWeight: 700,
+                            color: 'hsl(142, 71%, 30%)',
+                            paddingTop: '0.35rem',
+                            borderTop: '1px dashed var(--border)',
+                            cursor: 'pointer'
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={giveImmediateStockEntry}
+                              onChange={(e) => setGiveImmediateStockEntry(e.target.checked)}
+                            />
+                            <span>
+                              Dar entrada positiva imediata de +{effectiveDelivered.toLocaleString('pt-BR')} un no Estoque do produto ao concluir
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* OPÇÃO A: Registrar como Pendência no Mesmo Card */}
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    padding: '0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: `1.5px solid ${reconciliationChoice === 'PENDENCIA' ? 'var(--primary)' : 'var(--border)'}`,
+                    backgroundColor: reconciliationChoice === 'PENDENCIA' ? 'rgba(var(--primary-rgb), 0.05)' : 'var(--surface)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}>
+                    <input
+                      type="radio"
+                      name="reconciliation_type"
+                      checked={reconciliationChoice === 'PENDENCIA'}
+                      onChange={() => setReconciliationChoice('PENDENCIA')}
+                      style={{ marginTop: '3px', cursor: 'pointer' }}
+                    />
+                    <div>
+                      <strong style={{ fontSize: '0.82rem', color: 'var(--text)', display: 'block' }}>
+                        Apenas Registrar Pendência no Mesmo Card (Sem concluir e sem dar entrada agora)
+                      </strong>
+                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', lineHeight: 1.4, display: 'block', marginTop: '2px' }}>
+                        Mantém o card inteiro parado em Manuseio e cria apenas uma linha interna para as {effectiveRemaining.toLocaleString('pt-BR')} un restantes.
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* OPÇÃO B: Registrar como Falta Definitiva */}
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    padding: '0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: `1.5px solid ${reconciliationChoice === 'FALTA' ? 'hsl(0, 84%, 60%)' : 'var(--border)'}`,
+                    backgroundColor: reconciliationChoice === 'FALTA' ? 'hsla(0, 84%, 60%, 0.05)' : 'var(--surface)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}>
+                    <input
+                      type="radio"
+                      name="reconciliation_type"
+                      checked={reconciliationChoice === 'FALTA'}
+                      onChange={() => setReconciliationChoice('FALTA')}
+                      style={{ marginTop: '3px', cursor: 'pointer' }}
+                    />
+                    <div>
+                      <strong style={{ fontSize: '0.82rem', color: 'hsl(0, 84%, 45%)', display: 'block' }}>
+                        Registrar como Falta / Perda Definitiva (Sem gerar novo card)
+                      </strong>
+                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', lineHeight: 1.4, display: 'block', marginTop: '2px' }}>
+                        Encerra o lote e registra as {effectiveRemaining.toLocaleString('pt-BR')} un como perda/avaria definitiva no histórico.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Campo Opcional de Observações */}
+                <div>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Observações da Operação (Ficará registrado nos cards e no histórico):
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows={2}
+                    value={reconciliationNotes}
+                    onChange={(e) => setReconciliationNotes(e.target.value)}
+                    placeholder="Ex: Entregue 8.000 un urgentes para entrada imediata no estoque; saldo de 2.000 un ficou em produção..."
+                    style={{ fontSize: '0.78rem', width: '100%', resize: 'vertical' }}
+                  />
+                </div>
               </div>
 
-              {/* Campo Opcional de Observações */}
-              <div>
-                <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                  Observações da Conciliação (Opcional):
-                </label>
-                <textarea
-                  className="form-input"
-                  rows={2}
-                  value={reconciliationNotes}
-                  onChange={(e) => setReconciliationNotes(e.target.value)}
-                  placeholder="Ex: refugo no manuseio, rasgo de alça, lote retido para término amanhã..."
-                  style={{ fontSize: '0.78rem', width: '100%', resize: 'vertical' }}
-                />
+              {/* Rodapé do Submodal */}
+              <div style={{
+                padding: '0.85rem 1.25rem',
+                borderTop: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '0.6rem',
+                backgroundColor: 'var(--background)'
+              }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={savingReconciliation}
+                  onClick={() => {
+                    setIsReconciliationModalOpen(false);
+                    setReconciliationData(null);
+                  }}
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={savingReconciliation}
+                  onClick={handleConfirmReconciliation}
+                  style={{
+                    backgroundColor:
+                      reconciliationChoice === 'CONCLUIR_E_NOVO_CARD'
+                        ? 'hsl(142, 71%, 38%)'
+                        : reconciliationChoice === 'FALTA'
+                        ? 'hsl(0, 84%, 50%)'
+                        : 'var(--primary)',
+                    borderColor:
+                      reconciliationChoice === 'CONCLUIR_E_NOVO_CARD'
+                        ? 'hsl(142, 71%, 34%)'
+                        : reconciliationChoice === 'FALTA'
+                        ? 'hsl(0, 84%, 45%)'
+                        : 'var(--primary)',
+                    fontWeight: 800
+                  }}
+                >
+                  {savingReconciliation
+                    ? 'Processando...'
+                    : reconciliationChoice === 'CONCLUIR_E_NOVO_CARD'
+                    ? `Finalizar ${effectiveDelivered.toLocaleString('pt-BR')} un p/ Concluído e Gerar Card (${effectiveRemaining.toLocaleString('pt-BR')} un)`
+                    : reconciliationChoice === 'FALTA'
+                    ? 'Confirmar e Registrar Falta'
+                    : 'Confirmar e Gerar Pendência'}
+                </button>
               </div>
-            </div>
-
-            {/* Rodapé do Submodal */}
-            <div style={{
-              padding: '0.85rem 1.25rem',
-              borderTop: '1px solid var(--border)',
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '0.6rem',
-              backgroundColor: 'var(--background)'
-            }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={savingReconciliation}
-                onClick={() => {
-                  setIsReconciliationModalOpen(false);
-                  setReconciliationData(null);
-                }}
-              >
-                Voltar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={savingReconciliation}
-                onClick={handleConfirmReconciliation}
-                style={{
-                  backgroundColor: reconciliationChoice === 'FALTA' ? 'hsl(0, 84%, 50%)' : 'var(--primary)',
-                  borderColor: reconciliationChoice === 'FALTA' ? 'hsl(0, 84%, 45%)' : 'var(--primary)'
-                }}
-              >
-                {savingReconciliation ? 'Processando...' : (reconciliationChoice === 'FALTA' ? 'Confirmar e Registrar Falta' : 'Confirmar e Gerar Pendência')}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL DE HISTÓRICO E AUDITORIA */}
       {isHistoryModalOpen && (

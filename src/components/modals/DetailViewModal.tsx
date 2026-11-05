@@ -946,30 +946,66 @@ export function DetailViewModal(props: any) {
                       <span style={{ fontSize: '0.82rem', fontWeight: 800 }}>Informações de Manuseio & Produtos do Pedido</span>
                     </div>
 
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{
-                        fontSize: '0.75rem',
-                        padding: '0.3rem 0.75rem',
-                        gap: '0.35rem',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        fontWeight: 700,
-                        boxShadow: 'var(--shadow-xs)'
-                      }}
-                      onClick={() => {
-                        const itemsInOrder = orderItems.filter(i => i.order_id === order.id);
-                        const targetItem = itemsInOrder.find(i => i.id === detailItem?.id) || itemsInOrder[0] || detailItem;
-                        if (targetItem) {
-                          handleOpenHandlingTeamModalForItem(targetItem, targetItem.stage_id);
-                        }
-                      }}
-                      title="Editar ou vincular equipe de manuseio aos produtos deste pedido"
-                    >
-                      <Edit3 size={14} />
-                      <span>Editar Equipe de Manuseio</span>
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const itemsInOrder = orderItems.filter(i => i.order_id === order.id);
+                          const targetItem = itemsInOrder.find(i => i.id === detailItem?.id) || itemsInOrder[0] || detailItem;
+                          if (targetItem) {
+                            setIsDetailModalOpen(false);
+                            handleOpenHandlingTeamModalForItem(targetItem, targetItem.stage_id);
+                          }
+                        }}
+                        style={{
+                          fontSize: '0.74rem',
+                          padding: '0.3rem 0.75rem',
+                          gap: '0.35rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          fontWeight: 800,
+                          borderRadius: 'var(--radius-sm, 6px)',
+                          border: '1px solid hsl(142, 71%, 35%)',
+                          backgroundColor: 'hsl(142, 71%, 38%)',
+                          color: '#ffffff',
+                          cursor: 'pointer',
+                          textTransform: 'none',
+                          letterSpacing: 'normal',
+                          boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)'
+                        }}
+                        title="Finalizar entrega parcial do manuseio enviando o que foi entregue direto para Concluído (+Estoque) e gerando outro card para o saldo que faltou"
+                      >
+                        <Split size={13} />
+                        <span>Finalizar Entrega Parcial -&gt; Concluído (+Estoque)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.3rem 0.75rem',
+                          gap: '0.35rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          fontWeight: 700,
+                          textTransform: 'none',
+                          letterSpacing: 'normal',
+                          boxShadow: 'var(--shadow-xs)'
+                        }}
+                        onClick={() => {
+                          const itemsInOrder = orderItems.filter(i => i.order_id === order.id);
+                          const targetItem = itemsInOrder.find(i => i.id === detailItem?.id) || itemsInOrder[0] || detailItem;
+                          if (targetItem) {
+                            handleOpenHandlingTeamModalForItem(targetItem, targetItem.stage_id);
+                          }
+                        }}
+                        title="Editar ou vincular equipe de manuseio aos produtos deste pedido"
+                      >
+                        <Edit3 size={14} />
+                        <span>Editar Equipe de Manuseio</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>

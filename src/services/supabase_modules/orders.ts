@@ -387,10 +387,367 @@ export async function splitOrderItem(params: SplitOrderItemParams) {
     return { data: null, error: errInsert };
   }
 
+  // 3. Blindagem de Estoque e Status caso a etapa de destino na divisao ja seja Estoque ou Concluido
+  if (insertedCard1) {
+    const destStageName = (insertedCard1.stage?.name || '').trim();
+    const isEnteringStockOrCompleted = destStageName === 'Estoque' || destStageName === 'Concluído';
+
+    if (destStageName === 'Concluído' || destStageName === 'Estoque') {
+      const alignedStatus = destStageName === 'Concluído' ? 'Concluído' : 'Em estoque';
+      const alignedSector = destStageName === 'Concluído' ? 'Concluído' : 'Estoque';
+      await getDbClient()
+        .from('order_items')
+        .update({ status: alignedStatus, production_sector: alignedSector })
+        .eq('id', insertedCard1.id);
+      insertedCard1.status = alignedStatus;
+      insertedCard1.production_sector = alignedSector;
+    }
+
+    if (isEnteringStockOrCompleted && originalItem.product_id) {
+      const friendlyUpper = (originalItem.friendly_id || '').toUpperCase().trim();
+      const pvUpper = (originalItem.order?.pv_number || '').toUpperCase().trim();
+      const opUpper = (originalItem.order?.op_number || '').toUpperCase().trim();
+      const sellerUpper = (originalItem.order?.seller_name || '').toUpperCase().trim();
+      const isOp =
+        friendlyUpper.startsWith('OP-') ||
+        pvUpper.startsWith('OP-') ||
+        opUpper.startsWith('OP-') ||
+        sellerUpper === 'FÁBRICA' ||
+        sellerUpper === 'FABRICA';
+
+      // Verifica se o card pai ja havia movimentado o estoque antes de ser dividido
+      const { data: parentTx } = await getDbClient()
+        .from('stock_transactions')
+        .select('id')
+        .eq('product_id', originalItem.product_id)
+        .ilike('description', `%[ITEM:${originalItem.id}]%`)
+        .limit(1);
+
+      const { data: childTx } = await getDbClient()
+        .from('stock_transactions')
+        .select('id')
+        .eq('product_id', originalItem.product_id)
+        .ilike('description', `%[ITEM:${insertedCard1.id}]%`)
+        .limit(1);
+
+      const hasParentMovedStock = !!(parentTx && parentTx.length > 0);
+      const hasChildMovedStock = !!(childTx && childTx.length > 0);
+
+      if (!hasParentMovedStock && !hasChildMovedStock) {
+        if (isOp) {
+          await adjustStock(
+            originalItem.product_id,
+            advanceQuantity,
+            'ENTRADA',
+            `[ITEM:${insertedCard1.id}] Entrada automatica no estoque via divisao/conclusao parcial da OP ${part1FriendlyId} (${advanceQuantity} un)`,
+            tenantId
+          );
+        } else if (destStageName === 'Estoque') {
+          await adjustStock(
+            originalItem.product_id,
+            -advanceQuantity,
+            'SAIDA',
+            `[ITEM:${insertedCard1.id}] Baixa automatica no estoque via divisao parcial do pedido ${part1FriendlyId} (${advanceQuantity} un)`,
+            tenantId
+          );
+        }
+      }
+    }
+  }
+
   return {
     data: {
       card1: insertedCard1,
       card2: updatedCard2
+    },
+    error: null
+  };
+}
+
+export interface FinalizePartialHandlingParams {
+  originalItem: any;
+  allocationIndex: number;
+  allAllocations: any[];
+  deliveredQuantity: number;
+  concluidoStageId: string;
+  manuseioStageId: string;
+  irParaManuseioStageId?: string;
+  remainderDestination: 'SAME_TEAM' | 'OTHER_TEAM' | 'IR_PARA_MANUSEIO';
+  remainderTeamId?: string;
+  originTeamName?: string;
+  destinationTeamName?: string;
+  operatorId?: string | null;
+  operatorName?: string | null;
+  giveImmediateStockEntry?: boolean;
+  notes?: string;
+  tenantId?: string;
+}
+
+export async function finalizePartialHandlingAndSplitToCompleted(params: FinalizePartialHandlingParams) {
+  const {
+    originalItem,
+    allocationIndex,
+    allAllocations = [],
+    deliveredQuantity,
+    concluidoStageId,
+    manuseioStageId,
+    irParaManuseioStageId,
+    remainderDestination,
+    remainderTeamId,
+    originTeamName = 'Equipe de Manuseio',
+    destinationTeamName = 'Equipe de Manuseio',
+    operatorId,
+    operatorName = 'Operador',
+    giveImmediateStockEntry = true,
+    notes = '',
+    tenantId = originalItem?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+  } = params;
+
+  const originalPrintRun = Number(originalItem?.print_run || originalItem?.quantity || 0);
+  const deliveredQty = Number(deliveredQuantity || 0);
+
+  if (deliveredQty <= 0 || deliveredQty >= originalPrintRun) {
+    return {
+      data: null,
+      error: new Error(`A quantidade entregue para finalizacao parcial deve ser entre 1 e ${originalPrintRun - 1} unidades.`)
+    };
+  }
+
+  const remainingQuantity = originalPrintRun - deliveredQty;
+  const targetAllocation = allAllocations[allocationIndex] || allAllocations[0] || {};
+  const currentTeamId = targetAllocation.handling_team_id || originalItem.handling_team_id || '';
+
+  const baseId = (
+    originalItem.friendly_id ||
+    originalItem.order?.op_number ||
+    originalItem.order?.pv_number ||
+    'CARD'
+  ).trim();
+
+  const part1FriendlyId = `${baseId}.1`;
+  const part2FriendlyId = `${baseId}.2`;
+
+  const totalBoxes = Number(originalItem.boxes_count || 1);
+  const part1Boxes = Math.max(1, Math.round(totalBoxes * (deliveredQty / Math.max(1, originalPrintRun))));
+  const part2Boxes = Math.max(1, totalBoxes - part1Boxes);
+
+  const nowIso = new Date().toISOString();
+  const todayStr = nowIso.slice(0, 10);
+  const nowPtBr = new Date().toLocaleString('pt-BR');
+
+  // Define etapa e equipe do card remanescente (.2 - saldo que faltou)
+  const finalRemainderStageId =
+    remainderDestination === 'IR_PARA_MANUSEIO' && irParaManuseioStageId
+      ? irParaManuseioStageId
+      : manuseioStageId;
+
+  const finalRemainderTeamId =
+    remainderDestination === 'SAME_TEAM'
+      ? currentTeamId
+      : remainderDestination === 'OTHER_TEAM'
+      ? (remainderTeamId || currentTeamId)
+      : null;
+
+  const remainderStatus =
+    remainderDestination === 'IR_PARA_MANUSEIO' ? 'A produzir' : 'Manuseio';
+
+  const destSummary =
+    remainderDestination === 'SAME_TEAM'
+      ? `Mesma Equipe (${originTeamName})`
+      : remainderDestination === 'OTHER_TEAM'
+      ? `Outra Equipe (${destinationTeamName})`
+      : 'Ir para Manuseio (Definir Equipe Depois)';
+
+  const auditTagCard2 = `[MANUSEIO-SALDO-PENDENTE | DATA:${nowPtBr} | RESP:${operatorName} | ORIGEM:${baseId} (${originalPrintRun} un) | ENTREGUE_CONCLUIDO:${part1FriendlyId} (${deliveredQty} un) | SALDO_RESTANTE:${remainingQuantity} un | DESTINO:${destSummary}${notes ? ` | OBS:${notes}` : ''}]`;
+  const auditTagCard1 = `[MANUSEIO-PARCIAL-CONCLUIDO | DATA:${nowPtBr} | RESP:${operatorName} | ORIGEM:${baseId} (${originalPrintRun} un) | ENTREGUE:${deliveredQty} un | EQUIPE:${originTeamName} | SALDO_GERADO:${part2FriendlyId} (${remainingQuantity} un -> ${destSummary})${notes ? ` | OBS:${notes}` : ''}]`;
+
+  // 1. Atualiza o card original (Card .2 - Permanece com o saldo faltante para a mesma ou outra equipe)
+  const card2Updates: any = {
+    friendly_id: part2FriendlyId,
+    print_run: remainingQuantity,
+    boxes_count: part2Boxes,
+    stage_id: finalRemainderStageId,
+    status: remainderStatus,
+    production_sector: 'Manuseio',
+    handling_team_id: finalRemainderTeamId,
+    split_at: nowIso,
+    split_by_user_id: operatorId || null,
+    notes: originalItem.notes
+      ? `${originalItem.notes}\n${auditTagCard2}`
+      : auditTagCard2,
+    updated_at: nowIso
+  };
+
+  const { data: updatedCard2, error: errUpdate } = await getDbClient()
+    .from('order_items')
+    .update(card2Updates)
+    .eq('id', originalItem.id)
+    .select('*, product:products(*), stage:order_stages(*)')
+    .single();
+
+  if (errUpdate) {
+    console.error('Erro ao atualizar card do saldo faltante (.2):', errUpdate);
+    return { data: null, error: errUpdate };
+  }
+
+  // 2. Insere o novo card (Card .1 - Parte entregue vai direto para Concluido)
+  const card1Payload: any = {
+    tenant_id: tenantId,
+    order_id: originalItem.order_id,
+    product_id: originalItem.product_id || null,
+    item_type: originalItem.item_type || 'PRODUTO',
+    name: originalItem.name,
+    friendly_id: part1FriendlyId,
+    measure: originalItem.measure || null,
+    print_run: deliveredQty,
+    boxes_count: part1Boxes,
+    packaging_type: originalItem.packaging_type || 'CAIXA',
+    over_short_quantity: 0,
+    status: 'Concluído',
+    stage_id: concluidoStageId,
+    production_sector: 'Concluído',
+    physical_location: originalItem.physical_location || null,
+    machine_id: originalItem.machine_id || null,
+    handling_team_id: currentTeamId || null,
+    notes: originalItem.notes
+      ? `${originalItem.notes}\n${auditTagCard1}`
+      : auditTagCard1,
+    split_from_item_id: originalItem.id,
+    split_at: nowIso,
+    split_by_user_id: operatorId || null,
+    created_at: nowIso,
+    updated_at: nowIso
+  };
+
+  const { data: insertedCard1, error: errInsert } = await getDbClient()
+    .from('order_items')
+    .insert([card1Payload])
+    .select('*, product:products(*), stage:order_stages(*)')
+    .single();
+
+  if (errInsert || !insertedCard1) {
+    console.error('Erro ao inserir card concluido (.1):', errInsert);
+    return { data: null, error: errInsert || new Error('Falha ao criar card concluido (.1).') };
+  }
+
+  // 3. Registra a alocacao CONCLUIDA no Card .1 (8.000 un entregues e conferidas)
+  const rawPv = part1FriendlyId.replace(/^PV-?/i, '');
+  const completedAllocationForCard1 = [
+    {
+      handling_team_id: currentTeamId,
+      quantity: deliveredQty,
+      departure_date: targetAllocation.departure_date || todayStr,
+      return_quantity: deliveredQty,
+      return_date: targetAllocation.return_date || todayStr,
+      handling_code: targetAllocation.handling_code || `MS${rawPv}/1`,
+      is_completed: true,
+      completed_at: targetAllocation.return_date || todayStr,
+      services: targetAllocation.services || [],
+      status: 'CONCLUIDO' as const,
+      notes: `Entrega parcial finalizada e enviada diretamente para Concluido (${deliveredQty.toLocaleString('pt-BR')} un de ${originalPrintRun.toLocaleString('pt-BR')} un).${notes ? ` Obs: ${notes}` : ''}`
+    }
+  ];
+  await saveOrderItemHandlingTeams(insertedCard1.id, completedAllocationForCard1, tenantId);
+
+  // 4. Atualiza a alocacao PENDENTE no Card .2 (2.000 un restantes para a mesma ou outra equipe)
+  const rawPv2 = part2FriendlyId.replace(/^PV-?/i, '');
+  if (remainderDestination === 'IR_PARA_MANUSEIO' || !finalRemainderTeamId) {
+    await saveOrderItemHandlingTeams(updatedCard2.id, [], tenantId);
+  } else {
+    const pendingAllocationForCard2 = [
+      {
+        handling_team_id: finalRemainderTeamId,
+        quantity: remainingQuantity,
+        departure_date: remainderDestination === 'SAME_TEAM' ? (targetAllocation.departure_date || todayStr) : todayStr,
+        return_quantity: 0,
+        return_date: '',
+        handling_code: `MS${rawPv2}/1`,
+        is_completed: false,
+        completed_at: '',
+        services: targetAllocation.services || [],
+        status: 'PENDENTE' as const,
+        notes: `Saldo remanescente (${remainingQuantity.toLocaleString('pt-BR')} un) desmembrado apos entrega parcial de ${deliveredQty.toLocaleString('pt-BR')} un no card ${part1FriendlyId} (${destSummary}).`
+      }
+    ];
+    await saveOrderItemHandlingTeams(updatedCard2.id, pendingAllocationForCard2, tenantId);
+  }
+
+  // 5. Entrada Positiva Imediata no Estoque para o Card .1 (8.000 un)
+  let stockEntered = false;
+  if (giveImmediateStockEntry && originalItem.product_id) {
+    // Verifica se o card original ja era uma transformacao Saco->Sacola que deu entrada previa no ato da criacao
+    const isPreEnteredSacoToSacola = (originalItem.notes || '').includes('[SACO_TO_SACOLA|');
+
+    const { data: existingChildTx } = await getDbClient()
+      .from('stock_transactions')
+      .select('id')
+      .eq('product_id', originalItem.product_id)
+      .ilike('description', `%[ITEM:${insertedCard1.id}]%`)
+      .limit(1);
+
+    if (!isPreEnteredSacoToSacola && (!existingChildTx || existingChildTx.length === 0)) {
+      const stockDesc = `[ITEM:${insertedCard1.id}] [MANUSEIO-PARCIAL] Entrada imediata no estoque via finalizacao parcial de manuseio (${part1FriendlyId} - ${deliveredQty.toLocaleString('pt-BR')} un entregues de ${originalPrintRun.toLocaleString('pt-BR')} un | Equipe: ${originTeamName} | Responsavel: ${operatorName})`;
+      const stockRes = await adjustStock(
+        originalItem.product_id,
+        deliveredQty,
+        'ENTRADA',
+        stockDesc,
+        tenantId
+      );
+      if (!stockRes.error) {
+        stockEntered = true;
+      }
+    }
+  }
+
+  // 6. Grava divergencia e rastreabilidade no historico de manuseio
+  const formattedMsg = `Entrega parcial finalizada: ${deliveredQty.toLocaleString('pt-BR')} un enviadas direto para Concluido no card ${part1FriendlyId}${stockEntered ? ' (com entrada imediata no estoque)' : ''}. Saldo restante de ${remainingQuantity.toLocaleString('pt-BR')} un gerou o card ${part2FriendlyId} (${destSummary}).`;
+
+  await saveHandlingDivergence(
+    {
+      order_item_id: updatedCard2.id,
+      order_id: originalItem.order_id,
+      handling_team_id: currentTeamId || null,
+      handling_code: targetAllocation.handling_code || null,
+      type: 'FALTA',
+      divergence_quantity: remainingQuantity,
+      withdrawn_quantity: originalPrintRun,
+      returned_quantity: deliveredQty,
+      event_date: targetAllocation.return_date || todayStr,
+      formatted_message: formattedMsg,
+      reported_by_operator_id: operatorId || null,
+      reported_by_name: operatorName || 'Operador',
+      notes: notes || null
+    },
+    tenantId
+  );
+
+  await saveHandlingDivergence(
+    {
+      order_item_id: insertedCard1.id,
+      order_id: originalItem.order_id,
+      handling_team_id: currentTeamId || null,
+      handling_code: targetAllocation.handling_code || null,
+      type: 'FALTA',
+      divergence_quantity: remainingQuantity,
+      withdrawn_quantity: originalPrintRun,
+      returned_quantity: deliveredQty,
+      event_date: targetAllocation.return_date || todayStr,
+      formatted_message: formattedMsg,
+      reported_by_operator_id: operatorId || null,
+      reported_by_name: operatorName || 'Operador',
+      notes: notes || null
+    },
+    tenantId
+  );
+
+  return {
+    data: {
+      completedCard: insertedCard1,
+      remainderCard: updatedCard2,
+      deliveredQuantity: deliveredQty,
+      remainingQuantity,
+      stockEntered
     },
     error: null
   };

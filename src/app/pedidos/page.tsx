@@ -7065,7 +7065,7 @@ export default function PedidosPage() {
       {/* ──────────────────────────────────────────────────────────── */}
       {/* MODAL DE VINCULAÇÃO DE EQUIPE DE MANUSEIO E ITENS MÚLTIPLOS */}
       {/* ──────────────────────────────────────────────────────────── */}
-      {isHandlingTeamModalOpen && <HandlingTeamModal {...{ executeSaveHandlingTeam, handleSwitchHandlingModalItem, handlingTeamAllocations, handlingTeamModalItem, handlingTeamModalTargetStageId, handlingTeams, itemHandlingTeamsMap, orderItems, orders, resetAllBypasses, savingHandlingTeam, setHandlingTeamAllocations, setHandlingTeamModalItem, setHandlingTeamModalTargetStageId, setIsHandlingReworkModalOpen, setIsHandlingTeamModalOpen, setIsShortageModalOpen, setPendingHandlingPayload, setShortageItem, setShortageNotes, setShortageQty, setShortageReason, stages }} />}
+      {isHandlingTeamModalOpen && <HandlingTeamModal {...{ executeSaveHandlingTeam, fetchAllData, handleSwitchHandlingModalItem, handlingTeamAllocations, handlingTeamModalItem, handlingTeamModalTargetStageId, handlingTeams, itemHandlingTeamsMap, orderItems, orders, resetAllBypasses, savingHandlingTeam, setHandlingTeamAllocations, setHandlingTeamModalItem, setHandlingTeamModalTargetStageId, setIsHandlingReworkModalOpen, setIsHandlingTeamModalOpen, setIsShortageModalOpen, setPendingHandlingPayload, setShortageItem, setShortageNotes, setShortageQty, setShortageReason, showToast, stages, user }} />}
 
       {/* ──────────────────────────────────────────────────────────── */}
       {/* MODAL DE AVISO DE RETRABALHO DE MANUSEIO */}
