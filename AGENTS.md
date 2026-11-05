@@ -15,3 +15,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **Execução do Checkup:** Ao comando de "checkup", "check" ou "varredura", seguir a skill `.agents/skills/system-checkup/SKILL.md` e rodar `npm run checkup`.
 
 
+
+# Protocolo de Escopo Cirurgico e Ponto de Restauracao Total (Rollback)
+- **Escopo Cirurgico (Blast Radius Zero):** Antes de qualquer alteracao, identificar exclusivamente os arquivos, linhas e funcoes que serao alterados e respeitar as Zonas Criticas Blindadas documentadas em [docs/SAFE_CHANGE_AND_ROLLBACK_GUIDE.md](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/docs/SAFE_CHANGE_AND_ROLLBACK_GUIDE.md). Jamais tocar em setores ou logicas adjacentes desnecessariamente.
+- **Ponto de Restauracao Previo Obrigatorio:** Antes de editar arquivos de codigo, criar um ponto de restauracao via `scripts/restore-point.ps1` (`backup_YYYYMMDD_<escopo>/`) e registra-lo no catalogo de [docs/SAFE_CHANGE_AND_ROLLBACK_GUIDE.md](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/docs/SAFE_CHANGE_AND_ROLLBACK_GUIDE.md), permitindo rollback total ou parcial (por arquivo) a qualquer momento.

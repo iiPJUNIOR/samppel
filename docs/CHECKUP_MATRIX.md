@@ -17,22 +17,22 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx` | 2026-10-30 | OK |
-| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts` | 2026-10-30 | OK |
-| **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`) | 2026-10-27 | OK |
-| **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-10-30 | OK |
-| **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-10-30 | OK |
-| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-10-30 | OK |
-| **MOD-07** | Pedidos: Conferência Física na Expedição | `ConferencyModal.tsx`, `pedidos/page.tsx` | 2026-10-23 | OK |
-| **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `api/admin/saldos`, `orders.ts` | 2026-10-30 | OK |
-| **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts`, `orders.ts` | 2026-10-30 | OK |
-| **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-10-30 | OK |
-| **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-10-30 | OK |
-| **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx`, `suppliers.ts` | 2026-10-30 | OK |
-| **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-10-19 | OK |
-| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-10-30 | OK |
+| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx`, `OperatorAuthModal.tsx` | 2026-11-05 | OK |
+| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-05 | OK |
+| **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`), `src/services/deadline_service.ts` (`getExpeditionUrgency`), `src/app/globals.css` (`.kanban-board-scroll`, `--warning-card-bg`) | 2026-11-05 | OK |
+| **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-11-05 | OK |
+| **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-11-05 | OK |
+| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-11-05 | OK |
+| **MOD-07** | Pedidos: Conferência Física na Expedição | `ConferencyModal.tsx`, `pedidos/page.tsx` | 2026-11-05 | OK |
+| **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `api/admin/saldos`, `orders.ts` | 2026-11-05 | OK |
+| **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts`, `orders.ts` | 2026-11-05 | OK |
+| **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-11-05 | OK |
+| **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-11-05 | OK |
+| **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx`, `suppliers.ts` | 2026-11-05 | OK |
+| **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-11-05 | OK |
+| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-11-05 | OK |
 | **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, `sync_queue.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-10-30 | OK |
-| **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `InfoHint.tsx`, `metricGuides.ts`, `src/lib/supabasePlatformClient.ts`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql` | 2026-10-30 | OK |
+| **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `InfoHint.tsx`, `metricGuides.ts`, `src/lib/supabasePlatformClient.ts`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql` | 2026-11-05 | OK |
 
 Legenda de Status:
 * **OK:** Funcionalidade auditada, sem erros de compilação, tipos ou lógica aparente.
@@ -209,3 +209,5 @@ Legenda de Status:
 | **2026-10-30** | MOD-04, MOD-06, MOD-08 | APROVADO COM ÊXITO | Saneamento completo de Saldos & Créditos de Clientes: remoção dos 4 clones duplicados em customer_stock_credits, correção do PV-1832 (Clichê 422 un -> Sacola Parda 423 un), trava anti-Clichê e anti-duplicidade (banco + serviço), inclusão de PENDENCIA_ENTREGA na CHECK constraint de order_balance_adjustments, distinção explícita entre Sobra a Abater e Cortesia Gratuita (Brinde), padronização de cores/rótulos com ProductionAlertModal, correção do prefixo PV duplicado, habilitação da aba Histórico Completo da Expedição e endpoint/modal de Cancelar ou Excluir Saldo exclusivo para Administrador (/api/admin/saldos). |
 | **2026-10-30** | MOD-16 | APROVADO COM ÊXITO | Evolução didática da Central de Monitoramento (/monitoramento): adição do ícone circular (i) (InfoHint + metricGuides) em todos os KPIs, gráficos, colunas de tabela e seções explicando o significado prático, polaridade ideal (Bom ser ALTO vs BAIXO vs ZERO), gatilho anti-estouro e receita de código/banco para permanecer no Plano Free sem pagar upgrade Pro, além do painel Radar Anti-Upgrade Pro com veredito explícito de ação nos 5 pilares gratuitos. |
 | **2026-10-30** | MOD-16 | APROVADO COM ÊXITO | Integração direta com APIs oficiais da Supabase em /monitoramento (supabasePlatformClient.ts: Management API v1 para Plano Real, Org, Compute, Add-ons, API Gateway 24h e auditoria da cota global de 2 projetos Free ativos + Prometheus Metrics API para RAM física, disco /data e rede da VM + MAU 30d e billing_transition_config via RPC SQL), com backup prévio completo, Régua Dupla Padrão (Pro Ativo -> Alvo Free) e Checklist Automático de 6 Pré-Requisitos + Janela Ideal (1-2 dias pré-renovação) para retorno seguro ao Plano Free. |
+| **2026-11-05** | MOD-01 a MOD-14, MOD-16 | APROVADO COM ÊXITO | Habilitação de barras de rolagem lateral (horizontal) e vertical visíveis no quadro Kanban de Pedidos & Vendas (`.kanban-board-scroll`, `.kanban-column-scroll` em `globals.css` e `pedidos/page.tsx`), criação do inventário permanente de 55 modais do sistema em `docs/MODALS_INVENTORY.md` e padronização de rolagem vertical (`maxHeight: 90vh`, `overflowY: auto`, `.modal-scroll`) em 100% dos 55 modais (33 em `src/components/` e 22 inline em `src/app/`), com backup integral prévio em `backup_20261105_pre_kanban_modals_scroll/`. |
+| **2026-11-05** | MOD-02, MOD-03 | APROVADO COM ÊXITO | Implementação do Card Amarelo Fixo (`--warning-card-bg`, `getExpeditionUrgency` em `deadline_service.ts` e `pedidos/page.tsx`) para pedidos liberados cuja Data de Expedição esteja a 10 dias ou menos da entrega (ou atrasados) em qualquer etapa ativa do Kanban, além da criação do Guia de Escopo Cirúrgico e Pontos de Restauração Total/Parcial (`docs/SAFE_CHANGE_AND_ROLLBACK_GUIDE.md` + `scripts/restore-point.ps1`) e ponto de restauração dedicado `backup_20261105_pre_yellow_card_10d/`. |
