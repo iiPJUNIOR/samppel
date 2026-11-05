@@ -6030,7 +6030,7 @@ export default function PedidosPage() {
                                             borderRadius: '3px',
                                             fontWeight: 800
                                           }}
-                                          title="Atenção: Expedição próxima (10 dias ou menos para a entrega)"
+                                          title={`Atenção: Expedição próxima (${expRes.expeditionDate.toLocaleDateString('pt-BR')} — 10 dias ou menos para a entrega)`}
                                         >
                                           {expUrgency.daysRemaining === 0
                                             ? '(Entrega Hoje)'
