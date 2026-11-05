@@ -160,39 +160,95 @@ const extractProductionDeadline = (notes: string | null): string | null => {
   return altMatch ? altMatch[1].trim() : null;
 };
 
-// Extrair detalhes estruturados do pedido
-const extractOrderDetails = (notes: string | null) => {
-  if (!notes) return null;
+// Combinar observações do item e do pedido sem perder nenhuma das duas
+const combineOrderNotes = (primaryNotes?: string | null, secondaryNotes?: string | null): string => {
+  const p = (primaryNotes || '').trim();
+  const s = (secondaryNotes || '').trim();
+  if (p && s) {
+    if (p.toLowerCase() === s.toLowerCase()) return s;
+    return `${p}\n${s}`;
+  }
+  return p || s || '';
+};
+
+// Extrair detalhes estruturados do pedido (suporta notas do item + notas gerais do pedido)
+const extractOrderDetails = (notes: string | null, secondaryNotes?: string | null) => {
+  const combinedNotes = combineOrderNotes(notes, secondaryNotes);
+  if (!combinedNotes) return null;
 
   // Cut the notes at "ABAIXO:" to ignore client-only info.
-  const relevantNotes = notes.split(/ABAIXO:/i)[0];
+  const relevantNotes = combinedNotes.split(/ABAIXO:/i)[0];
 
   const extract = (keyRegex: RegExp) => {
     const match = relevantNotes.match(keyRegex);
     return match ? match[1].trim() : null;
   };
 
-  let cliche = extract(/Clich[êe]\s*:\s*([^\n\r]+)/i) || extract(/Chichê:\s*([^\n\r]+)/i);
+  let cliche =
+    extract(/Clich[êe]\s*:\s*([^\n\r]+)/i) ||
+    extract(/Chich[êe]\s*:\s*([^\n\r]+)/i) ||
+    extract(/\bCLICH[ÊE]\s+(NOVO[^\n\r]*|DE\s+ARQUIVO[^\n\r]*|ARQUIVO[^\n\r]*)/i);
   if (cliche) {
     cliche = cliche.replace(/Embalage(?:m|ns)\s*:.*/i, '').replace(/[\s|-]+$/, '').trim();
     if (!cliche) cliche = null;
   }
   const embalagem = extract(/Embalage(?:m|ns)\s*:\s*([^\n\r]+)/i);
-  const prazo = extract(/Prazo de entrega\s*:\s*([^\n\r]+)/i);
-  const freteInfo = extract(/Frete\s*:\s*([^\n\r]+)/i);
+  const prazo = extract(/Prazo\s*(?:de\s*(?:entrega|produ[çc][ãa]o)|produ[çc][ãa]o)?\s*:\s*([^\n\r]+)/i);
+  const freteInfo = extract(/Frete\s*:\s*([^\n\r]+)/i) || extract(/\b(FRETE\s+SAMPPEL[^\n\r]*)/i);
   const meioPag = extract(/Meio de pag(?:amento|\.)?\s*:\s*([^\n\r]+)/i);
   const formaPag = extract(/Forma de pag(?:amento|\.)?\s*:\s*([^\n\r]+)/i);
-  const op = extract(/OP\s*:\s*([^\n\r]+)/i);
+  const op = extract(/\bOP\s*:\s*([^\n\r]+)/i);
 
-  const impressaoMatch = relevantNotes.match(/Impressão\s+([^\n\r]+)/i);
-  const impressao = impressaoMatch ? impressaoMatch[1].trim() : null;
+  const impressao = extract(/(?:Quant(?:\.|idade)?\s*e\s*cor\s*da\s*arte|Cor\s*da\s*arte|Impress[ãa]o)\s*:?\s*([^\n\r]+)/i);
 
-  const faturamentoMatch = relevantNotes.match(/(PEDIDO FATURADO[^\n\r]*)/i);
+  const faturamentoMatch = relevantNotes.match(/(PEDIDO FATURADO[^\n\r]*|FATURAMENTO ESPECIAL[^\n\r]*)/i);
   const faturamento = faturamentoMatch ? faturamentoMatch[1].trim() : null;
 
-  if (!cliche && !embalagem && !prazo && !freteInfo && !meioPag && !formaPag && !op && !impressao && !faturamento) return null;
+  const autorizadoCreditos = extract(/Autorizado\s*Cr[ée]ditos?\s*:\s*([^\n\r]+)/i);
 
-  return { cliche, embalagem, prazo, freteInfo, meioPag, formaPag, op, impressao, faturamento };
+  const ocMatches = Array.from(relevantNotes.matchAll(/\bOC(?:\s+(SAMPPEL|IKS))?\s*:?\s*([0-9][^\n\r]*)/gi));
+  const oc = ocMatches.length > 0
+    ? ocMatches.map(m => m[1] ? `${m[1].toUpperCase()}: ${m[2].trim()}` : m[2].trim()).join(' | ')
+    : null;
+
+  const nfIks = extract(/\bNF\s+IKS\s*:\s*([^\n\r]+)/i);
+  const emissaoNota = extract(/Emiss[ãa]o\s*(?:de\s*)?Nota\s*:\s*([^\n\r]+)/i);
+
+  const rawPrimary = (notes || '').trim();
+  const rawSecondary = (secondaryNotes || '').trim();
+  const detalheItem = (
+    rawPrimary &&
+    rawSecondary &&
+    rawPrimary.toLowerCase() !== rawSecondary.toLowerCase() &&
+    !/(?:Clich[êe]|Chich[êe]|Embalage|Prazo|Frete|Meio de pag|Forma de pag)\s*:/i.test(rawPrimary)
+  )
+    ? rawPrimary
+    : null;
+
+  if (
+    !cliche && !embalagem && !prazo && !freteInfo && !meioPag && !formaPag &&
+    !op && !impressao && !faturamento && !autorizadoCreditos && !oc &&
+    !nfIks && !emissaoNota && !detalheItem
+  ) {
+    return null;
+  }
+
+  return {
+    cliche,
+    embalagem,
+    prazo,
+    freteInfo,
+    meioPag,
+    formaPag,
+    op,
+    impressao,
+    faturamento,
+    autorizadoCreditos,
+    oc,
+    nfIks,
+    emissaoNota,
+    detalheItem
+  };
 };
 
 // Helper para garantir primeira letra maiúscula em valores de especificações
@@ -270,7 +326,7 @@ const checkIsDelayed = (item: any, stagesList: any[]): boolean => {
   const itemStage = stagesList.find(s => s.id === item.stage_id);
   if (itemStage?.name === 'Concluído') return false;
 
-  const notesText = item.notes || parentOrder.notes;
+  const notesText = combineOrderNotes(item.notes, parentOrder.notes);
   const deadlineText = extractProductionDeadline(notesText);
   if (!deadlineText) return false;
 
@@ -1842,7 +1898,7 @@ export default function PedidosPage() {
     // REGRA DE ALERTA DE FATURADO (Qualquer etapa -> Expedição)
     // ---------------------------------------------------------------
     if (targetStage.name === 'Expedição' && !faturadoAlertBypass.current) {
-      const details = extractOrderDetails(item.notes || parentOrder.notes);
+      const details = extractOrderDetails(item.notes, parentOrder.notes);
       if (details?.formaPag && details.formaPag.toUpperCase().includes('FATURADO')) {
         setFaturadoAlertItem(item);
         setFaturadoAlertTargetStageId(targetStageId);
@@ -3780,7 +3836,7 @@ export default function PedidosPage() {
       setFormBoxes(entity.boxes_count || 1);
       setFormFreight(Number(order.freight_value || 0));
       setFormSeller(order.seller_name || '');
-      setFormNotes(entity.notes || '');
+      setFormNotes(combineOrderNotes(entity.notes, order.notes));
       setFormInternalNotes(order.internal_notes || '');
       setFormStatus(entity.status || 'A produzir');
       setFormStageId(entity.stage_id || '');
@@ -3817,7 +3873,7 @@ export default function PedidosPage() {
       setFormPhysicalLocation(entity.physical_location || 'Salão');
       setFormProductionStartDate(order.production_start_date || '');
 
-      const specDetails = extractOrderDetails(entity.notes || order.notes);
+      const specDetails = extractOrderDetails(entity.notes, order.notes);
       setFormCliche(specDetails?.cliche || '');
       setFormEmbalagem(specDetails?.embalagem || '');
       setFormPrazo(specDetails?.prazo || '');
@@ -3834,7 +3890,7 @@ export default function PedidosPage() {
         setFormMeasure(getItemRealMeasure(correspondingItem));
         setFormPrintRun(correspondingItem.print_run || 1000);
         setFormBoxes(correspondingItem.boxes_count || 1);
-        setFormNotes(correspondingItem.notes || '');
+        setFormNotes(combineOrderNotes(correspondingItem.notes, entity.notes));
         setFormStatus(correspondingItem.status || 'A produzir');
         setFormStageId(correspondingItem.stage_id || '');
         setFormSector(correspondingItem.production_sector || 'Impressão');
@@ -3893,6 +3949,14 @@ export default function PedidosPage() {
       setFormInstallmentsTotal(entity.installments_total || 1);
       setFormInstallmentsPaid(entity.installments_paid || 0);
       setFormProductionStartDate(entity.production_start_date || '');
+
+      const specDetails = extractOrderDetails(correspondingItem?.notes || null, entity.notes);
+      setFormCliche(specDetails?.cliche || '');
+      setFormEmbalagem(specDetails?.embalagem || '');
+      setFormPrazo(specDetails?.prazo || '');
+      setFormFreteInfo(specDetails?.freteInfo || '');
+      setFormMeioPag(specDetails?.meioPag || '');
+      setFormFormaPag(specDetails?.formaPag || '');
     }
     setIsModalOpen(true);
   };
@@ -4579,7 +4643,7 @@ export default function PedidosPage() {
       // 4. Frete e Envio do Pedido
       const parentCarrier = (parentOrder.carrier_name || '').toLowerCase();
       const parentShipping = (parentOrder.shipping_type || '').toLowerCase();
-      const itemNotesDetails = extractOrderDetails(item.notes || parentOrder.notes);
+      const itemNotesDetails = extractOrderDetails(item.notes, parentOrder.notes);
       const itemFreteInfo = (itemNotesDetails?.freteInfo || '').toLowerCase();
       const itemFreightBadge = getFreightBadgeStyle(parentOrder.shipping_type, itemNotesDetails?.freteInfo);
       const itemFreightLabel = (itemFreightBadge?.label || '').toLowerCase();
@@ -4680,7 +4744,7 @@ export default function PedidosPage() {
     let matchContaAzulStatus = true;
     if (filterContaAzulStatus) {
       if (filterContaAzulStatus === 'Faturado') {
-        const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+        const orderDetails = extractOrderDetails(item.notes, parentOrder.notes);
         const isFaturado = orderDetails?.faturamento || (orderDetails?.formaPag && orderDetails.formaPag.toLowerCase().includes('faturado'));
         matchContaAzulStatus = parentOrder.conta_azul_status === 'Faturado' || !!isFaturado;
       } else {
@@ -4705,7 +4769,7 @@ export default function PedidosPage() {
     }
 
     // Filtro de Tipo de Frete / Envio
-    const matchShipping = checkMatchShipping(filterShipping, parentOrder.shipping_type, parentOrder.carrier_name, item.notes || parentOrder.notes);
+    const matchShipping = checkMatchShipping(filterShipping, parentOrder.shipping_type, parentOrder.carrier_name, combineOrderNotes(item.notes, parentOrder.notes));
 
     return matchCustomer && matchSeller && matchSearchOrder && matchContaAzulStatus && matchPedidosRelease && matchStage && matchShipping;
   });
@@ -5631,23 +5695,28 @@ export default function PedidosPage() {
                           isBusinessDays: effectiveIsBusinessCard,
                           chosenDays: effectiveChosenDaysCard
                         });
-                        const isYellowAlert = isReleased && (expUrgency.isNearExpedition || expUrgency.isOverdue);
+                        const isOverdueAlert = isReleased && expUrgency.isOverdue;
+                        const isYellowAlert = isReleased && expUrgency.isNearExpedition && !expUrgency.isOverdue;
                         const overShort = item.over_short_quantity || 0;
-                        const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+                        const orderDetails = extractOrderDetails(item.notes, parentOrder.notes);
                         const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type, orderDetails?.freteInfo);
                         const isBeingDragged = draggedItemId === item.id;
                         const showPlaceholderBefore = dragOverStageId === stage.id && dragOverIndex === idx && !isBeingDragged;
 
                         const cardBorderStyle = !isReleased
                           ? '1.5px solid rgba(239, 68, 68, 0.35)'
-                          : isYellowAlert
-                            ? '1.5px solid var(--warning-card-border)'
-                            : '1px solid var(--border)';
+                          : isOverdueAlert
+                            ? '1.5px solid var(--overdue-card-border-rest)'
+                            : isYellowAlert
+                              ? '1.5px solid var(--warning-card-border)'
+                              : '1px solid var(--border)';
                         const cardShadowStyle = !isReleased
                           ? '0 1px 3px rgba(239, 68, 68, 0.08)'
-                          : isYellowAlert
-                            ? 'var(--warning-card-shadow)'
-                            : 'var(--shadow-sm)';
+                          : isOverdueAlert
+                            ? 'var(--overdue-card-shadow-rest)'
+                            : isYellowAlert
+                              ? 'var(--warning-card-shadow)'
+                              : 'var(--shadow-sm)';
 
                         return (
                           <React.Fragment key={item.id}>
@@ -5657,12 +5726,12 @@ export default function PedidosPage() {
                               </div>
                             )}
                             <div
-                              className={`kanban-card-base ${recentlyMovedItemId === item.id ? 'pulse-glow' : ''} ${isBeingDragged ? 'kanban-card-dragging' : ''}`}
+                              className={`kanban-card-base ${isOverdueAlert && !isBeingDragged && recentlyMovedItemId !== item.id ? 'kanban-card-overdue-pulse' : ''} ${recentlyMovedItemId === item.id ? 'pulse-glow' : ''} ${isBeingDragged ? 'kanban-card-dragging' : ''}`}
                               onPointerDown={(e) => handlePointerDown(e, item)}
                               style={{
                                 touchAction: 'pan-y',
                                 userSelect: 'none',
-                                backgroundColor: !isReleased ? 'var(--danger-bg)' : isYellowAlert ? 'var(--warning-card-bg)' : 'var(--surface)',
+                                backgroundColor: !isReleased ? 'var(--danger-bg)' : isOverdueAlert ? 'var(--overdue-card-bg-rest)' : isYellowAlert ? 'var(--warning-card-bg)' : 'var(--surface)',
                                 borderTop: cardBorderStyle,
                                 borderRight: cardBorderStyle,
                                 borderBottom: cardBorderStyle,
@@ -5690,13 +5759,19 @@ export default function PedidosPage() {
                                 e.currentTarget.style.transform = 'translateY(-1px)';
                                 e.currentTarget.style.boxShadow = !isReleased
                                   ? '0 4px 6px rgba(239, 68, 68, 0.15)'
-                                  : isYellowAlert
-                                    ? '0 4px 8px rgba(217, 119, 6, 0.22)'
-                                    : 'var(--shadow-md)';
+                                  : isOverdueAlert
+                                    ? 'var(--overdue-card-shadow-peak)'
+                                    : isYellowAlert
+                                      ? '0 4px 8px rgba(217, 119, 6, 0.22)'
+                                      : 'var(--shadow-md)';
                                 if (!isReleased) {
                                   e.currentTarget.style.borderTopColor = 'rgba(239, 68, 68, 0.6)';
                                   e.currentTarget.style.borderRightColor = 'rgba(239, 68, 68, 0.6)';
                                   e.currentTarget.style.borderBottomColor = 'rgba(239, 68, 68, 0.6)';
+                                } else if (isOverdueAlert) {
+                                  e.currentTarget.style.borderTopColor = 'var(--overdue-card-border-peak)';
+                                  e.currentTarget.style.borderRightColor = 'var(--overdue-card-border-peak)';
+                                  e.currentTarget.style.borderBottomColor = 'var(--overdue-card-border-peak)';
                                 } else if (isYellowAlert) {
                                   e.currentTarget.style.borderTopColor = 'var(--warning-card-border-hover)';
                                   e.currentTarget.style.borderRightColor = 'var(--warning-card-border-hover)';
@@ -5710,6 +5785,10 @@ export default function PedidosPage() {
                                   e.currentTarget.style.borderTopColor = 'rgba(239, 68, 68, 0.35)';
                                   e.currentTarget.style.borderRightColor = 'rgba(239, 68, 68, 0.35)';
                                   e.currentTarget.style.borderBottomColor = 'rgba(239, 68, 68, 0.35)';
+                                } else if (isOverdueAlert) {
+                                  e.currentTarget.style.borderTopColor = 'var(--overdue-card-border-rest)';
+                                  e.currentTarget.style.borderRightColor = 'var(--overdue-card-border-rest)';
+                                  e.currentTarget.style.borderBottomColor = 'var(--overdue-card-border-rest)';
                                 } else if (isYellowAlert) {
                                   e.currentTarget.style.borderTopColor = 'var(--warning-card-border)';
                                   e.currentTarget.style.borderRightColor = 'var(--warning-card-border)';
@@ -6091,7 +6170,7 @@ export default function PedidosPage() {
                                   )}
                                   <span style={{ fontWeight: 600 }}>
                                     {(() => {
-                                      const d = extractOrderDetails(item.notes || parentOrder.notes);
+                                      const d = extractOrderDetails(item.notes, parentOrder.notes);
                                       if (d?.embalagem) return capitalizeText(d.embalagem);
                                       return item.boxes_count ? `${item.boxes_count}${item.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null;
                                     })()}
@@ -6722,7 +6801,7 @@ export default function PedidosPage() {
 
                     const realMeasure = getItemRealMeasure(item) || item.measure || parentOrder.measure || '—';
                     const stage = stages.find(s => s.id === item.stage_id) || { name: item.status || 'A produzir', color: '#3b82f6' };
-                    const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
+                    const orderDetails = extractOrderDetails(item.notes, parentOrder.notes);
                     const artName = item.name || item.art_name || parentOrder.art_name || parentOrder.product_name || 'Arte Genérica';
                     const customerName = parentOrder.customer?.name || parentOrder.customer_name || '—';
                     const pvDisplay = item.friendly_id || parentOrder.pv_number || '---';
@@ -7020,7 +7099,7 @@ export default function PedidosPage() {
       {isAdjustmentModalOpen && <AdjustmentModal {...{ adjustmentAction, adjustmentItem, adjustmentNotes, handleAdjustmentSubmit, loading, producedQuantity, resetAllBypasses, setAdjustmentAction, setAdjustmentNotes, setIsAdjustmentModalOpen, setProducedQuantity }} />}
 
       {/* MODAL DE CRIAÇÃO E EDIÇÃO DE PEDIDOS */}
-      {isModalOpen && <DetailModal {...{ formItems, setFormItems,  CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
+      {isModalOpen && <DetailModal {...{ formItems, setFormItems, CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCliche, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCliche, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
 
       {/* ========================================
           MODAL DE AUTORIZAÇÃO DE RETROCESSO

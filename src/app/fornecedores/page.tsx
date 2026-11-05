@@ -81,7 +81,7 @@ export default function FornecedoresPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const payload = {
       name: formName,
       document: formDocument,
@@ -109,8 +109,8 @@ export default function FornecedoresPage() {
     }
   };
 
-  const filteredSuppliers = suppliers.filter(s => 
-    s.name.toLowerCase().includes(search.toLowerCase()) || 
+  const filteredSuppliers = suppliers.filter(s =>
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
     (s.document && s.document.includes(search))
   );
 
@@ -123,7 +123,7 @@ export default function FornecedoresPage() {
             Gerenciamento de fornecedores de insumos (papel, bobinas, tintas) integrados à Conta Azul.
           </p>
         </div>
-        
+
         <button onClick={handleOpenCreate} className="btn btn-primary" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <Plus size={16} />
           <span>Novo Fornecedor</span>
@@ -136,10 +136,10 @@ export default function FornecedoresPage() {
           <label className="form-label">Buscar Fornecedor</label>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <Search size={18} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
-            <input 
-              type="text" 
-              className="form-input" 
-              style={{ paddingLeft: '38px' }} 
+            <input
+              type="text"
+              className="form-input"
+              style={{ paddingLeft: '38px' }}
               placeholder="Digite o nome ou CNPJ do fornecedor..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -202,8 +202,8 @@ export default function FornecedoresPage() {
                       )}
                     </td>
                     <td>
-                      <button 
-                        onClick={() => handleOpenEdit(supplier)} 
+                      <button
+                        onClick={() => handleOpenEdit(supplier)}
                         className="btn btn-secondary"
                         style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
                       >
@@ -256,8 +256,8 @@ export default function FornecedoresPage() {
               <h3 style={{ fontSize: '1.15rem' }}>
                 {modalType === 'create' ? 'Cadastrar Novo Fornecedor' : 'Editar Fornecedor'}
               </h3>
-              <button 
-                onClick={() => setIsModalOpen(false)} 
+              <button
+                onClick={() => setIsModalOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--text-muted)' }}
               >
                 &times;
@@ -265,12 +265,12 @@ export default function FornecedoresPage() {
             </header>
 
             <form onSubmit={handleSubmit} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              
+
               <div className="form-group">
                 <label className="form-label">Razão Social / Nome Fantasia *</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
+                <input
+                  type="text"
+                  className="form-input"
                   required
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
@@ -279,9 +279,9 @@ export default function FornecedoresPage() {
 
               <div className="form-group">
                 <label className="form-label">CNPJ / CPF</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
+                <input
+                  type="text"
+                  className="form-input"
                   placeholder="Ex: 00.000.000/0001-00"
                   value={formDocument}
                   onChange={(e) => setFormDocument(e.target.value)}
@@ -290,9 +290,9 @@ export default function FornecedoresPage() {
 
               <div className="form-group">
                 <label className="form-label">E-mail</label>
-                <input 
-                  type="email" 
-                  className="form-input" 
+                <input
+                  type="email"
+                  className="form-input"
                   placeholder="Ex: suprimentos@fornecedor.com"
                   value={formEmail}
                   onChange={(e) => setFormEmail(e.target.value)}
@@ -301,9 +301,9 @@ export default function FornecedoresPage() {
 
               <div className="form-group">
                 <label className="form-label">Telefone</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
+                <input
+                  type="text"
+                  className="form-input"
                   placeholder="Ex: (11) 3003-9999"
                   value={formPhone}
                   onChange={(e) => setFormPhone(e.target.value)}
@@ -312,8 +312,8 @@ export default function FornecedoresPage() {
 
               <div className="form-group">
                 <label className="form-label">Endereço Industrial / Escritório</label>
-                <textarea 
-                  className="form-textarea" 
+                <textarea
+                  className="form-textarea"
                   placeholder="Rua, Número, Cidade/UF..."
                   value={formAddress}
                   onChange={(e) => setFormAddress(e.target.value)}

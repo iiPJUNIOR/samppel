@@ -71,7 +71,8 @@ export function DetailViewModal(props: any) {
         const customer = order.customer || {};
         const currentStage = stages.find(s => s.id === detailItem.stage_id);
         const itemAdjs = adjustments.filter(a => a.order_item_id === detailItem.id);
-        const deadline = parseDeadlineFromNotes(detailItem.notes || order.notes);
+        const combinedNotesForDeadline = [detailItem.notes, order.notes].filter(Boolean).join('\n');
+        const deadline = parseDeadlineFromNotes(combinedNotesForDeadline);
         const isOverdue = deadline ? deadline.getTime() < Date.now() && currentStage?.name !== 'Concluído' : false;
         const freightStyle = getFreightBadgeStyle(order.shipping_type);
         const isReleased = !!order.first_payment_date;
@@ -380,18 +381,20 @@ export function DetailViewModal(props: any) {
                   </div>
                   <div className="grid-responsive-3" style={{ gap: '0.65rem' }}>
                     {(() => {
-                      const specDetails = extractOrderDetails(detailItem.notes || order.notes);
+                      const specDetails = extractOrderDetails(detailItem.notes, order.notes);
                       const packagingText = specDetails?.embalagem || (detailItem.boxes_count ? `${detailItem.boxes_count} ${detailItem.packaging_type === 'PACOTE' ? 'pct' : 'cx'}` : null);
+                      const opText = specDetails?.op || detailItem.op_number || order.op_number;
+                      const freteText = specDetails?.freteInfo || (order.shipping_type && order.shipping_type !== 'SEM_FRETE' ? order.shipping_type : null);
 
                       const specsList = [
-                        { label: 'OP', value: capitalizeText(specDetails?.op) },
+                        { label: 'OP', value: capitalizeText(opText) },
                         { label: 'Tiragem', value: detailItem.print_run ? detailItem.print_run.toLocaleString('pt-BR') + ' un' : '—' },
                         { label: 'Clichê', value: capitalizeText(specDetails?.cliche) },
                         { label: 'Embalagem', value: capitalizeText(packagingText) },
                         { label: 'Medida', value: capitalizeText(getItemRealMeasure(detailItem)) },
-                        { label: 'Impressão', value: capitalizeText(specDetails?.impressao) },
+                        { label: 'Impressão / Cor da Arte', value: capitalizeText(specDetails?.impressao) },
                         { label: 'Prazo de Entrega', value: capitalizeText(specDetails?.prazo) },
-                        { label: 'Frete', value: capitalizeText(specDetails?.freteInfo) },
+                        { label: 'Frete', value: capitalizeText(freteText) },
                         { label: 'Meio de Pagamento', value: capitalizeText(specDetails?.meioPag) },
                         { label: 'Forma de Pagamento', value: capitalizeText(specDetails?.formaPag) },
                         { label: 'Faturamento', value: capitalizeText(specDetails?.faturamento) },
@@ -400,6 +403,11 @@ export function DetailViewModal(props: any) {
                         { label: 'Sobra/Falta Produção', value: detailItem.over_short_quantity ? (detailItem.over_short_quantity > 0 ? `+${detailItem.over_short_quantity}` : `${detailItem.over_short_quantity}`) : '—' },
                         { label: 'Falta na Entrega', value: detailItem.shortage_quantity ? `${detailItem.shortage_quantity} un` : '—' },
                         { label: 'Cortesia/Brinde', value: detailItem.courtesy_quantity ? `${detailItem.courtesy_quantity} un` : '—' },
+                        ...(specDetails?.detalheItem ? [{ label: 'Detalhe do Item', value: capitalizeText(specDetails.detalheItem) }] : []),
+                        ...(specDetails?.autorizadoCreditos ? [{ label: 'Autorizado Créditos', value: capitalizeText(specDetails.autorizadoCreditos) }] : []),
+                        ...(specDetails?.oc ? [{ label: 'OC / Ordem de Compra', value: specDetails.oc }] : []),
+                        ...(specDetails?.nfIks ? [{ label: 'NF IKS', value: specDetails.nfIks }] : []),
+                        ...(specDetails?.emissaoNota ? [{ label: 'Emissão de Nota', value: capitalizeText(specDetails.emissaoNota) }] : []),
                       ];
 
                       return specsList.map(({ label, value }) => (
@@ -1181,7 +1189,30 @@ export function DetailViewModal(props: any) {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                       <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Observações (Visível para todos)</span>
                       <div style={{ fontSize: '0.82rem', color: 'var(--text)', whiteSpace: 'pre-wrap', backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                        {detailItem.notes || order.notes || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhuma observação informada.</span>}
+                        {(() => {
+                          const itemNotes = (detailItem.notes || '').trim();
+                          const orderNotes = (order.notes || '').trim();
+                          if (itemNotes && orderNotes && itemNotes.toLowerCase() !== orderNotes.toLowerCase()) {
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                                <div>
+                                  <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '2px' }}>
+                                    Detalhe / Observação do Item:
+                                  </div>
+                                  <div>{itemNotes}</div>
+                                </div>
+                                <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '0.5rem' }}>
+                                  <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '2px' }}>
+                                    Observações Gerais do Pedido:
+                                  </div>
+                                  <div>{orderNotes}</div>
+                                </div>
+                              </div>
+                            );
+                          }
+                          const singleNote = itemNotes || orderNotes;
+                          return singleNote || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhuma observação informada.</span>;
+                        })()}
                       </div>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>

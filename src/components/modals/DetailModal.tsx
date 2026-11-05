@@ -19,6 +19,7 @@ export function DetailModal(props: any) {
     customers,
     factoryLocations,
     formArtName,
+    formCliche,
     formCustomer,
     formEmbalagem,
     formFirstPaymentDate,
@@ -63,6 +64,7 @@ export function DetailModal(props: any) {
     selectedItem,
     selectedOrder,
     setFormArtName,
+    setFormCliche,
     setFormCustomer,
     setFormEmbalagem,
     setFormFirstPaymentDate,
@@ -1043,6 +1045,17 @@ export function DetailModal(props: any) {
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label" style={{ fontWeight: 700, color: 'var(--primary)' }}>Especificações do Item / Leitura de Pedido</label>
                   <div className="grid-responsive-3" style={{ gap: '0.65rem', marginTop: '0.35rem' }}>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Clichê</span>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Ex: Novo / De arquivo"
+                        value={formCliche || ''}
+                        disabled={isReadOnlyForForm('cliche')}
+                        onChange={(e) => setFormCliche && setFormCliche(e.target.value)}
+                      />
+                    </div>
                     <div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Embalagem (Especificação)</span>
                       <input

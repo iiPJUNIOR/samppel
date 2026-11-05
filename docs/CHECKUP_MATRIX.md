@@ -27,7 +27,7 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `api/admin/saldos`, `orders.ts` | 2026-11-05 | OK |
 | **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts`, `orders.ts` | 2026-11-05 | OK |
 | **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-11-05 | OK |
-| **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts` | 2026-11-05 | OK |
+| **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts`, `TransformSacoModal.tsx` | 2026-11-05 | OK |
 | **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx`, `suppliers.ts` | 2026-11-05 | OK |
 | **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-11-05 | OK |
 | **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-11-05 | OK |
@@ -140,13 +140,14 @@ Legenda de Status:
   * Busca eficiente em dropdowns (`SearchableCustomerSelect.tsx`).
 
 ### MOD-11: Produtos e Catálogo Técnico
-* **Responsabilidade:** Cadastro técnico de itens (sacolas, caixas, copos), facas de corte, medidas, matérias-primas e preços de tabela.
-* **Arquivos-Chave:** [produtos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/produtos/page.tsx), [products.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/products.ts).
-* **Onde se conecta:** Tabelas `products`, `product_categories`.
-* **Módulos que Dependem Dele:** MOD-02 (Itens de Pedido), MOD-04 (Alerta de Produção), MOD-08 (Saldos).
+* **Responsabilidade:** Cadastro técnico de itens (sacolas, caixas, copos), facas de corte, medidas, matérias-primas, preços de tabela e fluxo de Transformação de Saco para Sacola com geração automática de card na etapa `Ir para Manuseio`.
+* **Arquivos-Chave:** [produtos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/produtos/page.tsx), [products.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/products.ts), [TransformSacoModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/modals/TransformSacoModal.tsx).
+* **Onde se conecta:** Tabelas `products`, `product_categories`, `stock_transactions`, `orders`, `order_items`, `order_stages`.
+* **Módulos que Dependem Dele:** MOD-02 (Itens de Pedido), MOD-04 (Alerta de Produção), MOD-05 (Equipes de Manuseio), MOD-08 (Saldos).
 * **Critérios de Validação:**
   * Dimensões de medidas válidas.
   * Tipagem estrita de `product_id`.
+  * Na saída de estoque de produtos com `SACO` no nome, perguntar se deseja transformar em Sacola, vinculando inteligentemente à Sacola correspondente, baixando o estoque do Saco (`SAIDA`), subindo o estoque da Sacola (`ENTRADA` com `[ITEM:<id>]`) e gerando o card na etapa `Ir para Manuseio` com o número escolhido.
 
 ### MOD-12: Fornecedores
 * **Responsabilidade:** Cadastro de fornecedores de insumos (papel, cola, tintas, embalagens).
@@ -211,3 +212,6 @@ Legenda de Status:
 | **2026-10-30** | MOD-16 | APROVADO COM ÊXITO | Integração direta com APIs oficiais da Supabase em /monitoramento (supabasePlatformClient.ts: Management API v1 para Plano Real, Org, Compute, Add-ons, API Gateway 24h e auditoria da cota global de 2 projetos Free ativos + Prometheus Metrics API para RAM física, disco /data e rede da VM + MAU 30d e billing_transition_config via RPC SQL), com backup prévio completo, Régua Dupla Padrão (Pro Ativo -> Alvo Free) e Checklist Automático de 6 Pré-Requisitos + Janela Ideal (1-2 dias pré-renovação) para retorno seguro ao Plano Free. |
 | **2026-11-05** | MOD-01 a MOD-14, MOD-16 | APROVADO COM ÊXITO | Habilitação de barras de rolagem lateral (horizontal) e vertical visíveis no quadro Kanban de Pedidos & Vendas (`.kanban-board-scroll`, `.kanban-column-scroll` em `globals.css` e `pedidos/page.tsx`), criação do inventário permanente de 55 modais do sistema em `docs/MODALS_INVENTORY.md` e padronização de rolagem vertical (`maxHeight: 90vh`, `overflowY: auto`, `.modal-scroll`) em 100% dos 55 modais (33 em `src/components/` e 22 inline em `src/app/`), com backup integral prévio em `backup_20261105_pre_kanban_modals_scroll/`. |
 | **2026-11-05** | MOD-02, MOD-03 | APROVADO COM ÊXITO | Implementação do Card Amarelo Fixo (`--warning-card-bg`, `getExpeditionUrgency` em `deadline_service.ts` e `pedidos/page.tsx`) para pedidos liberados cuja Data de Expedição esteja a 10 dias ou menos da entrega (ou atrasados) em qualquer etapa ativa do Kanban, além da criação do Guia de Escopo Cirúrgico e Pontos de Restauração Total/Parcial (`docs/SAFE_CHANGE_AND_ROLLBACK_GUIDE.md` + `scripts/restore-point.ps1`) e ponto de restauração dedicado `backup_20261105_pre_yellow_card_10d/`. |
+| **2026-11-05** | MOD-05, MOD-11 | APROVADO COM ÊXITO | Implementação do fluxo de Transformar Sacos em Sacolas (`TransformSacoModal.tsx` e `produtos/page.tsx`): ao dar Saída em um produto com `SACO` no nome e confirmar movimentação, pergunta se deseja transformar em Sacola, preenche automaticamente nome/medida/quantidade, realiza busca inteligente pela Sacola correspondente no catálogo (com opção de escolha manual ou criação imediata), exige a escolha do número do Card/OP, transfere o estoque (`SAIDA` do Saco -> `ENTRADA` da Sacola com marcador de idempotência `[ITEM:<id>]`) e gera o card diretamente na etapa `Ir para Manuseio`, com ponto de restauração prévio `backup_20261105_pre_saco_to_sacola/`. |
+| **2026-11-05** | MOD-02, MOD-03 | APROVADO COM ÊXITO | Correção cirúrgica da exibição das informações e especificações do pedido ao abrir o card (`DetailViewModal.tsx`, `DetailModal.tsx` e `pedidos/page.tsx`): unificação de `item.notes` + `order.notes` via `combineOrderNotes` (evitando que detalhes curtos do item no Conta Azul ocultem as especificações completas do pedido), ampliação de `extractOrderDetails` para reconhecer `Prazo de Produção:`, `Quant e cor da arte:`, `Autorizado Créditos:`, `OC / OC SAMPPEL / OC IKS`, `NF IKS` e `Emissão Nota:`, e adição do campo `Clichê` no modal de edição, com ponto de restauração prévio `backup_20261105_pre_order_details_fix/`. |
+| **2026-11-05** | MOD-03 | APROVADO COM ÊXITO | Separação visual entre pedidos próximos da expedição e pedidos já atrasados (`globals.css` e `pedidos/page.tsx`): Card Amarelo Fixo (`--warning-card-bg`) exclusivo para pedidos faltando de 0 a 10 dias para expedição (`isNearExpedition && !isOverdue`), e Card Vermelho Piscando Suave (`.kanban-card-overdue-pulse`, ciclo tranquilo de `3.2s ease-in-out`) para pedidos liberados cuja Data de Expedição já passou (`isOverdue`), com ponto de restauração prévio `backup_20261105_pre_overdue_red_pulse/`. |

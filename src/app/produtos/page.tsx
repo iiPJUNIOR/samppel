@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getProducts, getProductsPaginated, getProductCategoryCounts, createProduct, updateProduct, deleteProduct, adjustStock, getStockTransactions, getCustomerProductStock } from '@/services/supabase';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
+import TransformSacoModal, { isSacoProduct } from '@/components/modals/TransformSacoModal';
 import SearchableCustomerSelect from '@/components/SearchableCustomerSelect';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { Plus, Search, CheckCircle2, HelpCircle, ShieldAlert, Edit, Warehouse, ArrowUpRight, ArrowDownRight, RefreshCw, History, Package, Clock, Trash2, Users, ShoppingCart, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
@@ -283,9 +284,11 @@ export default function ProdutosPage() {
   const [stockAdjType, setStockAdjType] = useState<'ENTRADA' | 'SAIDA' | 'AJUSTE'>('ENTRADA');
   const [stockDescription, setStockDescription] = useState('');
 
-  // Operator secondary authentication
+  // Operator secondary authentication & Transform Saco -> Sacola Modal
   const [isOpAuthOpen, setIsOpAuthOpen] = useState(false);
   const [pendingStockAdj, setPendingStockAdj] = useState<{ quantity: number; type: any; desc: string } | null>(null);
+  const [isTransformSacoModalOpen, setIsTransformSacoModalOpen] = useState(false);
+  const pendingTransformExecRef = React.useRef<((opId: string, opName: string) => Promise<void>) | null>(null);
 
   // Sync Products & Stock state
   const [isSyncingProducts, setIsSyncingProducts] = useState(false);
@@ -534,8 +537,7 @@ export default function ProdutosPage() {
     }
   };
 
-  const handleStockSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeNormalStockSubmit = async () => {
     if (!selectedProduct) return;
 
     const currentStock = Number(selectedProduct.stock_quantity || 0);
@@ -579,8 +581,32 @@ export default function ProdutosPage() {
     }
   };
 
+  const handleStockSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+
+    if (stockAdjType === 'SAIDA' && isSacoProduct(selectedProduct.name)) {
+      if (!stockQtyChange || Number(stockQtyChange) <= 0) {
+        alert('Informe a quantidade a retirar.');
+        return;
+      }
+      setIsTransformSacoModalOpen(true);
+      return;
+    }
+
+    await executeNormalStockSubmit();
+  };
+
   const handleOpAuthSuccess = async (operatorId: string, operatorName: string) => {
     setIsOpAuthOpen(false);
+
+    if (pendingTransformExecRef.current) {
+      const fn = pendingTransformExecRef.current;
+      pendingTransformExecRef.current = null;
+      await fn(operatorId, operatorName);
+      return;
+    }
+
     if (!selectedProduct || !pendingStockAdj) return;
 
     const { error } = await adjustStock(
@@ -1634,16 +1660,20 @@ export default function ProdutosPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Motivo / Descrição *</label>
+                <label className="form-label">
+                  {stockAdjType === 'SAIDA' && isSacoProduct(selectedProduct?.name)
+                    ? 'Motivo / Descrição (Opcional para Transformação em Sacola)'
+                    : 'Motivo / Descrição *'}
+                </label>
                 <textarea 
                   className="form-textarea" 
-                  required
+                  required={!(stockAdjType === 'SAIDA' && isSacoProduct(selectedProduct?.name))}
                   placeholder={
                     stockAdjType === 'AJUSTE'
                       ? 'Ex: Contagem física de balanço, ajuste de inventário mensal...'
                       : stockAdjType === 'ENTRADA'
                         ? 'Ex: Recebimento de compra de fornecedor, devolução de lote...'
-                        : 'Ex: Baixa por refugo, retirada para amostras...'
+                        : 'Ex: Transformação em sacola, baixa por refugo, retirada para amostras...'
                   }
                   value={stockDescription}
                   onChange={(e) => setStockDescription(e.target.value)}
@@ -1669,11 +1699,37 @@ export default function ProdutosPage() {
         </div>
       )}
 
+      <TransformSacoModal
+        isOpen={isTransformSacoModalOpen}
+        onClose={() => setIsTransformSacoModalOpen(false)}
+        sourceProduct={selectedProduct}
+        quantity={Math.abs(Number(stockQtyChange || 0))}
+        description={stockDescription}
+        tenantId={user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'}
+        user={user}
+        onConfirmNormalSaida={async () => {
+          setIsTransformSacoModalOpen(false);
+          await executeNormalStockSubmit();
+        }}
+        onRequestOperatorAuth={(execFn) => {
+          pendingTransformExecRef.current = execFn;
+          setIsOpAuthOpen(true);
+        }}
+        onSuccess={async () => {
+          setIsTransformSacoModalOpen(false);
+          setIsStockModalOpen(false);
+          await fetchProducts();
+        }}
+      />
+
       <OperatorAuthModal 
         isOpen={isOpAuthOpen}
         tenantId={user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'}
         onSuccess={handleOpAuthSuccess}
-        onClose={() => setIsOpAuthOpen(false)}
+        onClose={() => {
+          pendingTransformExecRef.current = null;
+          setIsOpAuthOpen(false);
+        }}
         actionDescription={`Ajuste de Estoque (${stockAdjType}) - ${selectedProduct?.name}`}
       />
 

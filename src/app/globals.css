@@ -1061,12 +1061,20 @@ input[type="number"] {
 
 /* ═══════════════════════════════════════════════════════════════
    KANBAN YELLOW ALERT CARD (EXPEDICAO <= 10 DIAS)
+   & OVERDUE SOFT RED PULSE CARD (EXPEDICAO ATRASADA)
    ═══════════════════════════════════════════════════════════════ */
 :root, [data-theme="light"] {
   --warning-card-bg: #FEF9C3;
   --warning-card-border: rgba(217, 119, 6, 0.55);
   --warning-card-border-hover: rgba(217, 119, 6, 0.85);
   --warning-card-shadow: 0 2px 5px rgba(217, 119, 6, 0.14);
+
+  --overdue-card-bg-rest: #FFF1F2;
+  --overdue-card-bg-peak: #FEE2E2;
+  --overdue-card-border-rest: rgba(239, 68, 68, 0.38);
+  --overdue-card-border-peak: rgba(239, 68, 68, 0.72);
+  --overdue-card-shadow-rest: 0 1px 4px rgba(239, 68, 68, 0.10);
+  --overdue-card-shadow-peak: 0 2px 8px rgba(239, 68, 68, 0.22);
 }
 
 [data-theme="dark"] {
@@ -1074,4 +1082,36 @@ input[type="number"] {
   --warning-card-border: rgba(245, 158, 11, 0.55);
   --warning-card-border-hover: rgba(245, 158, 11, 0.85);
   --warning-card-shadow: 0 2px 6px rgba(245, 158, 11, 0.22);
+
+  --overdue-card-bg-rest: rgba(239, 68, 68, 0.11);
+  --overdue-card-bg-peak: rgba(239, 68, 68, 0.23);
+  --overdue-card-border-rest: rgba(239, 68, 68, 0.40);
+  --overdue-card-border-peak: rgba(239, 68, 68, 0.78);
+  --overdue-card-shadow-rest: 0 1px 4px rgba(239, 68, 68, 0.14);
+  --overdue-card-shadow-peak: 0 2px 9px rgba(239, 68, 68, 0.28);
+}
+
+@keyframes overdueSoftRedPulse {
+  0%, 100% {
+    background-color: var(--overdue-card-bg-rest);
+    border-top-color: var(--overdue-card-border-rest);
+    border-right-color: var(--overdue-card-border-rest);
+    border-bottom-color: var(--overdue-card-border-rest);
+    box-shadow: var(--overdue-card-shadow-rest);
+  }
+  50% {
+    background-color: var(--overdue-card-bg-peak);
+    border-top-color: var(--overdue-card-border-peak);
+    border-right-color: var(--overdue-card-border-peak);
+    border-bottom-color: var(--overdue-card-border-peak);
+    box-shadow: var(--overdue-card-shadow-peak);
+  }
+}
+
+.kanban-card-overdue-pulse {
+  animation: overdueSoftRedPulse 3.2s ease-in-out infinite;
+}
+
+.kanban-card-overdue-pulse:hover {
+  animation-play-state: paused;
 }
