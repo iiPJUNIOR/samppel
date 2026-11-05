@@ -94,7 +94,7 @@ import {
   supabase,
   getDbClient
 } from '@/services/supabase';
-import { parseDeadlineFromNotes, isCardOverdue, calculateExpeditionDate, detectScopeDays } from '@/services/deadline_service';
+import { parseDeadlineFromNotes, isCardOverdue, calculateExpeditionDate, detectScopeDays, getExpeditionUrgency } from '@/services/deadline_service';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import {
@@ -4766,15 +4766,16 @@ export default function PedidosPage() {
 
   return (
     <div
-      className="page-container"
+      className="page-container modal-scroll"
       style={viewMode === 'kanban' ? {
         display: 'flex',
         flexDirection: 'column',
-        padding: '0.75rem 0.75rem 0 0.75rem',
+        padding: '0.75rem 0.75rem 0.35rem 0.75rem',
         boxSizing: 'border-box',
         height: '100dvh',
         maxHeight: '100dvh',
-        overflow: 'hidden'
+        overflowY: 'auto',
+        overflowX: 'hidden'
       } : undefined}
     >
       <header className="page-header" style={{ display: isHeaderCollapsed ? 'none' : undefined, marginBottom: viewMode === 'kanban' ? '0.5rem' : undefined }}>
@@ -5335,13 +5336,13 @@ export default function PedidosPage() {
 
         /* 1. VISUALIZAÇÃO KANBAN */
         <div
-          className="no-scrollbar kanban-board-container"
+          className="kanban-board-scroll kanban-board-container"
           style={{
             display: 'flex',
             gap: '0.75rem',
             width: '100%',
             flex: '1 1 0',
-            minHeight: 0,
+            minHeight: '480px',
             alignItems: 'stretch',
             overflowX: 'auto',
             overflowY: 'hidden',
@@ -5595,7 +5596,7 @@ export default function PedidosPage() {
 
                   {/* Lista de Cards da Etapa */}
                   <div
-                    className="no-scrollbar"
+                    className="kanban-column-scroll"
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
@@ -5603,7 +5604,8 @@ export default function PedidosPage() {
                       overflowY: 'auto',
                       flex: 1,
                       minHeight: 0,
-                      paddingBottom: '0.25rem'
+                      paddingBottom: '0.25rem',
+                      paddingRight: '0.2rem'
                     }}
                   >
                     {stageItems.length === 0 ? (
@@ -5621,11 +5623,31 @@ export default function PedidosPage() {
                       stageItems.map((item, idx) => {
                         const parentOrder = item.order || {};
                         const isReleased = !!parentOrder.first_payment_date;
+                        const orderIdForUrgency = parentOrder.id || item.order_id;
+                        const deadlineCfg = orderDeadlineConfigMap.get(orderIdForUrgency);
+                        const effectiveIsBusinessCard = deadlineCfg ? deadlineCfg.isBusinessDays : isBusinessDays;
+                        const effectiveChosenDaysCard = deadlineCfg ? deadlineCfg.chosenDays : orderRangeChoiceMap.get(item.order_id);
+                        const expUrgency = getExpeditionUrgency(item, stages, {
+                          isBusinessDays: effectiveIsBusinessCard,
+                          chosenDays: effectiveChosenDaysCard
+                        });
+                        const isYellowAlert = isReleased && (expUrgency.isNearExpedition || expUrgency.isOverdue);
                         const overShort = item.over_short_quantity || 0;
                         const orderDetails = extractOrderDetails(item.notes || parentOrder.notes);
                         const freightStyle = getFreightBadgeStyle(parentOrder.shipping_type, orderDetails?.freteInfo);
                         const isBeingDragged = draggedItemId === item.id;
                         const showPlaceholderBefore = dragOverStageId === stage.id && dragOverIndex === idx && !isBeingDragged;
+
+                        const cardBorderStyle = !isReleased
+                          ? '1.5px solid rgba(239, 68, 68, 0.35)'
+                          : isYellowAlert
+                            ? '1.5px solid var(--warning-card-border)'
+                            : '1px solid var(--border)';
+                        const cardShadowStyle = !isReleased
+                          ? '0 1px 3px rgba(239, 68, 68, 0.08)'
+                          : isYellowAlert
+                            ? 'var(--warning-card-shadow)'
+                            : 'var(--shadow-sm)';
 
                         return (
                           <React.Fragment key={item.id}>
@@ -5640,15 +5662,15 @@ export default function PedidosPage() {
                               style={{
                                 touchAction: 'pan-y',
                                 userSelect: 'none',
-                                backgroundColor: isReleased ? 'var(--surface)' : 'var(--danger-bg)',
-                                borderTop: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
-                                borderRight: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
-                                borderBottom: isReleased ? '1px solid var(--border)' : '1.5px solid rgba(239, 68, 68, 0.35)',
+                                backgroundColor: !isReleased ? 'var(--danger-bg)' : isYellowAlert ? 'var(--warning-card-bg)' : 'var(--surface)',
+                                borderTop: cardBorderStyle,
+                                borderRight: cardBorderStyle,
+                                borderBottom: cardBorderStyle,
                                 borderLeft: `3px solid ${stage.color}`,
                                 borderRadius: 'var(--radius-sm)',
                                 padding: '0.5rem',
                                 cursor: 'pointer',
-                                boxShadow: isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)',
+                                boxShadow: cardShadowStyle,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: '0.35rem'
@@ -5666,16 +5688,32 @@ export default function PedidosPage() {
                               }}
                               onMouseEnter={(e) => {
                                 e.currentTarget.style.transform = 'translateY(-1px)';
-                                e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-md)' : '0 4px 6px rgba(239, 68, 68, 0.15)';
+                                e.currentTarget.style.boxShadow = !isReleased
+                                  ? '0 4px 6px rgba(239, 68, 68, 0.15)'
+                                  : isYellowAlert
+                                    ? '0 4px 8px rgba(217, 119, 6, 0.22)'
+                                    : 'var(--shadow-md)';
                                 if (!isReleased) {
-                                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
+                                  e.currentTarget.style.borderTopColor = 'rgba(239, 68, 68, 0.6)';
+                                  e.currentTarget.style.borderRightColor = 'rgba(239, 68, 68, 0.6)';
+                                  e.currentTarget.style.borderBottomColor = 'rgba(239, 68, 68, 0.6)';
+                                } else if (isYellowAlert) {
+                                  e.currentTarget.style.borderTopColor = 'var(--warning-card-border-hover)';
+                                  e.currentTarget.style.borderRightColor = 'var(--warning-card-border-hover)';
+                                  e.currentTarget.style.borderBottomColor = 'var(--warning-card-border-hover)';
                                 }
                               }}
                               onMouseLeave={(e) => {
                                 e.currentTarget.style.transform = 'none';
-                                e.currentTarget.style.boxShadow = isReleased ? 'var(--shadow-sm)' : '0 1px 3px rgba(239, 68, 68, 0.08)';
+                                e.currentTarget.style.boxShadow = cardShadowStyle;
                                 if (!isReleased) {
-                                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                                  e.currentTarget.style.borderTopColor = 'rgba(239, 68, 68, 0.35)';
+                                  e.currentTarget.style.borderRightColor = 'rgba(239, 68, 68, 0.35)';
+                                  e.currentTarget.style.borderBottomColor = 'rgba(239, 68, 68, 0.35)';
+                                } else if (isYellowAlert) {
+                                  e.currentTarget.style.borderTopColor = 'var(--warning-card-border)';
+                                  e.currentTarget.style.borderRightColor = 'var(--warning-card-border)';
+                                  e.currentTarget.style.borderBottomColor = 'var(--warning-card-border)';
                                 }
                               }}
                             >
@@ -5981,6 +6019,26 @@ export default function PedidosPage() {
                                       </div>
 
                                       {isOverdue && <span style={{ fontSize: '0.58rem', color: 'var(--danger)', fontWeight: 800 }}>(Atrasado)</span>}
+                                      {!isOverdue && isYellowAlert && expUrgency.daysRemaining !== null && (
+                                        <span
+                                          style={{
+                                            fontSize: '0.58rem',
+                                            color: '#b45309',
+                                            backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                            border: '1px solid rgba(217, 119, 6, 0.4)',
+                                            padding: '0px 4px',
+                                            borderRadius: '3px',
+                                            fontWeight: 800
+                                          }}
+                                          title="Atenção: Expedição próxima (10 dias ou menos para a entrega)"
+                                        >
+                                          {expUrgency.daysRemaining === 0
+                                            ? '(Entrega Hoje)'
+                                            : expUrgency.daysRemaining === 1
+                                              ? '(Falta 1 dia)'
+                                              : `(Faltam ${expUrgency.daysRemaining}d)`}
+                                        </span>
+                                      )}
                                       {parentOrder.conta_azul_status === 'Em andamento' && (
                                         <span style={{ fontSize: '0.58rem', color: '#eab308', fontWeight: 700 }}>(Orçamento)</span>
                                       )}

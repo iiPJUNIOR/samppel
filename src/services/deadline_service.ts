@@ -159,20 +159,64 @@ export function calculateExpeditionDate(
   };
 }
 
+export interface ExpeditionUrgencyResult {
+  expeditionDate: Date | null;
+  daysRemaining: number | null;
+  isNearExpedition: boolean;
+  isOverdue: boolean;
+}
+
+function isStageFinishedOrCancelled(stageName?: string | null): boolean {
+  if (!stageName) return false;
+  const norm = stageName.trim().toLowerCase();
+  return norm.includes('conclu') || norm.includes('cancel') || norm === 'entregue';
+}
+
+/**
+ * Calcula a urgência da Data de Expedição (dias restantes, alerta de <= 10 dias e atraso).
+ */
+export function getExpeditionUrgency(
+  item: any,
+  stages: any[],
+  options?: { isBusinessDays?: boolean; chosenDays?: number }
+): ExpeditionUrgencyResult {
+  const orderObj = item?.order || {};
+  const caStatus = (orderObj.conta_azul_status || '').trim().toLowerCase();
+  if (caStatus === 'em andamento') {
+    return { expeditionDate: null, daysRemaining: null, isNearExpedition: false, isOverdue: false };
+  }
+
+  const res = calculateExpeditionDate(item, orderObj, options);
+  if (!res.expeditionDate) {
+    return { expeditionDate: null, daysRemaining: null, isNearExpedition: false, isOverdue: false };
+  }
+
+  const currentStage = stages.find(s => s.id === item?.stage_id);
+  const stageName = currentStage?.name || item?.status || 'Pedidos';
+  if (isStageFinishedOrCancelled(stageName) || isStageFinishedOrCancelled(item?.status)) {
+    return { expeditionDate: res.expeditionDate, daysRemaining: null, isNearExpedition: false, isOverdue: false };
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const expDayStart = new Date(res.expeditionDate.getTime());
+  expDayStart.setHours(0, 0, 0, 0);
+
+  const daysRemaining = Math.round((expDayStart.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+  const isOverdue = daysRemaining < 0;
+  const isNearExpedition = daysRemaining >= 0 && daysRemaining <= 10;
+
+  return {
+    expeditionDate: res.expeditionDate,
+    daysRemaining,
+    isNearExpedition,
+    isOverdue
+  };
+}
+
 /**
  * Verifica se um card está em atraso com base na Data de Expedição calculada.
  */
 export function isCardOverdue(item: any, stages: any[], options?: { isBusinessDays?: boolean; chosenDays?: number }): boolean {
-  if (item.order?.conta_azul_status === 'Em andamento') return false;
-
-  const res = calculateExpeditionDate(item, undefined, options);
-  if (!res.expeditionDate) return false;
-
-  if (res.expeditionDate.getTime() >= Date.now()) return false;
-
-  const currentStage = stages.find(s => s.id === item.stage_id);
-  if (!currentStage) return false;
-
-  const intermediateStages = ['Em produção', 'Manuseio', 'Em revisão', 'Expedição'];
-  return intermediateStages.includes(currentStage.name);
+  return getExpeditionUrgency(item, stages, options).isOverdue;
 }
