@@ -17,6 +17,9 @@ export interface UserProfile {
   is_factory_account?: boolean;
   allowed_modules?: string[];
   can_delete_any_order?: boolean;
+  primary_seller_name?: string | null;
+  seller_access_mode?: string | null;
+  allowed_sellers?: string[] | null;
 }
 
 interface AuthContextType {

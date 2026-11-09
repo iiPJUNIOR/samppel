@@ -91,11 +91,12 @@ export function MoveStageModal(props: any) {
       setPin('');
       setStep('PIN');
     } else {
-      // Validação prévia de permissão de entrada caso seja vendedor
-      if (isVendedor && user?.role !== 'Administrador') {
+      // Validação prévia de permissão de entrada conforme matriz de etapas do perfil
+      const hasCustomPerms = Array.isArray(userPermissions) && userPermissions.length > 0;
+      if (user?.role !== 'Administrador' && (isVendedor || hasCustomPerms)) {
         const targetPerm = (userPermissions || []).find((p: any) => p.stage_id === stg.id);
         if (!targetPerm || !targetPerm.can_enter) {
-          alert(`Você não possui autorização nos ajustes do seu perfil para colocar pedidos na etapa "${stg.name}".`);
+          setErrorMsg(`Você não possui autorização nos ajustes do seu perfil para colocar pedidos na etapa "${stg.name}".`);
           return;
         }
       }
@@ -306,6 +307,17 @@ export function MoveStageModal(props: any) {
         {/* PASSO 1: SELECAO DA ETAPA DE DESTINO */}
         {step === 'STAGE' && (
           <div className="modal-scroll" style={{ padding: '0.85rem 1.15rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, maxHeight: '380px', overflowY: 'auto' }}>
+            {errorMsg && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                padding: '0.65rem 0.85rem', backgroundColor: 'var(--danger-bg, #fee2e2)',
+                color: 'var(--danger, #dc2626)', border: '1px solid var(--danger, #dc2626)',
+                borderRadius: 'var(--radius-sm, 6px)', fontSize: '0.8rem', fontWeight: 600
+              }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>{errorMsg}</span>
+              </div>
+            )}
             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               {isFactoryUser 
                 ? 'Selecione a etapa de destino (sera solicitado o PIN):' 
@@ -316,8 +328,9 @@ export function MoveStageModal(props: any) {
               const isCurrent = itemToMoveStage.stage_id === stg.id || (!itemToMoveStage.stage_id && stg.id === stages[0]?.id);
               const isTargetMoving = movingStageId === stg.id;
               const isUserAdmin = user?.role === 'Administrador';
+              const hasCustomPerms = Array.isArray(userPermissions) && userPermissions.length > 0;
               const targetPerm = (userPermissions || []).find((p: any) => p.stage_id === stg.id);
-              const canEnter = isUserAdmin || !isVendedor || Boolean(targetPerm && targetPerm.can_enter);
+              const canEnter = isUserAdmin || (!isVendedor && !hasCustomPerms) || Boolean(targetPerm && targetPerm.can_enter);
               const isDisabled = isCurrent || isMovingDirect || !canEnter;
 
               return (

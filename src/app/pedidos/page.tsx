@@ -478,6 +478,45 @@ export default function PedidosPage() {
   const isVendedor = (user?.role === 'Comercial' || user?.role === 'Vendedor') && !isSupervisor;
   const hideMonetaryValues = !supervisorHasFinance && user?.role !== 'Administrador' && user?.role !== 'Vendedor' && !(user?.role === 'Comercial' && !isLegacySupervisor);
 
+  // Normaliza nomes de vendedores (remove acentos, múltiplos espaços e caixa)
+  const normalizeSellerName = (val: string): string => {
+    return (val || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  // Compara se o nome do vendedor no pedido corresponde ao nome/carteira configurado
+  const matchesSellerIdentity = (orderSellerRaw: string, targetSellerRaw: string): boolean => {
+    const sNorm = normalizeSellerName(orderSellerRaw);
+    const tNorm = normalizeSellerName(targetSellerRaw);
+    if (!sNorm || !tNorm) return false;
+    if (sNorm === tNorm) return true;
+
+    // Suporte a pedidos com apenas o primeiro nome (ex: "Larissa" vs "Larissa Barbosa"),
+    // exceto quando o primeiro nome for ambíguo entre vendedores distintos ("lucas")
+    const sParts = sNorm.split(' ');
+    const tParts = tNorm.split(' ');
+    if (sParts.length === 1 && sParts[0].length >= 3 && sParts[0] !== 'lucas' && tParts[0] === sParts[0]) {
+      return true;
+    }
+    if (tParts.length === 1 && tParts[0].length >= 3 && tParts[0] !== 'lucas' && sParts[0] === tParts[0]) {
+      return true;
+    }
+    return false;
+  };
+
+  // Helper para obter o seller_name de um item com fallback seguro para o pedido pai
+  const getItemSellerName = (item: any): string => {
+    if (!item) return '';
+    if (item.order?.seller_name) return item.order.seller_name;
+    if (item.seller_name) return item.seller_name;
+    const parent = orders.find(o => o.id === item.order_id);
+    return parent?.seller_name || '';
+  };
+
   // Helper para verificar permissões de carteira de vendedor do usuário logado
   const canUserViewOrderSeller = (sellerName: string): boolean => {
     if (!user) return true;
@@ -485,25 +524,27 @@ export default function PedidosPage() {
 
     if (user.role === 'Comercial' || user.role === 'Vendedor') {
       const sellerPermsMap = getSellerPermissionsMap();
-      const userPerms = sellerPermsMap[user.id];
+      const localPerms = sellerPermsMap[user.id];
 
-      if (!userPerms) {
-        const userFullNameLower = (user.full_name || '').toLowerCase().trim();
-        const sellerNameLower = (sellerName || '').toLowerCase().trim();
-        if (!sellerNameLower) return false;
-        return sellerNameLower === userFullNameLower;
+      const effectiveMode = localPerms?.seller_access_mode || user.seller_access_mode || 'OWN';
+      const effectivePrimary = localPerms?.primary_seller_name || user.primary_seller_name || user.full_name || '';
+      const effectiveAllowed = (localPerms?.allowed_sellers && localPerms.allowed_sellers.length > 0)
+        ? localPerms.allowed_sellers
+        : (Array.isArray(user.allowed_sellers) ? user.allowed_sellers : []);
+
+      if (effectiveMode === 'ALL' || effectiveAllowed.includes('*')) return true;
+
+      const sNorm = normalizeSellerName(sellerName);
+      if (!sNorm) return false;
+
+      if (matchesSellerIdentity(sellerName, effectivePrimary)) return true;
+      if (matchesSellerIdentity(sellerName, user.full_name || '')) return true;
+
+      if (effectiveMode === 'SPECIFIC' || effectiveAllowed.length > 0) {
+        return effectiveAllowed.some(a => a && matchesSellerIdentity(sellerName, a));
       }
 
-      const mode = userPerms.seller_access_mode || 'OWN';
-      if (mode === 'ALL' || (userPerms.allowed_sellers || []).includes('*')) return true;
-
-      const primary = (userPerms.primary_seller_name || '').toLowerCase().trim();
-      const sLower = (sellerName || '').toLowerCase().trim();
-
-      if (primary && primary === sLower) return true;
-
-      const allowed = userPerms.allowed_sellers || [];
-      return allowed.some(a => a && a.toLowerCase().trim() === sLower);
+      return false;
     }
 
     return true;
@@ -978,7 +1019,7 @@ export default function PedidosPage() {
   };
 
   // Estados de Notificação Toast, Drag/Drop e Filtros Mobile
-  const [toastNotification, setToastNotification] = useState<{ message: string; type: 'success' | 'info'; id: number } | null>(null);
+  const [toastNotification, setToastNotification] = useState<{ message: string; type: 'success' | 'info' | 'error'; id: number } | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
 
@@ -1006,11 +1047,11 @@ export default function PedidosPage() {
   const [itemToMoveStage, setItemToMoveStage] = useState<any>(null);
 
 
-  const showToast = (message: string, type: 'success' | 'info' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setToastNotification({ message, type, id: Date.now() });
     setTimeout(() => {
       setToastNotification(null);
-    }, 3500);
+    }, type === 'error' ? 5000 : 3500);
   };
 
 
@@ -1557,26 +1598,43 @@ export default function PedidosPage() {
         return; // Admin tem permissão irrestrita por padrão
       }
 
+      let resolvedPerms: any[] | null = null;
+
       if (supabase) {
         const { data, error } = await supabase
           .from('profile_stage_permissions')
           .select('stage_id, can_enter, can_exit')
           .eq('profile_id', user.id);
 
-        if (!error && data) {
+        if (!error && Array.isArray(data) && data.length > 0) {
+          resolvedPerms = data;
           setUserPermissions(data);
-          return;
         }
       }
 
-      // Fallback via API caso a query direta falhe ou sofra com RLS
+      // Consulta complementar via API (supabaseAdmin) para garantir permissões de etapa e carteira de vendedor sem bloqueio de RLS
       const tenantId = user.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
       const res = await authenticatedFetch(`/api/operators?tenantId=${tenantId}`);
       if (res.ok) {
         const json = await res.json();
         const currentOp = (json.data || []).find((o: any) => o.id === user.id);
-        if (currentOp && currentOp.profile_stage_permissions) {
-          setUserPermissions(currentOp.profile_stage_permissions);
+        if (currentOp) {
+          if (Array.isArray(currentOp.profile_stage_permissions) && (!resolvedPerms || currentOp.profile_stage_permissions.length > 0)) {
+            setUserPermissions(currentOp.profile_stage_permissions);
+          }
+          if (currentOp.primary_seller_name || currentOp.seller_access_mode || (Array.isArray(currentOp.allowed_sellers) && currentOp.allowed_sellers.length > 0)) {
+            try {
+              const map = getSellerPermissionsMap();
+              map[user.id] = {
+                primary_seller_name: currentOp.primary_seller_name || user.full_name || '',
+                seller_access_mode: currentOp.seller_access_mode || 'OWN',
+                allowed_sellers: Array.isArray(currentOp.allowed_sellers) && currentOp.allowed_sellers.length > 0
+                  ? currentOp.allowed_sellers
+                  : [currentOp.primary_seller_name || user.full_name || '']
+              };
+              localStorage.setItem('samppel_seller_permissions_map_v1', JSON.stringify(map));
+            } catch { }
+          }
         }
       }
     } catch (err) {
@@ -1817,11 +1875,74 @@ export default function PedidosPage() {
       return;
     }
 
-    const currentStageId = item.stage_id;
+    const currentStageId = item.stage_id || stages[0]?.id;
     const targetStage = stages.find(s => s.id === targetStageId);
     if (!targetStage) return;
 
     const currentStage = stages.find(s => s.id === currentStageId);
+
+    // ---------------------------------------------------------------
+    // VALIDAÇÃO PRELIMINAR DE PERMISSÕES DE ETAPA (ENTRADA E SAÍDA) E CARTEIRA
+    // Respeita integralmente as liberações marcadas no modal "Etapas Autorizadas no Kanban"
+    // sem disparar window.alert nativo do navegador
+    // ---------------------------------------------------------------
+    if (user && user.role !== 'Administrador') {
+      const hasExplicitStagePerms = Array.isArray(userPermissions) && userPermissions.length > 0;
+      const currentStagePerm = hasExplicitStagePerms ? userPermissions.find(p => p.stage_id === currentStageId) : null;
+      const targetStagePerm = hasExplicitStagePerms ? userPermissions.find(p => p.stage_id === targetStageId) : null;
+
+      // 1. Vendedor(a) / Comercial
+      if (isVendedor) {
+        const itemSeller = getItemSellerName(item);
+        if (!canUserViewOrderSeller(itemSeller)) {
+          showToast('Permissão Negada: Vendedores só podem movimentar pedidos autorizados em sua carteira.', 'error');
+          return;
+        }
+
+        if (!currentStagePerm || !currentStagePerm.can_exit) {
+          showToast(`Permissão Negada: Seu perfil não possui liberação de saída da etapa "${currentStage?.name || 'Pedidos'}".`, 'error');
+          return;
+        }
+
+        if (!targetStagePerm || !targetStagePerm.can_enter) {
+          showToast(`Permissão Negada: Seu perfil não possui liberação de entrada na etapa "${targetStage.name}".`, 'error');
+          return;
+        }
+      } else if (hasExplicitStagePerms) {
+        // 2. Qualquer outro perfil (Supervisão, Produção, Estoque, Expedição, etc.) com etapas configuradas no modal
+        if (currentStageId && (!currentStagePerm || !currentStagePerm.can_exit)) {
+          showToast(`Você não possui liberação nos ajustes do perfil para retirar pedidos da etapa "${currentStage?.name || 'Pedidos'}".`, 'error');
+          return;
+        }
+
+        if (!targetStagePerm || !targetStagePerm.can_enter) {
+          showToast(`Você não possui liberação nos ajustes do perfil para colocar pedidos na etapa "${targetStage.name}".`, 'error');
+          return;
+        }
+      } else {
+        // 3. Regras legadas por cargo apenas quando o usuário não possui matriz de etapas configurada
+        if (user.role === 'Financeiro') {
+          if (currentStage && ['Em revisão', 'Expedição', 'Concluído'].includes(currentStage.name)) {
+            showToast('Permissão Negada: Operadores do Financeiro não podem movimentar cards fora das fases permitidas.', 'error');
+            return;
+          }
+        }
+
+        if (targetStage.name === 'Concluído') {
+          if (user.role !== 'Expedição' && user.role !== 'Supervisão' && !isSupervisor) {
+            showToast('Permissão Negada: Seu perfil não possui liberação para mover cards para Concluído.', 'error');
+            return;
+          }
+        }
+
+        if (user.role === 'Estoque') {
+          if (currentStage?.name !== 'Estoque' || targetStage.name !== 'Estoque') {
+            showToast('Permissão Negada: Operadores de Estoque só podem manipular cards nas etapas liberadas.', 'error');
+            return;
+          }
+        }
+      }
+    }
 
     // REGRA DE TRAVA DO MANUSEIO:
     // Se estiver saindo de Manuseio para outra etapa (exceto se for cancelamento/reversão específica),
@@ -2151,77 +2272,6 @@ export default function PedidosPage() {
         setSuggestionQuantityToConsume(0);
         setIsSuggestionModalOpen(true);
         return;
-      }
-    }
-
-    // Regras de Transições baseadas em Papel
-    if (user && user.role !== 'Administrador') {
-      // 1. Vendedor(a) regular
-      if (isVendedor) {
-        if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
-          alert('Permissão Negada: Vendedores só podem movimentar seus próprios pedidos.');
-          return;
-        }
-
-        // Validação estrita de permissões de saída (can_exit) e entrada (can_enter) para Vendedores
-        const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
-        if (!currentStagePerm || !currentStagePerm.can_exit) {
-          const currentStage = stages.find(s => s.id === currentStageId);
-          alert(`Permissão Negada: Você não possui autorização nos ajustes do seu perfil para retirar pedidos da etapa "${currentStage?.name || 'Atual'}".`);
-          return;
-        }
-
-        const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
-        if (!targetStagePerm || !targetStagePerm.can_enter) {
-          alert(`Permissão Negada: Você não possui autorização nos ajustes do seu perfil para colocar pedidos na etapa "${targetStage.name}".`);
-          return;
-        }
-      }
-
-      // 2. Financeiro
-      if (user.role === 'Financeiro') {
-        const currentStage = stages.find(s => s.id === currentStageId);
-        if (currentStage && ['Em revisão', 'Expedição', 'Concluído'].includes(currentStage.name)) {
-          alert('Permissão Negada: Operadores do Financeiro não podem movimentar cards fora das fases de Embalagem/Expedição/Conclusão.');
-          return;
-        }
-      }
-
-      // 3. Expedição (Apenas eles, Admin ou Supervisor podem concluir)
-      if (targetStage.name === 'Concluído') {
-        if (user.role !== 'Expedição' && user.role !== 'Supervisão' && !isSupervisor) {
-          alert('Permissão Negada: Apenas operadores da Expedição ou Supervisor podem mover cards para Concluído.');
-          return;
-        }
-      }
-
-      // 4. Estoque
-      if (user.role === 'Estoque') {
-        const currentStage = stages.find(s => s.id === currentStageId);
-        if (currentStage?.name !== 'Estoque' || targetStage.name !== 'Estoque') {
-          alert('Permissão Negada: Operadores de Estoque só podem manipular cards na coluna de Estoque.');
-          return;
-        }
-      }
-
-      // 5. Validar saída e entrada por permissões configuradas por etapa (se houver permissões cadastradas para outros usuários não-vendedores)
-      if (!isVendedor && userPermissions && userPermissions.length > 0) {
-        // Validar saída da etapa atual (se houver uma etapa atual)
-        if (currentStageId) {
-          const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
-          if (!currentStagePerm || !currentStagePerm.can_exit) {
-            const currentStage = stages.find(s => s.id === currentStageId);
-            alert(`Você não tem liberação para retirar itens da etapa "${currentStage?.name || 'desconhecida'}".`);
-            return;
-          }
-        }
-
-        // Validar entrada na etapa de destino
-        const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
-        if (!targetStagePerm || !targetStagePerm.can_enter) {
-          alert(`Você não tem liberação para colocar itens na etapa "${targetStage.name}".`);
-          return;
-        }
       }
     }
 
@@ -3220,14 +3270,16 @@ export default function PedidosPage() {
     if (!user) return false;
     if (user.role === 'Administrador') return true;
 
+    const currentStageId = item.stage_id || stages[0]?.id;
+    const hasExplicitStagePerms = Array.isArray(userPermissions) && userPermissions.length > 0;
+
     if (isVendedor) {
-      // Vendedor só pode movimentar pedidos da sua própria carteira
-      if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
+      // Vendedor só pode movimentar pedidos autorizados em sua carteira
+      if (!canUserViewOrderSeller(getItemSellerName(item))) {
         return false;
       }
 
       // Vendedor só pode iniciar movimentação se tiver permissão de SAÍDA (can_exit) da etapa atual
-      const currentStageId = item.stage_id || stages[0]?.id;
       const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
       if (!currentStagePerm || !currentStagePerm.can_exit) {
         return false;
@@ -3247,12 +3299,26 @@ export default function PedidosPage() {
       return true;
     }
 
+    // Qualquer outro perfil com permissões configuradas no modal "Etapas Autorizadas no Kanban"
+    if (hasExplicitStagePerms) {
+      const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
+      if (!currentStagePerm || !currentStagePerm.can_exit) {
+        return false;
+      }
+      const hasAnyAllowedTarget = stages.some(s => {
+        if (s.id === currentStageId) return false;
+        const targetPerm = userPermissions.find(p => p.stage_id === s.id);
+        return targetPerm && targetPerm.can_enter;
+      });
+      return hasAnyAllowedTarget;
+    }
+
     if (user.role === 'Estoque') {
-      const currentStage = stages.find(s => s.id === item.stage_id);
+      const currentStage = stages.find(s => s.id === currentStageId);
       return currentStage?.name === 'Estoque';
     }
     if (user.role === 'Expedição') {
-      const currentStage = stages.find(s => s.id === item.stage_id);
+      const currentStage = stages.find(s => s.id === currentStageId);
       return currentStage && ['Em revisão', 'Expedição', 'Concluído'].includes(currentStage.name);
     }
     if (['Produção', 'Fábrica'].includes(user.role)) {
@@ -3265,11 +3331,25 @@ export default function PedidosPage() {
     if (!user) return false;
     if (user.role === 'Administrador') return true;
 
+    const currentStageId = item.stage_id || stages[0]?.id;
+    const hasExplicitStagePerms = Array.isArray(userPermissions) && userPermissions.length > 0;
+
     if (isVendedor) {
-      if (!canUserViewOrderSeller(item.order?.seller_name || '')) {
+      if (!canUserViewOrderSeller(getItemSellerName(item))) {
         return false;
       }
-      const currentStageId = item.stage_id || stages[0]?.id;
+      const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
+      if (!currentStagePerm || !currentStagePerm.can_exit) {
+        return false;
+      }
+      const targetStagePerm = userPermissions.find(p => p.stage_id === targetStageId);
+      if (!targetStagePerm || !targetStagePerm.can_enter) {
+        return false;
+      }
+      return true;
+    }
+
+    if (hasExplicitStagePerms) {
       const currentStagePerm = userPermissions.find(p => p.stage_id === currentStageId);
       if (!currentStagePerm || !currentStagePerm.can_exit) {
         return false;
@@ -3368,7 +3448,8 @@ export default function PedidosPage() {
 
     if (wasActive && itemId && targetStageId) {
       const itemToMove = orderItems.find(i => i.id === itemId);
-      if (itemToMove && itemToMove.stage_id !== targetStageId) {
+      const effectiveCurrentStageId = itemToMove?.stage_id || stages[0]?.id;
+      if (itemToMove && effectiveCurrentStageId !== targetStageId) {
         await moveOrderItemToStage(itemToMove, targetStageId);
       }
     }
@@ -3393,7 +3474,7 @@ export default function PedidosPage() {
     setFormPrintRun(1000);
     setFormBoxes(1);
     setFormFreight(0);
-    setFormSeller(user?.role === 'Comercial' ? user.full_name.split(' ')[0] : '');
+    setFormSeller((user?.role === 'Comercial' || user?.role === 'Vendedor') ? (user.primary_seller_name || user.full_name || '') : '');
     setFormNotes('');
     setFormInternalNotes('');
     setFormInitialDestination('PRODUCAO');
@@ -3433,7 +3514,7 @@ export default function PedidosPage() {
     setFormPrintRun(1000);
     setFormBoxes(1);
     setFormFreight(0);
-    setFormSeller(user?.role === 'Comercial' ? user.full_name.split(' ')[0] : 'Fábrica');
+    setFormSeller((user?.role === 'Comercial' || user?.role === 'Vendedor') ? (user.primary_seller_name || user.full_name || '') : 'Fábrica');
     setFormNotes('');
     setFormInternalNotes('');
     setFormInitialDestination('ESTOQUE');
@@ -7182,8 +7263,37 @@ export default function PedidosPage() {
         }}
         actionDescription={pendingKanbanMove ? `Mover item para outra etapa do Kanban` : 'Movimentação Kanban'}
         targetStageId={pendingKanbanMove?.targetStageId}
-        currentStageId={pendingKanbanMove?.item?.stage_id}
+        currentStageId={pendingKanbanMove?.item?.stage_id || stages[0]?.id}
       />
+
+      {toastNotification && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '1.25rem',
+            right: '1.25rem',
+            zIndex: 99999,
+            maxWidth: '420px',
+            padding: '0.85rem 1.15rem',
+            borderRadius: 'var(--radius-md, 8px)',
+            backgroundColor: toastNotification.type === 'error'
+              ? 'var(--danger, #dc2626)'
+              : toastNotification.type === 'info'
+                ? 'var(--primary, #2563eb)'
+                : '#10b981',
+            color: '#ffffff',
+            fontWeight: 600,
+            fontSize: '0.82rem',
+            lineHeight: 1.4,
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.22)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem'
+          }}
+        >
+          <span>{toastNotification.message}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -441,9 +441,24 @@ export default function ConfiguracoesPage() {
         if (!sellers.includes('Vendas Samppel')) sellers.push('Vendas Samppel');
         setAvailableSellersList(sellers.sort());
       }
-      setSellerPermissionsMap(getSellerPermissionsMap());
-
       const allProfiles = profilesRes.data || [];
+      const localSellerMap = getSellerPermissionsMap();
+      const mergedSellerMap: Record<string, { primary_seller_name: string; seller_access_mode: string; allowed_sellers: string[] }> = {
+        ...localSellerMap
+      };
+      allProfiles.forEach((p: any) => {
+        if (p.primary_seller_name || p.seller_access_mode || (Array.isArray(p.allowed_sellers) && p.allowed_sellers.length > 0)) {
+          mergedSellerMap[p.id] = {
+            primary_seller_name: p.primary_seller_name || localSellerMap[p.id]?.primary_seller_name || p.full_name || p.name || '',
+            seller_access_mode: p.seller_access_mode || localSellerMap[p.id]?.seller_access_mode || 'OWN',
+            allowed_sellers: Array.isArray(p.allowed_sellers) && p.allowed_sellers.length > 0
+              ? p.allowed_sellers
+              : (localSellerMap[p.id]?.allowed_sellers || [p.primary_seller_name || p.full_name || p.name || ''])
+          };
+        }
+      });
+      setSellerPermissionsMap(mergedSellerMap);
+
       const mappedProfiles = allProfiles.map((p: any) => ({
         ...p,
         name: p.full_name || p.name || 'Sem nome'

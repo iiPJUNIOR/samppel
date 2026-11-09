@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     // Busca da tabela principal profiles com todos os operadores e usuarios do tenant
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, full_name, email, role, pin, status, force_password_change, allowed_modules, can_delete_any_order, created_at, profile_stage_permissions(stage_id, can_enter, can_exit)')
+      .select('id, full_name, email, role, pin, status, is_factory_account, force_password_change, allowed_modules, can_delete_any_order, primary_seller_name, seller_access_mode, allowed_sellers, created_at, profile_stage_permissions(stage_id, can_enter, can_exit)')
       .eq('tenant_id', tenantId)
       .in('role', ['Produção', 'Fábrica', 'Administrador', 'Supervisão', 'Vendedor', 'Comercial', 'Financeiro', 'Estoque', 'Expedição'])
       .order('full_name', { ascending: true });
@@ -35,10 +35,14 @@ export async function GET(request: NextRequest) {
       email: p.email,
       role: p.role,
       status: p.status || 'ATIVO',
+      is_factory_account: !!p.is_factory_account,
       has_pin: !!p.pin,
       force_password_change: !!p.force_password_change,
       allowed_modules: p.allowed_modules || ['pedidos', 'produtos', 'financeiro', 'clientes', 'relatorios', 'dashboard'],
       can_delete_any_order: !!p.can_delete_any_order,
+      primary_seller_name: p.primary_seller_name || null,
+      seller_access_mode: p.seller_access_mode || 'OWN',
+      allowed_sellers: Array.isArray(p.allowed_sellers) ? p.allowed_sellers : [],
       profile_stage_permissions: p.profile_stage_permissions || [],
       created_at: p.created_at
     }));

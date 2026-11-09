@@ -17,9 +17,9 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx`, `OperatorAuthModal.tsx` | 2026-11-05 | OK |
-| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-05 | OK |
-| **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`), `src/services/deadline_service.ts` (`getExpeditionUrgency`), `src/app/globals.css` (`.kanban-board-scroll`, `--warning-card-bg`) | 2026-11-05 | OK |
+| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx`, `OperatorAuthModal.tsx` | 2026-11-09 | OK |
+| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-09 | OK |
+| **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`), `src/services/deadline_service.ts` (`getExpeditionUrgency`), `src/app/globals.css` (`.kanban-board-scroll`, `--warning-card-bg`) | 2026-11-09 | OK |
 | **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-11-05 | OK |
 | **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-11-05 | OK |
 | **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-11-05 | OK |
@@ -30,7 +30,7 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts`, `TransformSacoModal.tsx` | 2026-11-05 | OK |
 | **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx`, `suppliers.ts` | 2026-11-05 | OK |
 | **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-11-05 | OK |
-| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-11-05 | OK |
+| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-11-09 | OK |
 | **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, `sync_queue.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-10-30 | OK |
 | **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `InfoHint.tsx`, `metricGuides.ts`, `src/lib/supabasePlatformClient.ts`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql` | 2026-11-05 | OK |
 
