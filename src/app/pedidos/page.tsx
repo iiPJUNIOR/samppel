@@ -91,11 +91,22 @@ import {
   saveOrderItemShortage,
   resolveOrderItemShortage,
   type OrderItemShortage,
+  getOrdersByIdsBulk,
+  getActiveKanbanOrderItems,
+  getHistoricalStageItemsPage,
+  searchHistoricalOrderItemsServer,
+  getKanbanFinancialSummary,
   supabase,
   getDbClient
 } from '@/services/supabase';
 import { parseDeadlineFromNotes, isCardOverdue, calculateExpeditionDate, detectScopeDays, getExpeditionUrgency } from '@/services/deadline_service';
-import { TableRowSkeleton } from '@/components/ui/Skeleton';
+import {
+  TableRowSkeleton,
+  KanbanBoardSkeleton,
+  OrdersTableSkeleton,
+  KanbanCardMiniSkeleton,
+  OrdersListInlineMoreSkeleton
+} from '@/components/ui/Skeleton';
 import OperatorAuthModal from '@/components/OperatorAuthModal';
 import {
   Plus,
@@ -142,6 +153,117 @@ const getStatusForStageName = (stageName: string): string => {
   if (stageName === 'Concluído') return 'Entregue';
   return stageName;
 };
+
+const HISTORICAL_STAGE_NAMES = new Set(['concluído', 'concluido', 'cancelados', 'cancelado']);
+const HISTORICAL_PAGE_SIZE = 30;
+
+const isHistoricalTerminalStage = (stage?: { name?: string } | null): boolean => {
+  if (!stage?.name) return false;
+  return HISTORICAL_STAGE_NAMES.has(stage.name.trim().toLowerCase());
+};
+
+interface HistoricalStagePaginationState {
+  offset: number;
+  totalCount: number | null;
+  hasMore: boolean;
+  loadingMore: boolean;
+}
+
+function StageInfiniteScrollSentinel({
+  stageId,
+  stageColor,
+  hasMore,
+  loadingMore,
+  onLoadMore
+}: {
+  stageId: string;
+  stageColor: string;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: (stageId: string) => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasMore || loadingMore) return;
+
+    const scrollParent = node.closest('.kanban-column-scroll') as HTMLElement | null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          onLoadMore(stageId);
+        }
+      },
+      {
+        root: scrollParent || null,
+        rootMargin: '220px 0px'
+      }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [stageId, hasMore, loadingMore, onLoadMore]);
+
+  if (!hasMore && !loadingMore) return null;
+
+  return (
+    <div
+      ref={sentinelRef}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.45rem',
+        paddingTop: '0.15rem',
+        paddingBottom: '0.2rem',
+        minHeight: hasMore && !loadingMore ? '14px' : undefined
+      }}
+    >
+      {loadingMore && (
+        <>
+          <KanbanCardMiniSkeleton accentColor={stageColor} compact delayMs={0} />
+          <KanbanCardMiniSkeleton accentColor={stageColor} compact delayMs={80} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ListInfiniteScrollSentinel({
+  hasMore,
+  loadingMore,
+  onLoadMore
+}: {
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasMore || loadingMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          onLoadMore();
+        }
+      },
+      {
+        root: null,
+        rootMargin: '320px 0px'
+      }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, onLoadMore]);
+
+  if (!hasMore && !loadingMore) return null;
+
+  return <div ref={sentinelRef} style={{ height: '12px', width: '100%' }} aria-hidden="true" />;
+}
 
 // Extrair número de Autorização do texto das observações (padrão: AUT. XXX.YYYY ou similar)
 const extractAuthorization = (notes: string | null): string | null => {
@@ -1480,107 +1602,431 @@ export default function PedidosPage() {
   const [formHandlingTeamId, setFormHandlingTeamId] = useState('');
   const [formHandlingAllocations, setFormHandlingAllocations] = useState<HandlingTeamRow[]>([]);
 
+  const [historicalPagination, setHistoricalPagination] = useState<Record<string, HistoricalStagePaginationState>>({});
+  const [isSearchingHistorical, setIsSearchingHistorical] = useState(false);
+
+  const catalogsLoadedKeyRef = useRef<string | null>(null);
+  const stagesRef = useRef<any[]>([]);
+  const productsRef = useRef<any[]>([]);
+  const machinesRef = useRef<any[]>([]);
+  const teamsRef = useRef<any[]>([]);
+  const ordersRef = useRef<any[]>([]);
+  const orderItemsRef = useRef<any[]>([]);
+  const historicalPaginationRef = useRef<Record<string, HistoricalStagePaginationState>>({});
+  const loadingStageIdsRef = useRef<Set<string>>(new Set());
+  const extraLoadedHistoricalMapRef = useRef<Map<string, any>>(new Map());
+
+  useEffect(() => { stagesRef.current = stages; }, [stages]);
+  useEffect(() => { productsRef.current = products; }, [products]);
+  useEffect(() => { machinesRef.current = productionMachines; }, [productionMachines]);
+  useEffect(() => { teamsRef.current = handlingTeams; }, [handlingTeams]);
+  useEffect(() => { ordersRef.current = orders; }, [orders]);
+  useEffect(() => { orderItemsRef.current = orderItems; }, [orderItems]);
+  useEffect(() => { historicalPaginationRef.current = historicalPagination; }, [historicalPagination]);
+
+  const hydrateRawItemsInMemory = (
+    rawItems: any[],
+    ordersMap: Map<string, any>,
+    prodsList: any[],
+    machList: any[],
+    tList: any[]
+  ) => {
+    const prodMap = new Map<string, any>(prodsList.map(p => [p.id, p]));
+    const machMap = new Map<string, any>(machList.map(m => [m.id, m]));
+    const teamMap = new Map<string, any>(tList.map(t => [t.id, t]));
+
+    return rawItems
+      .filter(item => !item.order_id || ordersMap.has(item.order_id))
+      .map((item: any) => ({
+        ...item,
+        order: ordersMap.get(item.order_id) || item.order || null,
+        product: (item.product_id ? prodMap.get(item.product_id) : null) || item.product || null,
+        machine: (item.machine_id ? machMap.get(item.machine_id) : null) || item.machine || null,
+        handling_team: (item.handling_team_id ? teamMap.get(item.handling_team_id) : null) || item.handling_team || null
+      }));
+  };
+
+  const hydrateAndAppendNewItems = React.useCallback(async (newRawItems: any[], tenantId: string) => {
+    if (!Array.isArray(newRawItems) || newRawItems.length === 0) return;
+
+    const existingOrderIds = new Set(ordersRef.current.map((o: any) => o.id));
+    const missingOrderIds = Array.from(
+      new Set(
+        newRawItems
+          .map((i: any) => i.order_id)
+          .filter((oid: string) => Boolean(oid) && !existingOrderIds.has(oid))
+      )
+    );
+    const newItemIds = Array.from(new Set(newRawItems.map((i: any) => i.id).filter(Boolean)));
+
+    const [newOrdersRes, newFinRes, teamsBulkRes, shortagesBulkRes, pkgBulkRes] = await Promise.all([
+      missingOrderIds.length > 0 ? getOrdersByIdsBulk(missingOrderIds, tenantId) : Promise.resolve({ data: [] as any[] }),
+      missingOrderIds.length > 0 ? getKanbanFinancialSummary(missingOrderIds, tenantId) : Promise.resolve({ data: [] as any[] }),
+      newItemIds.length > 0 ? getOrderItemHandlingTeamsBulk(newItemIds, tenantId) : Promise.resolve({ data: [] as OrderItemHandlingTeam[] }),
+      newItemIds.length > 0 ? getOrderItemShortagesBulk(newItemIds, tenantId) : Promise.resolve({ data: [] as OrderItemShortage[] }),
+      newItemIds.length > 0 ? getOrderItemPackagingBulk(newItemIds, tenantId) : Promise.resolve({ data: [] as any[] })
+    ]);
+
+    const combinedOrdersMap = new Map<string, any>();
+    for (const ord of ordersRef.current) combinedOrdersMap.set(ord.id, ord);
+    for (const ord of newOrdersRes.data || []) combinedOrdersMap.set(ord.id, ord);
+    const updatedOrders = Array.from(combinedOrdersMap.values());
+
+    ordersRef.current = updatedOrders;
+    setOrders(updatedOrders);
+
+    setCustomers(prev => {
+      const custMap = new Map<string, any>();
+      for (const c of prev) {
+        if (c?.id) custMap.set(c.id, c);
+      }
+      for (const ord of newOrdersRes.data || []) {
+        if (ord?.customer?.id) custMap.set(ord.customer.id, ord.customer);
+      }
+      return Array.from(custMap.values());
+    });
+
+    if ((newFinRes.data || []).length > 0) {
+      setFinancialTransactions(prev => {
+        const finMap = new Map<string, any>();
+        for (const f of prev) if (f?.id) finMap.set(f.id, f);
+        for (const f of newFinRes.data || []) if (f?.id) finMap.set(f.id, f);
+        return Array.from(finMap.values());
+      });
+    }
+
+    const hydratedNew = hydrateRawItemsInMemory(
+      newRawItems,
+      combinedOrdersMap,
+      productsRef.current,
+      machinesRef.current,
+      teamsRef.current
+    );
+
+    setOrderItems(prev => {
+      const itemMap = new Map<string, any>();
+      for (const existing of prev) itemMap.set(existing.id, existing);
+      for (const added of hydratedNew) itemMap.set(added.id, added);
+      const next = Array.from(itemMap.values());
+      orderItemsRef.current = next;
+      return next;
+    });
+
+    if ((teamsBulkRes.data || []).length > 0) {
+      setItemHandlingTeamsMap(prev => {
+        const next = new Map(prev);
+        const grouped = new Map<string, OrderItemHandlingTeam[]>();
+        for (const t of teamsBulkRes.data || []) {
+          const arr = grouped.get(t.order_item_id) || [];
+          arr.push(t);
+          grouped.set(t.order_item_id, arr);
+        }
+        grouped.forEach((val, key) => next.set(key, val));
+        return next;
+      });
+    }
+
+    if ((shortagesBulkRes.data || []).length > 0) {
+      setShortagesMap(prev => {
+        const next = new Map(prev);
+        const grouped = new Map<string, OrderItemShortage[]>();
+        for (const s of shortagesBulkRes.data || []) {
+          const arr = grouped.get(s.order_item_id) || [];
+          arr.push(s);
+          grouped.set(s.order_item_id, arr);
+        }
+        grouped.forEach((val, key) => next.set(key, val));
+        return next;
+      });
+    }
+
+    if ((pkgBulkRes.data || []).length > 0) {
+      setItemsWithPackaging(prev => {
+        const next = new Set(prev);
+        for (const p of pkgBulkRes.data || []) {
+          if (p?.order_item_id) next.add(p.order_item_id);
+        }
+        return next;
+      });
+    }
+  }, []);
+
+  const loadMoreHistoricalStage = React.useCallback(async (stageId: string) => {
+    if (!stageId || loadingStageIdsRef.current.has(stageId)) return;
+    const currentPag = historicalPaginationRef.current[stageId];
+    if (!currentPag || !currentPag.hasMore || currentPag.loadingMore) return;
+
+    loadingStageIdsRef.current.add(stageId);
+    setHistoricalPagination(prev => ({
+      ...prev,
+      [stageId]: {
+        ...(prev[stageId] || currentPag),
+        loadingMore: true
+      }
+    }));
+
+    try {
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const pageRes = await getHistoricalStageItemsPage({
+        stageId,
+        tenantId,
+        offset: currentPag.offset,
+        limit: HISTORICAL_PAGE_SIZE,
+        includeExactCount: false
+      });
+
+      const fetchedBatch = pageRes.data || [];
+      for (const row of fetchedBatch) {
+        extraLoadedHistoricalMapRef.current.set(row.id, row);
+      }
+
+      if (fetchedBatch.length > 0) {
+        await hydrateAndAppendNewItems(fetchedBatch, tenantId);
+      }
+
+      const nextOffset = currentPag.offset + fetchedBatch.length;
+      const nextHasMore =
+        currentPag.totalCount !== null
+          ? nextOffset < currentPag.totalCount && fetchedBatch.length > 0
+          : pageRes.hasMore;
+
+      setHistoricalPagination(prev => {
+        const nextState = {
+          ...prev,
+          [stageId]: {
+            offset: nextOffset,
+            totalCount: currentPag.totalCount,
+            hasMore: nextHasMore,
+            loadingMore: false
+          }
+        };
+        historicalPaginationRef.current = nextState;
+        return nextState;
+      });
+    } catch (err) {
+      console.error('Erro ao carregar mais cards historicos:', err);
+      setHistoricalPagination(prev => ({
+        ...prev,
+        [stageId]: {
+          ...(prev[stageId] || currentPag),
+          loadingMore: false
+        }
+      }));
+    } finally {
+      loadingStageIdsRef.current.delete(stageId);
+    }
+  }, [hydrateAndAppendNewItems, user?.tenant_id]);
+
+  const loadMoreHistoricalForList = React.useCallback(() => {
+    const entries = Object.entries(historicalPaginationRef.current);
+    for (const [stageId, pag] of entries) {
+      if (pag.hasMore && !pag.loadingMore) {
+        loadMoreHistoricalStage(stageId);
+      }
+    }
+  }, [loadMoreHistoricalStage]);
+
   const fetchAllData = async () => {
     setLoading(true);
     try {
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const cacheKey = `${tenantId}:${user?.id || 'anon'}:${user?.role || ''}`;
+      const needsStaticCatalogs = catalogsLoadedKeyRef.current !== cacheKey || stagesRef.current.length === 0;
 
-      // Chamadas críticas — se qualquer uma falhar, o Kanban não carrega
-      const [ordersRes, customersRes, productsRes, stagesRes, itemsRes, adjRes, credRes, stockRes, finRes] = await Promise.all([
-        getOrders(tenantId),
-        getCustomers(tenantId),
+      let resolvedStages = stagesRef.current;
+      let resolvedMachines = machinesRef.current;
+      let resolvedTeams = teamsRef.current;
+
+      if (needsStaticCatalogs) {
+        const [
+          stagesRes,
+          machResult,
+          teamsResult,
+          pmtResult,
+          settingsResult,
+          sectorsResult,
+          shippingTypesResult,
+          locationsResult
+        ] = await Promise.allSettled([
+          getOrderStages(tenantId),
+          getProductionMachines(tenantId),
+          getHandlingTeams(tenantId),
+          getPackagingMaterialTypes(tenantId),
+          getPackagingSettings(tenantId),
+          getProductionSectors(tenantId),
+          getShippingTypesConfig(tenantId),
+          getFactoryLocations(tenantId)
+        ]);
+
+        if (stagesRes.status === 'fulfilled') {
+          resolvedStages = stagesRes.value.data || [];
+          stagesRef.current = resolvedStages;
+          setStages(resolvedStages);
+        }
+        if (machResult.status === 'fulfilled') {
+          resolvedMachines = machResult.value.data || [];
+          machinesRef.current = resolvedMachines;
+          setProductionMachines(resolvedMachines);
+        }
+        if (teamsResult.status === 'fulfilled') {
+          resolvedTeams = teamsResult.value.data || [];
+          teamsRef.current = resolvedTeams;
+          setHandlingTeams(resolvedTeams);
+        }
+        if (pmtResult.status === 'fulfilled') setPackagingMaterialTypes(pmtResult.value.data || []);
+        if (settingsResult.status === 'fulfilled') setPackagingSettings(settingsResult.value.data || null);
+        if (sectorsResult.status === 'fulfilled' && sectorsResult.value.data && sectorsResult.value.data.length > 0) {
+          setProductionSectors(sectorsResult.value.data);
+        }
+        if (shippingTypesResult.status === 'fulfilled') setShippingTypes(shippingTypesResult.value.data || []);
+        if (locationsResult.status === 'fulfilled') setFactoryLocations(locationsResult.value.data || []);
+
+        catalogsLoadedKeyRef.current = cacheKey;
+        fetchUserPermissions();
+      }
+
+      const historicalStages = resolvedStages.filter(s => isHistoricalTerminalStage(s));
+      const historicalStageIds = historicalStages.map(s => s.id);
+      const activeStageIds = resolvedStages.filter(s => !isHistoricalTerminalStage(s)).map(s => s.id);
+
+      const [productsRes, activeItemsRes, adjRes, credRes, stockRes, ...histInitialResults] = await Promise.all([
         getProducts(tenantId),
-        getOrderStages(tenantId),
-        getOrderItems(undefined, tenantId),
+        getActiveKanbanOrderItems(activeStageIds, historicalStageIds, tenantId),
         getOrderBalanceAdjustments(undefined, undefined, tenantId),
         getCustomerStockCredits(undefined, 'ATIVO', tenantId),
         getCustomerProductStock(undefined, undefined, tenantId),
-        getFinancialTransactions(tenantId),
+        ...historicalStages.map(hs =>
+          getHistoricalStageItemsPage({
+            stageId: hs.id,
+            tenantId,
+            offset: 0,
+            limit: HISTORICAL_PAGE_SIZE,
+            includeExactCount: true
+          })
+        )
       ]);
 
-      const fetchedOrders = ordersRes.data || [];
       const fetchedProducts = productsRes.data || [];
-      setOrders(fetchedOrders);
-      setCustomers(customersRes.data || []);
+      productsRef.current = fetchedProducts;
       setProducts(fetchedProducts);
-      setStages(stagesRes.data || []);
-
-      const joinedItems = (itemsRes.data || []).map((item: any) => {
-        const prod = fetchedProducts.find((p: any) => p.id === item.product_id) || item.product || null;
-        const ord = fetchedOrders.find((o: any) => o.id === item.order_id) || item.order || null;
-        return {
-          ...item,
-          order: ord,
-          product: prod
-        };
-      });
-      setOrderItems(joinedItems);
       setAdjustments(adjRes.data || []);
       setCustomerCredits(credRes.data || []);
       setCustomerStocks(stockRes.data || []);
-      setFinancialTransactions(finRes.data || []);
 
-      // Chamadas opcionais — tabelas que podem não existir ainda (migração pendente)
-      const [machResult, teamsResult, pmtResult, settingsResult, sectorsResult, shippingTypesResult, locationsResult] = await Promise.allSettled([
-        getProductionMachines(tenantId),
-        getHandlingTeams(tenantId),
-        getPackagingMaterialTypes(tenantId),
-        getPackagingSettings(tenantId),
-        getProductionSectors(tenantId),
-        getShippingTypesConfig(tenantId),
-        getFactoryLocations(tenantId)
+      const rawItemsMap = new Map<string, any>();
+      for (const item of activeItemsRes.data || []) {
+        rawItemsMap.set(item.id, item);
+        // Se um item que estava no cache historico voltou para etapa ativa, limpa do cache historico
+        extraLoadedHistoricalMapRef.current.delete(item.id);
+      }
+
+      const nextPagination: Record<string, HistoricalStagePaginationState> = {};
+      historicalStages.forEach((hs, idx) => {
+        const pageRes = histInitialResults[idx];
+        const batch = pageRes?.data || [];
+        for (const item of batch) {
+          rawItemsMap.set(item.id, item);
+        }
+        const prevOffset = historicalPaginationRef.current[hs.id]?.offset || 0;
+        const effectiveOffset = Math.max(batch.length, prevOffset);
+        const totalCount = typeof pageRes?.totalCount === 'number' ? pageRes.totalCount : null;
+        const hasMore = totalCount !== null ? effectiveOffset < totalCount : Boolean(pageRes?.hasMore);
+
+        nextPagination[hs.id] = {
+          offset: effectiveOffset,
+          totalCount,
+          hasMore,
+          loadingMore: false
+        };
+      });
+
+      // Preserva itens historicos adicionais ja rolados ou buscados pelo usuario nesta sessao
+      extraLoadedHistoricalMapRef.current.forEach((cachedItem, itemId) => {
+        if (!rawItemsMap.has(itemId)) {
+          rawItemsMap.set(itemId, cachedItem);
+        }
+      });
+
+      const mergedRawItems = Array.from(rawItemsMap.values());
+      const allOrderIds = Array.from(new Set(mergedRawItems.map((i: any) => i.order_id).filter(Boolean)));
+      const allItemIds = Array.from(new Set(mergedRawItems.map((i: any) => i.id).filter(Boolean)));
+
+      const [ordersRes, finRes, teamsBulkRes, shortagesBulkRes, pkgBulkRes] = await Promise.all([
+        allOrderIds.length > 0 ? getOrdersByIdsBulk(allOrderIds, tenantId) : Promise.resolve({ data: [] as any[] }),
+        allOrderIds.length > 0 ? getKanbanFinancialSummary(allOrderIds, tenantId) : Promise.resolve({ data: [] as any[] }),
+        allItemIds.length > 0 ? getOrderItemHandlingTeamsBulk(allItemIds, tenantId) : Promise.resolve({ data: [] as OrderItemHandlingTeam[] }),
+        allItemIds.length > 0 ? getOrderItemShortagesBulk(allItemIds, tenantId) : Promise.resolve({ data: [] as OrderItemShortage[] }),
+        allItemIds.length > 0 ? getOrderItemPackagingBulk(allItemIds, tenantId) : Promise.resolve({ data: [] as any[] })
       ]);
 
-      if (machResult.status === 'fulfilled') setProductionMachines(machResult.value.data || []);
-      if (sectorsResult.status === 'fulfilled' && sectorsResult.value.data && sectorsResult.value.data.length > 0) {
-        setProductionSectors(sectorsResult.value.data);
-      }
-      if (teamsResult.status === 'fulfilled') setHandlingTeams(teamsResult.value.data || []);
-      if (pmtResult.status === 'fulfilled') setPackagingMaterialTypes(pmtResult.value.data || []);
-      if (shippingTypesResult.status === 'fulfilled') setShippingTypes(shippingTypesResult.value.data || []);
-      if (settingsResult.status === 'fulfilled') setPackagingSettings(settingsResult.value.data || null);
-      if (locationsResult.status === 'fulfilled') setFactoryLocations(locationsResult.value.data || []);
+      const fetchedOrders = ordersRes.data || [];
+      const fetchedOrdersMap = new Map<string, any>(fetchedOrders.map((o: any) => [o.id, o]));
 
-      // Pré-carregar cache de embalagens e alocações de equipes de manuseio
-      const itemIds: string[] = (itemsRes.data || []).map((i: any) => i.id);
-      if (itemIds.length > 0) {
-        const packaged = new Set<string>();
-        const teamsMap = new Map<string, OrderItemHandlingTeam[]>();
-
-        const [teamsBulkRes, shortagesBulkRes] = await Promise.all([
-          getOrderItemHandlingTeamsBulk(itemIds),
-          getOrderItemShortagesBulk(itemIds)
-        ]);
-
-        (teamsBulkRes.data || []).forEach((t: OrderItemHandlingTeam) => {
-          const arr = teamsMap.get(t.order_item_id) || [];
-          arr.push(t);
-          teamsMap.set(t.order_item_id, arr);
-        });
-
-        const sMap = new Map<string, OrderItemShortage[]>();
-        (shortagesBulkRes.data || []).forEach((s: OrderItemShortage) => {
-          const arr = sMap.get(s.order_item_id) || [];
-          arr.push(s);
-          sMap.set(s.order_item_id, arr);
-        });
-
-        const pkgBulkRes = await getOrderItemPackagingBulk(itemIds);
-        (pkgBulkRes.data || []).forEach((p: any) => {
-          if (p.order_item_id) packaged.add(p.order_item_id);
-        });
-
-        setItemsWithPackaging(packaged);
-        if (typeof window !== 'undefined' && Array.isArray(teamsBulkRes.data)) {
-          try {
-            localStorage.setItem('samppel_handling_teams_v2', JSON.stringify(teamsBulkRes.data));
-          } catch (e) { }
+      // Remove do cache historico qualquer item cujo pedido tenha sido excluido
+      extraLoadedHistoricalMapRef.current.forEach((val, key) => {
+        if (val?.order_id && !fetchedOrdersMap.has(val.order_id)) {
+          extraLoadedHistoricalMapRef.current.delete(key);
         }
-        setItemHandlingTeamsMap(teamsMap);
-        setShortagesMap(sMap);
+      });
+
+      ordersRef.current = fetchedOrders;
+      setOrders(fetchedOrders);
+
+      // Deriva clientes diretamente dos pedidos carregados (zero full-scan nos 5.438 registros)
+      setCustomers(prev => {
+        const custMap = new Map<string, any>();
+        for (const c of prev) if (c?.id) custMap.set(c.id, c);
+        for (const o of fetchedOrders) {
+          if (o?.customer?.id) custMap.set(o.customer.id, o.customer);
+        }
+        return Array.from(custMap.values());
+      });
+
+      const joinedItems = hydrateRawItemsInMemory(
+        mergedRawItems,
+        fetchedOrdersMap,
+        fetchedProducts,
+        resolvedMachines,
+        resolvedTeams
+      );
+
+      orderItemsRef.current = joinedItems;
+      setOrderItems(joinedItems);
+      setFinancialTransactions(finRes.data || []);
+
+      historicalPaginationRef.current = nextPagination;
+      setHistoricalPagination(nextPagination);
+
+      const packaged = new Set<string>();
+      const teamsMap = new Map<string, OrderItemHandlingTeam[]>();
+      const sMap = new Map<string, OrderItemShortage[]>();
+
+      (teamsBulkRes.data || []).forEach((t: OrderItemHandlingTeam) => {
+        const arr = teamsMap.get(t.order_item_id) || [];
+        arr.push(t);
+        teamsMap.set(t.order_item_id, arr);
+      });
+
+      (shortagesBulkRes.data || []).forEach((s: OrderItemShortage) => {
+        const arr = sMap.get(s.order_item_id) || [];
+        arr.push(s);
+        sMap.set(s.order_item_id, arr);
+      });
+
+      (pkgBulkRes.data || []).forEach((p: any) => {
+        if (p.order_item_id) packaged.add(p.order_item_id);
+      });
+
+      setItemsWithPackaging(packaged);
+      if (typeof window !== 'undefined' && Array.isArray(teamsBulkRes.data)) {
+        try {
+          localStorage.setItem('samppel_handling_teams_v2', JSON.stringify(teamsBulkRes.data));
+        } catch (e) { }
       }
-      fetchUserPermissions();
-      return ordersRes.data || [];
+      setItemHandlingTeamsMap(teamsMap);
+      setShortagesMap(sMap);
+
+      return fetchedOrders;
     } catch (e) {
       console.error('Erro ao carregar dados da página de pedidos:', e);
       return [];
@@ -1588,6 +2034,69 @@ export default function PedidosPage() {
       setLoading(false);
     }
   };
+
+  // Busca automatica no servidor (debounce 400ms) para PVs, OPs ou Clientes antigos ainda nao rolados
+  useEffect(() => {
+    const terms = [filterSearchOrder, filterCustomer, filterSeller]
+      .map(t => (t || '').trim())
+      .filter(t => t.length >= 2);
+
+    if (terms.length === 0 || stagesRef.current.length === 0) {
+      setIsSearchingHistorical(false);
+      return;
+    }
+
+    const historicalStageIds = stagesRef.current
+      .filter(s => isHistoricalTerminalStage(s))
+      .map(s => s.id);
+
+    if (historicalStageIds.length === 0) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearchingHistorical(true);
+      try {
+        const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+        const responses = await Promise.all(
+          terms.map(term =>
+            searchHistoricalOrderItemsServer({
+              term,
+              historicalStageIds,
+              tenantId,
+              limit: 45
+            })
+          )
+        );
+
+        if (cancelled) return;
+
+        const existingIds = new Set(orderItemsRef.current.map((i: any) => i.id));
+        const missingMap = new Map<string, any>();
+        for (const res of responses) {
+          for (const row of res.data || []) {
+            if (row?.id && !existingIds.has(row.id)) {
+              missingMap.set(row.id, row);
+              extraLoadedHistoricalMapRef.current.set(row.id, row);
+            }
+          }
+        }
+
+        const missingItems = Array.from(missingMap.values());
+        if (missingItems.length > 0) {
+          await hydrateAndAppendNewItems(missingItems, tenantId);
+        }
+      } catch (err) {
+        console.warn('Falha ao buscar itens historicos no servidor:', err);
+      } finally {
+        if (!cancelled) setIsSearchingHistorical(false);
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [filterSearchOrder, filterCustomer, filterSeller, hydrateAndAppendNewItems, user?.tenant_id]);
 
 
   const fetchUserPermissions = async () => {
@@ -1765,9 +2274,18 @@ export default function PedidosPage() {
   };
 
   useEffect(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') {
+          document.removeEventListener('visibilitychange', onVisible);
+          fetchAllData();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisible);
+      return () => document.removeEventListener('visibilitychange', onVisible);
+    }
     fetchAllData();
-    fetchUserPermissions();
-  }, [user]);
+  }, [user?.id, user?.role, user?.tenant_id]);
 
   // Atualizar estoque do produto selecionado no formulário
   useEffect(() => {
@@ -5466,6 +5984,27 @@ export default function PedidosPage() {
                     Limpar Filtros
                   </button>
                 )}
+
+                {isSearchingHistorical && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      color: 'var(--primary)',
+                      padding: '0.18rem 0.55rem',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: 'rgba(var(--primary-rgb), 0.08)',
+                      border: '1px solid rgba(var(--primary-rgb), 0.2)',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <Loader2 size={11} className="spinner" />
+                    <span>Buscando no histórico...</span>
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -5473,10 +6012,8 @@ export default function PedidosPage() {
       })()}
 
 
-      {loading && orders.length === 0 ? (
-        <div className="card" style={{ padding: '3rem', display: 'flex', justifyContent: 'center' }}>
-          <Loader2 size={40} className="spinner" style={{ color: 'var(--primary)' }} />
-        </div>
+      {loading && orderItems.length === 0 && orders.length === 0 ? (
+        viewMode === 'kanban' ? <KanbanBoardSkeleton /> : <OrdersTableSkeleton />
       ) : viewMode === 'kanban' ? (
 
         /* 1. VISUALIZAÇÃO KANBAN */
@@ -5497,7 +6034,7 @@ export default function PedidosPage() {
             position: 'relative'
           }}
         >
-          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSearchOrder || filterShipping) && filteredOrderItems.length === 0 && (
+          {(filterCustomer || filterSeller || filterContaAzulStatus || filterPedidosRelease || filterStage || filterSearchOrder || filterShipping) && filteredOrderItems.length === 0 && !isSearchingHistorical && (
             <div style={{
               position: 'absolute',
               top: '40%',
@@ -5530,16 +6067,29 @@ export default function PedidosPage() {
               } as any);
 
             }
+            const hasNonStageFilterActive = Boolean(
+              filterCustomer ||
+              filterSeller ||
+              filterContaAzulStatus ||
+              filterPedidosRelease ||
+              filterSearchOrder ||
+              filterShipping
+            );
+            const hasAnyFilterActive = Boolean(hasNonStageFilterActive || filterStage);
+
             return columns.map((stage) => {
               const isVirtual = stage.isVirtual;
               const originalIdx = stage.originalIdx;
+              const isHistCol = !isVirtual && isHistoricalTerminalStage(stage);
+              const stagePag = isHistCol ? historicalPagination[stage.id] : undefined;
+
               const stageItemsRaw = isVirtual
                 ? filteredOrderItems.filter(item => checkIsDelayed(item, stages))
                 : filteredOrderItems.filter(item =>
                   item.stage_id === stage.id || (!item.stage_id && originalIdx === 0)
                 );
 
-              const sortDir = columnSortDirs[stage.id] || 'asc';
+              const effectiveSortDir = columnSortDirs[stage.id] || (isHistCol ? 'desc' : 'asc');
               const isFirstColumn = originalIdx === 0;
 
               const getItemExpeditionTimestamp = (item: any): number => {
@@ -5563,6 +6113,17 @@ export default function PedidosPage() {
               };
 
               const stageItems = [...stageItemsRaw].sort((a, b) => {
+                if (isHistCol) {
+                  const aUpd = new Date(a.updated_at || a.created_at || 0).getTime();
+                  const bUpd = new Date(b.updated_at || b.created_at || 0).getTime();
+                  if (aUpd !== bUpd) {
+                    return effectiveSortDir === 'desc' ? bUpd - aUpd : aUpd - bUpd;
+                  }
+                  return effectiveSortDir === 'desc'
+                    ? String(b.id || '').localeCompare(String(a.id || ''))
+                    : String(a.id || '').localeCompare(String(b.id || ''));
+                }
+
                 const aExpTime = getItemExpeditionTimestamp(a);
                 const bExpTime = getItemExpeditionTimestamp(b);
                 const aAprovado = (a.order?.conta_azul_status || '').toLowerCase() === 'aprovado';
@@ -5589,7 +6150,7 @@ export default function PedidosPage() {
 
                 // Ordenação primária pela Data de Expedição
                 if (aExpTime && bExpTime) {
-                  return sortDir === 'asc' ? aExpTime - bExpTime : bExpTime - aExpTime;
+                  return effectiveSortDir === 'asc' ? aExpTime - bExpTime : bExpTime - aExpTime;
                 }
                 if (aExpTime && !bExpTime) return -1;
                 if (!aExpTime && bExpTime) return 1;
@@ -5597,10 +6158,14 @@ export default function PedidosPage() {
                 // Fallback por data do pedido
                 const aDate = new Date(a.order?.order_date || 0).getTime();
                 const bDate = new Date(b.order?.order_date || 0).getTime();
-                return sortDir === 'asc' ? aDate - bDate : bDate - aDate;
+                return effectiveSortDir === 'asc' ? aDate - bDate : bDate - aDate;
               });
 
-              const isEmpty = stageItems.length === 0;
+              const isEmpty = stageItems.length === 0 && !(isHistCol && stagePag?.loadingMore);
+              const headerBadgeCount =
+                isHistCol && !hasAnyFilterActive && typeof stagePag?.totalCount === 'number'
+                  ? Math.max(stagePag.totalCount, stageItems.length)
+                  : stageItems.length;
 
               return (
                 <div
@@ -5652,17 +6217,25 @@ export default function PedidosPage() {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                         <span className={`badge ${isVirtual ? 'badge-danger' : 'badge-secondary'}`} style={{ fontSize: '0.65rem', padding: '1px 5px', fontWeight: 600 }}>
-                          {stageItems.length}
+                          {headerBadgeCount}
                         </span>
                         {/* Sort toggle button */}
                         {!isVirtual && (
                           <button
-                            title={columnSortDirs[stage.id] === 'desc' ? 'Data de expedição: Decrescente (Clique para Crescente)' : 'Data de expedição: Crescente (Clique para Decrescente)'}
+                            title={
+                              isHistCol
+                                ? (effectiveSortDir === 'desc'
+                                  ? 'Ordenação: Concluídos mais recentes primeiro (Clique para inverter)'
+                                  : 'Ordenação: Concluídos mais antigos primeiro (Clique para inverter)')
+                                : (effectiveSortDir === 'desc'
+                                  ? 'Data de expedição: Decrescente (Clique para Crescente)'
+                                  : 'Data de expedição: Crescente (Clique para Decrescente)')
+                            }
                             onClick={(e) => {
                               e.stopPropagation();
                               setColumnSortDirs(prev => ({
                                 ...prev,
-                                [stage.id]: prev[stage.id] === 'desc' ? 'asc' : 'desc'
+                                [stage.id]: (prev[stage.id] || (isHistCol ? 'desc' : 'asc')) === 'desc' ? 'asc' : 'desc'
                               }));
                             }}
                             style={{
@@ -5676,7 +6249,7 @@ export default function PedidosPage() {
                             onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
                             onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
                           >
-                            {columnSortDirs[stage.id] === 'desc' ? '↓' : '↑'}
+                            {effectiveSortDir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
                           </button>
                         )}
                       </div>
@@ -5760,9 +6333,11 @@ export default function PedidosPage() {
                             Encaixar nesta etapa
                           </div>
                         )}
-                        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', padding: '1.5rem 0', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
-                          Vazio
-                        </div>
+                        {!(isHistCol && stagePag?.loadingMore) && (
+                          <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', padding: '1.5rem 0', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                            Vazio
+                          </div>
+                        )}
                       </>
                     ) : (
                       stageItems.map((item, idx) => {
@@ -6815,6 +7390,35 @@ export default function PedidosPage() {
                         );
                       })
                     )}
+
+                    {isHistCol && !hasNonStageFilterActive && (
+                      <StageInfiniteScrollSentinel
+                        stageId={stage.id}
+                        stageColor={stage.color || 'var(--primary)'}
+                        hasMore={Boolean(stagePag?.hasMore)}
+                        loadingMore={Boolean(stagePag?.loadingMore)}
+                        onLoadMore={loadMoreHistoricalStage}
+                      />
+                    )}
+
+                    {isHistCol && hasNonStageFilterActive && Boolean(stagePag?.hasMore) && (
+                      <button
+                        type="button"
+                        onClick={() => loadMoreHistoricalStage(stage.id)}
+                        disabled={Boolean(stagePag?.loadingMore)}
+                        className="btn btn-secondary"
+                        style={{
+                          width: '100%',
+                          padding: '0.35rem 0.5rem',
+                          fontSize: '0.68rem',
+                          fontWeight: 600,
+                          justifyContent: 'center',
+                          marginTop: '0.15rem'
+                        }}
+                      >
+                        {stagePag?.loadingMore ? 'Carregando histórico...' : 'Carregar anteriores'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Rodapé da Coluna (Fixado na base da coluna, fora da rolagem de cards) */}
@@ -6835,7 +7439,9 @@ export default function PedidosPage() {
                     marginTop: 'auto'
                   }}>
                     <span style={{ fontWeight: 600 }}>
-                      {stageItems.length} {stageItems.length === 1 ? 'item' : 'itens'}
+                      {isHistCol && !hasAnyFilterActive && typeof stagePag?.totalCount === 'number' && stagePag.totalCount > stageItems.length
+                        ? `${stageItems.length} de ${stagePag.totalCount} itens`
+                        : `${stageItems.length} ${stageItems.length === 1 ? 'item' : 'itens'}`}
                     </span>
                     <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: stage.color }} />
                   </div>
@@ -7109,9 +7715,51 @@ export default function PedidosPage() {
                     );
                   })
                 )}
+                {Object.values(historicalPagination).some(p => p.loadingMore) && (
+                  <OrdersListInlineMoreSkeleton rows={3} />
+                )}
               </tbody>
             </table>
           </div>
+          {(() => {
+            const hasNonStageFilter = Boolean(
+              filterCustomer ||
+              filterSeller ||
+              filterContaAzulStatus ||
+              filterPedidosRelease ||
+              filterSearchOrder ||
+              filterShipping
+            );
+            const listAllowsHistorical = !filterStage || isHistoricalTerminalStage({ name: filterStage });
+            const hasAnyMore = listAllowsHistorical && Object.values(historicalPagination).some(p => p.hasMore);
+            const isAnyLoadingMore = Object.values(historicalPagination).some(p => p.loadingMore);
+
+            if (!hasAnyMore && !isAnyLoadingMore) return null;
+
+            if (hasNonStageFilter) {
+              return (
+                <div style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={loadMoreHistoricalForList}
+                    disabled={isAnyLoadingMore}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.9rem', fontWeight: 600 }}
+                  >
+                    {isAnyLoadingMore ? 'Carregando histórico...' : 'Carregar mais itens do histórico'}
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <ListInfiniteScrollSentinel
+                hasMore={hasAnyMore}
+                loadingMore={isAnyLoadingMore}
+                onLoadMore={loadMoreHistoricalForList}
+              />
+            );
+          })()}
         </div>
       )}
 

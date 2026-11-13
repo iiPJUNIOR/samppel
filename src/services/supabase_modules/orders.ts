@@ -228,6 +228,286 @@ export async function getOrderItems(orderId?: string, tenantId = 'd3b07384-d113-
   return { data, error };
 }
 
+const ORDER_ITEM_SLIM_FIELDS = [
+  'id', 'tenant_id', 'order_id', 'product_id', 'item_type', 'name', 'item_index',
+  'friendly_id', 'measure', 'print_run', 'boxes_count', 'packaging_type',
+  'over_short_quantity', 'status', 'production_sector', 'stage_id', 'physical_location',
+  'machine_id', 'handling_team_id', 'notes', 'unit_price', 'total_price',
+  'shortage_quantity', 'courtesy_quantity', 'expedition_notes',
+  'adjustment_resolved', 'resolved_by_item_id', 'applied_adjustment_id',
+  'adjusted_quantity_math', 'adjusted_production_quantity', 'quantity_per_box', 'last_operator_id',
+  'split_from_item_id', 'split_at', 'split_by_user_id',
+  'created_at', 'updated_at'
+].join(', ');
+
+const ORDER_HYDRATE_SELECT = [
+  'id', 'tenant_id', 'order_number', 'pv_number', 'op_number', 'art_name', 'seller_name',
+  'measure', 'print_run', 'boxes_count', 'packaging_type', 'freight_value', 'shipping_type',
+  'status', 'production_sector', 'physical_location', 'notes', 'internal_notes', 'order_date',
+  'installments_total', 'installments_paid', 'first_payment_date', 'production_start_date', 'over_short_quantity',
+  'package_weight', 'package_length', 'package_width', 'package_height', 'quantity_per_box',
+  'invoice_number', 'pickup_number', 'freight_quotation', 'scheduled_date', 'carrier_name',
+  'conta_azul_status', 'conta_azul_id', 'customer_id', 'product_id', 'stage_id', 'created_at', 'updated_at',
+  'customer:customers(id, name, document, phone, email, address)'
+].join(', ');
+
+async function fetchAllPaginatedRows(
+  buildRangeQuery: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>
+): Promise<{ data: any[]; error: any }> {
+  const PAGE_SIZE = 800;
+  const allRows: any[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await buildRangeQuery(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      return { data: allRows, error };
+    }
+    const batch = Array.isArray(data) ? data : [];
+    allRows.push(...batch);
+    if (batch.length < PAGE_SIZE) {
+      break;
+    }
+    offset += PAGE_SIZE;
+  }
+
+  return { data: allRows, error: null };
+}
+
+export async function getOrdersByIdsBulk(
+  orderIds: string[],
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+) {
+  const uniqueIds = Array.from(new Set((orderIds || []).filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return { data: [] as any[], error: null };
+  }
+
+  const CHUNK_SIZE = 120;
+  const chunks: string[][] = [];
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+    chunks.push(uniqueIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  const responses = await Promise.all(
+    chunks.map(chunk =>
+      getDbClient()
+        .from('orders')
+        .select(ORDER_HYDRATE_SELECT)
+        .eq('tenant_id', tenantId)
+        .in('id', chunk)
+    )
+  );
+
+  const merged: any[] = [];
+  let firstError: any = null;
+  for (const res of responses) {
+    if (res.error && !firstError) firstError = res.error;
+    if (Array.isArray(res.data)) merged.push(...res.data);
+  }
+
+  return { data: merged, error: firstError };
+}
+
+export async function getActiveKanbanOrderItems(
+  activeStageIds: string[],
+  historicalStageIds: string[] = [],
+  tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0'
+) {
+  const [nullStageRes, activeStagesRes] = await Promise.all([
+    fetchAllPaginatedRows((from, to) =>
+      getDbClient()
+        .from('order_items')
+        .select(ORDER_ITEM_SLIM_FIELDS)
+        .eq('tenant_id', tenantId)
+        .is('stage_id', null)
+        .order('updated_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to)
+    ),
+    activeStageIds.length > 0
+      ? fetchAllPaginatedRows((from, to) =>
+          getDbClient()
+            .from('order_items')
+            .select(ORDER_ITEM_SLIM_FIELDS)
+            .eq('tenant_id', tenantId)
+            .in('stage_id', activeStageIds)
+            .order('updated_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to)
+        )
+      : Promise.resolve({ data: [] as any[], error: null })
+  ]);
+
+  const itemMap = new Map<string, any>();
+  for (const row of nullStageRes.data) itemMap.set(row.id, row);
+  for (const row of activeStagesRes.data) itemMap.set(row.id, row);
+
+  // Garante integridade de Pedidos Conjuntos (irmaos que ja foram para Concluido/CANCELADOS)
+  const activeOrderIds = Array.from(
+    new Set(Array.from(itemMap.values()).map(i => i.order_id).filter(Boolean))
+  );
+
+  if (activeOrderIds.length > 0 && historicalStageIds.length > 0) {
+    const CHUNK_SIZE = 120;
+    const chunks: string[][] = [];
+    for (let i = 0; i < activeOrderIds.length; i += CHUNK_SIZE) {
+      chunks.push(activeOrderIds.slice(i, i + CHUNK_SIZE));
+    }
+
+    const siblingResponses = await Promise.all(
+      chunks.map(chunk =>
+        getDbClient()
+          .from('order_items')
+          .select(ORDER_ITEM_SLIM_FIELDS)
+          .eq('tenant_id', tenantId)
+          .in('order_id', chunk)
+          .in('stage_id', historicalStageIds)
+      )
+    );
+
+    for (const res of siblingResponses) {
+      if (Array.isArray(res.data)) {
+        for (const sib of res.data as any[]) {
+          if (!itemMap.has(sib.id)) {
+            itemMap.set(sib.id, sib);
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    data: Array.from(itemMap.values()),
+    error: nullStageRes.error || activeStagesRes.error || null
+  };
+}
+
+export async function getHistoricalStageItemsPage(params: {
+  stageId: string;
+  tenantId?: string;
+  offset?: number;
+  limit?: number;
+  includeExactCount?: boolean;
+}) {
+  const {
+    stageId,
+    tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+    offset = 0,
+    limit = 30,
+    includeExactCount = false
+  } = params;
+
+  const { data, count, error } = await getDbClient()
+    .from('order_items')
+    .select(ORDER_ITEM_SLIM_FIELDS, includeExactCount ? { count: 'exact' } : undefined)
+    .eq('tenant_id', tenantId)
+    .eq('stage_id', stageId)
+    .order('updated_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  const rows: any[] = Array.isArray(data) ? (data as any[]) : [];
+  const totalCount = typeof count === 'number' ? count : null;
+  const hasMore = totalCount !== null ? offset + rows.length < totalCount : rows.length === limit;
+
+  return {
+    data: rows,
+    totalCount,
+    hasMore,
+    error
+  };
+}
+
+export async function searchHistoricalOrderItemsServer(params: {
+  term: string;
+  historicalStageIds: string[];
+  tenantId?: string;
+  limit?: number;
+}) {
+  const {
+    term,
+    historicalStageIds,
+    tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0',
+    limit = 45
+  } = params;
+
+  const clean = (term || '').trim().replace(/[,()"'\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean || clean.length < 2 || historicalStageIds.length === 0) {
+    return { data: [] as any[], error: null };
+  }
+
+  const numericOnly = clean.replace(/^pv[-\s]*/i, '').replace(/\D/g, '');
+
+  const [custRes, directItemsRes] = await Promise.all([
+    getDbClient()
+      .from('customers')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .ilike('name', `%${clean}%`)
+      .limit(35),
+    getDbClient()
+      .from('order_items')
+      .select(ORDER_ITEM_SLIM_FIELDS)
+      .eq('tenant_id', tenantId)
+      .in('stage_id', historicalStageIds)
+      .or(
+        `friendly_id.ilike.%${clean}%,name.ilike.%${clean}%,measure.ilike.%${clean}%,notes.ilike.%${clean}%`
+      )
+      .order('updated_at', { ascending: false })
+      .limit(limit)
+  ]);
+
+  const matchingCustomerIds = (custRes.data || []).map((c: any) => c.id).filter(Boolean);
+
+  const orderOrClauses = [
+    `pv_number.ilike.%${clean}%`,
+    `op_number.ilike.%${clean}%`,
+    `art_name.ilike.%${clean}%`,
+    `seller_name.ilike.%${clean}%`,
+    `carrier_name.ilike.%${clean}%`
+  ];
+  if (numericOnly && numericOnly.length >= 1 && numericOnly.length <= 9) {
+    orderOrClauses.push(`order_number.eq.${numericOnly}`);
+    orderOrClauses.push(`pv_number.ilike.%${numericOnly}%`);
+  }
+  if (matchingCustomerIds.length > 0) {
+    orderOrClauses.push(`customer_id.in.(${matchingCustomerIds.join(',')})`);
+  }
+
+  const ordersRes = await getDbClient()
+    .from('orders')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .or(orderOrClauses.join(','))
+    .order('created_at', { ascending: false })
+    .limit(60);
+
+  const matchingOrderIds = (ordersRes.data || []).map((o: any) => o.id).filter(Boolean);
+
+  let itemsByOrder: any[] = [];
+  if (matchingOrderIds.length > 0) {
+    const byOrdRes = await getDbClient()
+      .from('order_items')
+      .select(ORDER_ITEM_SLIM_FIELDS)
+      .eq('tenant_id', tenantId)
+      .in('stage_id', historicalStageIds)
+      .in('order_id', matchingOrderIds)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    itemsByOrder = (byOrdRes.data as any[]) || [];
+  }
+
+  const mergedMap = new Map<string, any>();
+  for (const row of (directItemsRes.data as any[]) || []) mergedMap.set(row.id, row);
+  for (const row of itemsByOrder) mergedMap.set(row.id, row);
+
+  return {
+    data: Array.from(mergedMap.values()),
+    error: directItemsRes.error || null
+  };
+}
+
 
 export async function createOrderItem(item: Omit<OrderItem, 'id' | 'item_index' | 'friendly_id' | 'created_at' | 'updated_at'>) {
   const tenantId = item.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
@@ -1953,31 +2233,41 @@ export async function getOrderItemHandlingTeams(orderItemId: string) {
   return { data: cachedList, error: null };
 }
 
-export async function getOrderItemHandlingTeamsBulk(orderItemIds: string[]) {
+export async function getOrderItemHandlingTeamsBulk(orderItemIds: string[], tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   const currentCache = loadHandlingCache();
 
   if (!orderItemIds || orderItemIds.length === 0) {
     return { data: currentCache, error: null };
   }
 
-  try {
-    const { data, error } = await getDbClient()
-      .from('order_item_handling_teams')
-      .select('*, team:handling_teams(*)')
-      .in('order_item_id', orderItemIds);
+  const idSet = new Set(orderItemIds);
 
-    if (data && data.length > 0) {
+  try {
+    let query = getDbClient()
+      .from('order_item_handling_teams')
+      .select('*, team:handling_teams(*)');
+
+    if (orderItemIds.length <= 50) {
+      query = query.in('order_item_id', orderItemIds);
+    } else {
+      query = query.eq('tenant_id', tenantId);
+    }
+
+    const { data, error } = await query;
+
+    if (!error && data) {
+      const filteredData = data.filter(d => idSet.has(d.order_item_id));
       const cacheMap = new Map(currentCache.map(c => [c.id, c]));
-      data.forEach(d => cacheMap.set(d.id, d));
+      filteredData.forEach(d => cacheMap.set(d.id, d));
       const updatedList = Array.from(cacheMap.values());
       saveHandlingCache(updatedList);
-      return { data, error: null };
+      return { data: filteredData, error: null };
     }
   } catch (err) {
     console.warn('Falha na consulta remota bulk de equipes de manuseio:', err);
   }
 
-  const cachedList = currentCache.filter(t => orderItemIds.includes(t.order_item_id));
+  const cachedList = currentCache.filter(t => idSet.has(t.order_item_id));
   return { data: cachedList, error: null };
 }
 
@@ -2346,18 +2636,27 @@ export async function getOrderItemPackaging(orderItemId: string) {
   return { data, error };
 }
 
-export async function getOrderItemPackagingBulk(orderItemIds: string[]) {
+export async function getOrderItemPackagingBulk(orderItemIds: string[], tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {
   if (!orderItemIds || orderItemIds.length === 0) {
     return { data: [], error: null };
   }
 
-  try {
-    const { data, error } = await getDbClient()
-      .from('order_item_packaging')
-      .select('order_item_id')
-      .in('order_item_id', orderItemIds);
+  const idSet = new Set(orderItemIds);
 
-    return { data: data || [], error };
+  try {
+    let query = getDbClient()
+      .from('order_item_packaging')
+      .select('order_item_id');
+
+    if (orderItemIds.length <= 50) {
+      query = query.in('order_item_id', orderItemIds);
+    } else {
+      query = query.eq('tenant_id', tenantId);
+    }
+
+    const { data, error } = await query;
+
+    return { data: (data || []).filter((d: any) => idSet.has(d.order_item_id)), error };
   } catch (err: any) {
     return { data: [], error: err };
   }
@@ -2886,15 +3185,22 @@ export async function getOrderItemShortagesBulk(orderItemIds: string[], tenantId
     return { data: [], error: null };
   }
 
+  const idSet = new Set(orderItemIds);
+
   try {
-    const { data, error } = await getDbClient()
+    let query = getDbClient()
       .from('order_item_shortages')
       .select('*')
-      .in('order_item_id', orderItemIds)
       .eq('tenant_id', tenantId);
 
+    if (orderItemIds.length <= 50) {
+      query = query.in('order_item_id', orderItemIds);
+    }
+
+    const { data, error } = await query;
+
     if (!error && data) {
-      return { data, error: null };
+      return { data: data.filter((s: OrderItemShortage) => idSet.has(s.order_item_id)), error: null };
     }
   } catch (err) {}
 
@@ -2903,7 +3209,7 @@ export async function getOrderItemShortagesBulk(orderItemIds: string[], tenantId
     const stored = typeof window !== 'undefined' ? localStorage.getItem('samppel_shortages') : null;
     if (stored) localData = JSON.parse(stored);
   } catch (e) {}
-  return { data: localData.filter(s => orderItemIds.includes(s.order_item_id)), error: null };
+  return { data: localData.filter(s => idSet.has(s.order_item_id)), error: null };
 }
 
 export async function saveOrderItemShortage(shortage: Partial<OrderItemShortage>, tenantId = 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0') {

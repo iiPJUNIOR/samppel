@@ -1115,3 +1115,57 @@ input[type="number"] {
 .kanban-card-overdue-pulse:hover {
   animation-play-state: paused;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SAMPPEL SHIMMER SKELETON SYSTEM (KANBAN & LIST VIEW)
+   ═══════════════════════════════════════════════════════════════ */
+:root, [data-theme="light"] {
+  --skeleton-base: #E2E8F0;
+  --skeleton-mid: #F1F5F9;
+  --skeleton-highlight: #FFFFFF;
+  --skeleton-card-bg: #FFFFFF;
+  --skeleton-col-bg: #F8FAFC;
+}
+
+[data-theme="dark"] {
+  --skeleton-base: #1E293B;
+  --skeleton-mid: #273549;
+  --skeleton-highlight: #334155;
+  --skeleton-card-bg: #1E293B;
+  --skeleton-col-bg: #0F172A;
+}
+
+@keyframes samppelShimmerWave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.samppel-skeleton-block {
+  background: linear-gradient(
+    105deg,
+    var(--skeleton-base) 20%,
+    var(--skeleton-mid) 38%,
+    var(--skeleton-highlight) 50%,
+    var(--skeleton-mid) 62%,
+    var(--skeleton-base) 80%
+  );
+  background-size: 220% 100%;
+  animation: samppelShimmerWave 1.65s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+
+.samppel-skeleton-pill {
+  border-radius: 9999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .samppel-skeleton-block {
+    animation: none;
+    background: var(--skeleton-base);
+  }
+}

@@ -89,6 +89,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Registra listener para mudanças de autenticação (dispara INITIAL_SESSION automaticamente)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
+        // Evita reconsultar perfil no banco a cada renovação automática de token em segundo plano
+        if (event === 'TOKEN_REFRESHED') {
+          const cached = getCachedProfile();
+          if (cached && cached.id === session.user.id) {
+            setIsLoading(false);
+            isLoadingRef.current = false;
+            return;
+          }
+        }
         await fetchProfile(session.user.id);
       } else {
         saveCachedProfile(null);
@@ -159,7 +168,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } as UserProfile;
 
         saveCachedProfile(profile);
-        setUser(profile);
+        setUser(prev => {
+          if (prev && JSON.stringify(prev) === JSON.stringify(profile)) {
+            return prev;
+          }
+          return profile;
+        });
 
         if (profile.force_password_change && typeof window !== 'undefined') {
           const currentPath = window.location.pathname;
@@ -171,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Verifica se há perfil em cache local para o mesmo usuário antes do fallback genérico
         const cached = getCachedProfile();
         if (cached && cached.id === userId) {
-          setUser(cached);
+          setUser(prev => (prev && prev.id === cached.id ? prev : cached));
         } else {
           // Se a busca falhou e não há cache, cria um objeto mínimo baseado na sessão do auth (papel padrão: Administrador)
           const { data: sessionData } = await supabase!.auth.getSession();
