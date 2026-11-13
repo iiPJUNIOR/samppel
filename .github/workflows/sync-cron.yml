@@ -1,9 +1,9 @@
-name: Sincronizacao Agendada Conta Azul (15 Minutos)
+name: Sincronizacao Agendada Conta Azul (Janela Comercial)
 
 on:
   schedule:
-    # Executa a cada 15 minutos (00, 15, 30, 45 de cada hora)
-    - cron: '*/15 * * * *'
+    # Executa a cada 20 minutos na janela comercial Seg-Sab das 07:00 as 20:59 BRT (10:00-23:59 UTC)
+    - cron: '*/20 10-23 * * 1-6'
   workflow_dispatch: # Permite disparo manual direto pela aba Actions do GitHub
 
 jobs:

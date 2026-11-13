@@ -6,7 +6,7 @@ import {
   getFinancialTransactions, 
   createFinancialTransaction, 
   reconcileTransaction,
-  getOrders
+  getDbClient
 } from '@/services/supabase';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
 import { 
@@ -28,6 +28,7 @@ export default function FinanceiroPage() {
   // Data States
   const [transactions, setTransactions] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoadedForModal, setOrdersLoadedForModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Filters State
@@ -47,12 +48,21 @@ export default function FinanceiroPage() {
   const fetchFinanceData = async () => {
     setLoading(true);
     try {
-      const [financeRes, ordersRes] = await Promise.all([
-        getFinancialTransactions(),
-        getOrders()
-      ]);
-      setTransactions(financeRes.data || []);
-      setOrders(ordersRes.data || []);
+      const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+      const financeRes = await getFinancialTransactions(tenantId);
+      const txList = financeRes.data || [];
+      setTransactions(txList);
+
+      // Reaproveita os pedidos ja aninhados nas transacoes sem varrer a tabela orders inteira no carregamento
+      const embeddedOrdersMap = new Map<string, any>();
+      for (const tx of txList) {
+        if (tx?.order?.id) {
+          embeddedOrdersMap.set(tx.order.id, tx.order);
+        }
+      }
+      if (!ordersLoadedForModal && embeddedOrdersMap.size > 0) {
+        setOrders(Array.from(embeddedOrdersMap.values()));
+      }
     } catch (e) {
       console.error('Error fetching finance page data:', e);
     } finally {
@@ -81,13 +91,31 @@ export default function FinanceiroPage() {
     );
   }
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = async () => {
     setFormType('RECEITA');
     setFormAmount(0);
     setFormDescription('');
     setFormDueDate(new Date().toISOString().split('T')[0]);
     setFormOrderId('');
     setIsModalOpen(true);
+
+    if (!ordersLoadedForModal) {
+      try {
+        const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
+        const { data } = await getDbClient()
+          .from('orders')
+          .select('id, order_number, pv_number, customer:customers(name)')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .limit(300);
+        if (Array.isArray(data)) {
+          setOrders(data);
+          setOrdersLoadedForModal(true);
+        }
+      } catch (err) {
+        console.error('Erro ao carregar lista enxuta de pedidos para lancamento:', err);
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

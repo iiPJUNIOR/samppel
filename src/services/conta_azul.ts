@@ -1227,27 +1227,17 @@ export class ContaAzulService {
         };
 
         let orderId = '';
+        let orderWasUpdated = false;
 
         const { data: existingOrder } = await dbClient
           .from('orders')
-          .select('id')
+          .select('id, customer_id, product_id, pv_number, op_number, art_name, seller_name, measure, print_run, boxes_count, packaging_type, freight_value, shipping_type, installments_total, installments_paid, first_payment_date, status, production_sector, notes, order_date, conta_azul_status')
           .eq('tenant_id', this.tenantId)
           .eq('conta_azul_id', saleSummary.id)
           .maybeSingle();
 
         if (existingOrder) {
-          const { error: updateErr } = await dbClient
-            .from('orders')
-            .update(orderPayload)
-            .eq('id', existingOrder.id);
-
-          if (updateErr) {
-            console.error('Erro ao atualizar pedido:', updateErr);
-            continue;
-          } else {
-            updated++;
-            orderId = existingOrder.id;
-          }
+          orderId = existingOrder.id;
         } else {
           const { data: newOrder, error: insertErr } = await dbClient
             .from('orders')
@@ -1264,122 +1254,207 @@ export class ContaAzulService {
           }
         }
 
-        // Sincronizar parcelas financeiras para o local
+        let resolvedInstallmentsPaid = installmentsPaid;
+        let resolvedFirstPaymentDate: string | null = firstPaymentDate;
+        const isCancelledInCa = contaAzulStatus === 'Cancelado' || contaAzulStatus === 'Recusado';
+
+        if (existingOrder?.first_payment_date && !resolvedFirstPaymentDate && !isCancelledInCa) {
+          // Preserva liberacao financeira ja registrada localmente (BLIND-04)
+          resolvedFirstPaymentDate = existingOrder.first_payment_date;
+        }
+
+        // Sincronizar parcelas financeiras para o local (com diff para evitar DELETE+INSERT redundante no cron)
         if (installments && installments.length > 0) {
-          // Primeiro removemos as parcelas financeiras locais antigas desse pedido
-          await dbClient
-            .from('financial_transactions')
-            .delete()
-            .eq('order_id', orderId);
+          const { data: existingFinRows } = existingOrder
+            ? await dbClient
+                .from('financial_transactions')
+                .select('type, amount, status, description, due_date, payment_date, notes')
+                .eq('order_id', orderId)
+            : { data: [] as any[] };
 
-          let totalPaidInstallments = 0;
-          let paymentReleasedDate: string | null = null;
+          const alreadyAllReconciled = Boolean(
+            existingOrder &&
+            !isCancelledInCa &&
+            Array.isArray(existingFinRows) &&
+            existingFinRows.length === installments.length &&
+            existingFinRows.every((r: any) => r.status === 'CONCILIADO') &&
+            Number(existingOrder.installments_paid || 0) >= installments.length &&
+            Boolean(existingOrder.first_payment_date)
+          );
 
-          // E inserimos as novas parcelas
-          const transactionsPayload = [];
-          
-          for (let i = 0; i < installments.length; i++) {
-            const inst = installments[i];
-            const installmentNumber = i + 1;
-            // Status real da parcela, iniciamos como PENDENTE
-            let realInstStatus = 'PENDENTE';
-            let paymentDateStr: string | null = null;
-            let instNotes: string | null = null;
-            
+          if (alreadyAllReconciled && existingOrder) {
+            resolvedInstallmentsPaid = Number(existingOrder.installments_paid || installments.length);
+            resolvedFirstPaymentDate = existingOrder.first_payment_date;
+          } else {
+            let totalPaidInstallments = 0;
+            let paymentReleasedDate: string | null = null;
+            const transactionsPayload: any[] = [];
 
-            if (inst.id) {
-              try {
-                onProgress?.(`PV-${saleSummary.numero || currentIdx}: Sincronizando parcela ${installmentNumber}...`, pct);
-                // Puxamos o status REAL da parcela pela API financeira do Conta Azul
-                const instRes = await fetch(`${CONTA_AZUL_API_URL}/v1/financeiro/eventos-financeiros/parcelas/${inst.id}`, {
-                  headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (instRes.ok) {
-                  const instDetail = await instRes.json();
-                  // Usar o status real retornado: PENDENTE, ATRASADO, BAIXADO, QUITADO, CONCILIADO
-                  const apiStatus = (instDetail.status || instDetail.situacao || '').toUpperCase();
-                  if (apiStatus) realInstStatus = apiStatus;
-                  
-                  const isPaid = apiStatus === 'QUITADO' || apiStatus === 'BAIXADO' || apiStatus === 'CONCILIADO';
-                  if (isPaid) {
-                    totalPaidInstallments++;
-                    paymentDateStr = instDetail.baixas?.[0]?.data_pagamento || instDetail.data_vencimento || null;
-                    if (!paymentReleasedDate || (paymentDateStr && paymentDateStr < paymentReleasedDate)) {
-                      paymentReleasedDate = paymentDateStr;
+            for (let i = 0; i < installments.length; i++) {
+              const inst = installments[i];
+              const installmentNumber = i + 1;
+              let realInstStatus = 'PENDENTE';
+              let paymentDateStr: string | null = null;
+              let instNotes: string | null = null;
+
+              if (inst.id) {
+                try {
+                  onProgress?.(`PV-${saleSummary.numero || currentIdx}: Sincronizando parcela ${installmentNumber}...`, pct);
+                  const instRes = await fetch(`${CONTA_AZUL_API_URL}/v1/financeiro/eventos-financeiros/parcelas/${inst.id}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                  });
+                  if (instRes.ok) {
+                    const instDetail = await instRes.json();
+                    const apiStatus = (instDetail.status || instDetail.situacao || '').toUpperCase();
+                    if (apiStatus) realInstStatus = apiStatus;
+
+                    const isPaid = apiStatus === 'QUITADO' || apiStatus === 'BAIXADO' || apiStatus === 'CONCILIADO';
+                    if (isPaid) {
+                      totalPaidInstallments++;
+                      paymentDateStr = instDetail.baixas?.[0]?.data_pagamento || instDetail.data_vencimento || null;
+                      if (!paymentReleasedDate || (paymentDateStr && paymentDateStr < paymentReleasedDate)) {
+                        paymentReleasedDate = paymentDateStr;
+                      }
+                    }
+
+                    if (instDetail.baixas && instDetail.baixas.length > 0) {
+                      instNotes = instDetail.baixas
+                        .map((b: any) => b.observacao?.trim())
+                        .filter(Boolean)
+                        .join('; ');
                     }
                   }
-                  
-                  // Extrair observação da baixa
-                  if (instDetail.baixas && instDetail.baixas.length > 0) {
-                    instNotes = instDetail.baixas
-                      .map((b: any) => b.observacao?.trim())
-                      .filter(Boolean)
-                      .join('; ');
-                  }
+                } catch (err) {
+                  console.error(`Erro ao buscar detalhes da parcela ${inst.id} na API:`, err);
                 }
-              } catch (err) {
-                console.error(`Erro ao buscar detalhes da parcela ${inst.id} na API:`, err);
+              }
+
+              if (realInstStatus === 'PENDENTE' && inst.situacao) {
+                const fallbackStatus = (inst.situacao || '').toUpperCase();
+                if (fallbackStatus) realInstStatus = fallbackStatus;
+              }
+
+              const isInstPaidFallback = localStatus === 'Pago' || isPaidAVista;
+              if (realInstStatus === 'PENDENTE' && isInstPaidFallback) {
+                realInstStatus = 'QUITADO';
+                totalPaidInstallments++;
+                paymentDateStr = inst.data_vencimento || null;
+                if (!paymentReleasedDate) paymentReleasedDate = paymentDateStr;
+              }
+
+              const dbStatus = (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
+                ? 'CONCILIADO'
+                : (realInstStatus === 'CANCELADO' ? 'CANCELADO' : 'PENDENTE');
+
+              transactionsPayload.push({
+                tenant_id: this.tenantId,
+                order_id: orderId,
+                type: 'RECEITA',
+                amount: inst.valor || inst.value || 0,
+                status: dbStatus,
+                description: `Parcela ${installmentNumber}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
+                due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
+                payment_date: (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
+                  ? (paymentDateStr || inst.data_vencimento || new Date().toISOString().split('T')[0])
+                  : null,
+                notes: instNotes
+              });
+            }
+
+            if (totalPaidInstallments > 0) {
+              resolvedInstallmentsPaid = totalPaidInstallments;
+              resolvedFirstPaymentDate = paymentReleasedDate || installments[0].data_vencimento || resolvedFirstPaymentDate;
+            }
+
+            const buildFinSig = (rows: any[]) =>
+              [...rows]
+                .map(r => [
+                  r.type || 'RECEITA',
+                  Number(r.amount || 0).toFixed(2),
+                  r.status || '',
+                  r.due_date ? String(r.due_date).slice(0, 10) : '',
+                  r.payment_date ? String(r.payment_date).slice(0, 10) : '',
+                  r.description || '',
+                  r.notes || ''
+                ].join('|'))
+                .sort()
+                .join(';;');
+
+            const finChanged = !existingOrder || buildFinSig(transactionsPayload) !== buildFinSig(existingFinRows || []);
+
+            if (finChanged) {
+              if (existingOrder) {
+                await dbClient
+                  .from('financial_transactions')
+                  .delete()
+                  .eq('order_id', orderId);
+              }
+
+              const { error: finInsertErr } = await dbClient
+                .from('financial_transactions')
+                .insert(transactionsPayload);
+
+              if (finInsertErr) {
+                console.error('Erro ao inserir transações financeiras:', finInsertErr);
+              } else if (existingOrder) {
+                orderWasUpdated = true;
               }
             }
-            
-            // Fallback: se não conseguimos o status da API, ler da própria parcela da venda
-            if (realInstStatus === 'PENDENTE' && inst.situacao) {
-              const fallbackStatus = (inst.situacao || '').toUpperCase();
-              if (fallbackStatus) realInstStatus = fallbackStatus;
-            }
-            
-            // Para o fallback de pagamento local (sem API)
-            const isInstPaidFallback = localStatus === 'Pago' || isPaidAVista;
-            if (realInstStatus === 'PENDENTE' && isInstPaidFallback) {
-              realInstStatus = 'QUITADO';
-              totalPaidInstallments++;
-              paymentDateStr = inst.data_vencimento || null;
-              if (!paymentReleasedDate) paymentReleasedDate = paymentDateStr;
-            }
-
-            const dbStatus = (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
-              ? 'CONCILIADO'
-              : (realInstStatus === 'CANCELADO' ? 'CANCELADO' : 'PENDENTE');
-
-            transactionsPayload.push({
-              tenant_id: this.tenantId,
-              order_id: orderId,
-              type: 'RECEITA',
-              amount: inst.valor || inst.value || 0,
-              status: dbStatus,
-              description: `Parcela ${installmentNumber}/${installmentsTotal} - ${inst.forma_pagamento || 'Pix'}`,
-              due_date: inst.data_vencimento || new Date().toISOString().split('T')[0],
-              payment_date: (realInstStatus === 'QUITADO' || realInstStatus === 'BAIXADO' || realInstStatus === 'CONCILIADO')
-                ? (paymentDateStr || inst.data_vencimento || new Date().toISOString().split('T')[0])
-                : null,
-              notes: instNotes
-            });
           }
+        }
 
-          const { error: finInsertErr } = await dbClient
-            .from('financial_transactions')
-            .insert(transactionsPayload);
+        orderPayload.installments_paid = resolvedInstallmentsPaid;
+        orderPayload.first_payment_date = resolvedFirstPaymentDate;
 
-          if (finInsertErr) {
-            console.error('Erro ao inserir transações financeiras:', finInsertErr);
-          }
+        if (existingOrder) {
+          const normDate = (v: any) => (v ? String(v).slice(0, 10) : '');
+          const orderHeaderChanged =
+            (existingOrder.customer_id || null) !== (orderPayload.customer_id || null) ||
+            (existingOrder.product_id || null) !== (orderPayload.product_id || null) ||
+            (existingOrder.pv_number || '') !== (orderPayload.pv_number || '') ||
+            (existingOrder.op_number || null) !== (orderPayload.op_number || null) ||
+            (existingOrder.art_name || '') !== (orderPayload.art_name || '') ||
+            (existingOrder.seller_name || '') !== (orderPayload.seller_name || '') ||
+            (existingOrder.measure || '') !== (orderPayload.measure || '') ||
+            Number(existingOrder.print_run || 0) !== Number(orderPayload.print_run || 0) ||
+            Number(existingOrder.boxes_count || 0) !== Number(orderPayload.boxes_count || 0) ||
+            (existingOrder.packaging_type || '') !== (orderPayload.packaging_type || '') ||
+            Math.abs(Number(existingOrder.freight_value || 0) - Number(orderPayload.freight_value || 0)) > 0.009 ||
+            (existingOrder.shipping_type || null) !== (orderPayload.shipping_type || null) ||
+            Number(existingOrder.installments_total || 0) !== Number(orderPayload.installments_total || 0) ||
+            Number(existingOrder.installments_paid || 0) !== Number(orderPayload.installments_paid || 0) ||
+            normDate(existingOrder.first_payment_date) !== normDate(orderPayload.first_payment_date) ||
+            (existingOrder.status || '') !== (orderPayload.status || '') ||
+            (existingOrder.notes || '') !== (orderPayload.notes || '') ||
+            normDate(existingOrder.order_date) !== normDate(orderPayload.order_date) ||
+            (existingOrder.conta_azul_status || '') !== (orderPayload.conta_azul_status || '');
 
-          // Se tivermos alguma parcela paga, atualizamos o orders correspondente com a data real
-          if (totalPaidInstallments > 0) {
-            await dbClient
+          if (orderHeaderChanged) {
+            const { error: updateErr } = await dbClient
               .from('orders')
-              .update({
-                installments_paid: totalPaidInstallments,
-                first_payment_date: paymentReleasedDate || installments[0].data_vencimento
-              })
-              .eq('id', orderId);
+              .update(orderPayload)
+              .eq('id', existingOrder.id);
+
+            if (updateErr) {
+              console.error('Erro ao atualizar pedido:', updateErr);
+              continue;
+            }
+            orderWasUpdated = true;
           }
+        } else if (resolvedInstallmentsPaid !== installmentsPaid || resolvedFirstPaymentDate !== firstPaymentDate) {
+          await dbClient
+            .from('orders')
+            .update({
+              installments_paid: resolvedInstallmentsPaid,
+              first_payment_date: resolvedFirstPaymentDate
+            })
+            .eq('id', orderId);
         }
 
         // DESDOBRAMENTO: Upsert de itens de pedido (por item_index) preservando progresso do Kanban e embalagens
         const { data: existingLocalItems, error: localItemsError } = await dbClient
           .from('order_items')
-          .select('id, item_index, status, production_sector, over_short_quantity, notes')
+          .select('id, item_index, status, production_sector, over_short_quantity, notes, product_id, item_type, name, measure, print_run, boxes_count, packaging_type, unit_price, total_price')
           .eq('order_id', orderId);
 
         if (localItemsError) {
@@ -1447,14 +1522,30 @@ export class ContaAzulService {
           };
 
           if (localItem) {
-            // Atualiza campos comerciais, preservando status, setor e quantidades locais
-            const { error: itemUpdateErr } = await dbClient
-              .from('order_items')
-              .update(orderItemPayload)
-              .eq('id', localItem.id);
+            const itemChanged =
+              (localItem.product_id || null) !== (orderItemPayload.product_id || null) ||
+              (localItem.item_type || '') !== (orderItemPayload.item_type || '') ||
+              (localItem.name || '') !== (orderItemPayload.name || '') ||
+              (localItem.measure || '') !== (orderItemPayload.measure || '') ||
+              Number(localItem.print_run || 0) !== Number(orderItemPayload.print_run || 0) ||
+              Number(localItem.boxes_count || 0) !== Number(orderItemPayload.boxes_count || 0) ||
+              (localItem.packaging_type || '') !== (orderItemPayload.packaging_type || '') ||
+              (localItem.notes || '') !== (orderItemPayload.notes || '') ||
+              Math.abs(Number(localItem.unit_price || 0) - Number(orderItemPayload.unit_price || 0)) > 0.009 ||
+              Math.abs(Number(localItem.total_price || 0) - Number(orderItemPayload.total_price || 0)) > 0.009;
 
-            if (itemUpdateErr) {
-              console.error('Erro ao atualizar item de pedido:', itemUpdateErr);
+            if (itemChanged) {
+              // Atualiza campos comerciais apenas quando houver alteracao real, preservando updated_at e progresso Kanban
+              const { error: itemUpdateErr } = await dbClient
+                .from('order_items')
+                .update(orderItemPayload)
+                .eq('id', localItem.id);
+
+              if (itemUpdateErr) {
+                console.error('Erro ao atualizar item de pedido:', itemUpdateErr);
+              } else {
+                orderWasUpdated = true;
+              }
             }
           } else {
             // Inserir novo item do pedido
@@ -1469,6 +1560,8 @@ export class ContaAzulService {
 
             if (itemInsertErr) {
               console.error('Erro ao inserir item de pedido desdobrado:', itemInsertErr);
+            } else if (existingOrder) {
+              orderWasUpdated = true;
             }
           }
         }
@@ -1485,7 +1578,13 @@ export class ContaAzulService {
 
           if (deleteItemsErr) {
             console.error('Erro ao deletar itens de pedido removidos na Conta Azul:', deleteItemsErr);
+          } else if (existingOrder) {
+            orderWasUpdated = true;
           }
+        }
+
+        if (existingOrder && orderWasUpdated) {
+          updated++;
         }
       }
 

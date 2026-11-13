@@ -1,29 +1,41 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AlertTriangle, ExternalLink, RefreshCw } from 'lucide-react';
 
 const SUPABASE_PROJECT_ID = 'cywbfcrtuawsgtbsjnnb';
 const SUPABASE_DASHBOARD_URL = `https://supabase.com/dashboard/project/${SUPABASE_PROJECT_ID}`;
+const HEALTH_CHECK_COOLDOWN_MS = 15 * 60 * 1000;
 
 export default function DatabaseStatusBanner() {
   const [isDown, setIsDown] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const lastCheckedAtRef = useRef<number>(0);
+  const isDownRef = useRef<boolean>(false);
 
-  const checkStatus = useCallback(async () => {
+  const checkStatus = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && !isDownRef.current && lastCheckedAtRef.current > 0 && now - lastCheckedAtRef.current < HEALTH_CHECK_COOLDOWN_MS) {
+      return;
+    }
+
+    lastCheckedAtRef.current = now;
     setIsChecking(true);
     try {
       const res = await fetch('/api/health');
       const data = await res.json();
       if (!res.ok || !data.healthy) {
+        isDownRef.current = true;
         setIsDown(true);
         setErrorMessage(data.database?.error || 'Banco inacessível ou pausado no Supabase.');
       } else {
+        isDownRef.current = false;
         setIsDown(false);
         setErrorMessage(null);
       }
     } catch (err: any) {
+      isDownRef.current = true;
       setIsDown(true);
       setErrorMessage(err.message || 'Erro de conexão com o servidor da aplicação.');
     } finally {
@@ -37,7 +49,7 @@ export default function DatabaseStatusBanner() {
     const startTimer = () => {
       if (!interval) {
         // Verificação periódica a cada 15 minutos apenas enquanto a aba estiver visível
-        interval = setInterval(checkStatus, 15 * 60 * 1000);
+        interval = setInterval(() => checkStatus(true), HEALTH_CHECK_COOLDOWN_MS);
       }
     };
 
@@ -50,7 +62,7 @@ export default function DatabaseStatusBanner() {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        checkStatus();
+        checkStatus(false);
         startTimer();
       } else {
         stopTimer();
@@ -58,7 +70,7 @@ export default function DatabaseStatusBanner() {
     };
 
     // Verificação inicial rápida
-    checkStatus();
+    checkStatus(true);
     startTimer();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -101,7 +113,7 @@ export default function DatabaseStatusBanner() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
         <button
-          onClick={checkStatus}
+          onClick={() => checkStatus(true)}
           disabled={isChecking}
           style={{
             backgroundColor: 'rgba(255, 255, 255, 0.15)',
