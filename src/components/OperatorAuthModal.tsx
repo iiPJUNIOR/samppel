@@ -27,6 +27,7 @@ export default function OperatorAuthModal({
   const [selectedOp, setSelectedOp] = useState('');
   const [authMethod, setAuthMethod] = useState<'PIN' | 'PASSWORD'>('PIN');
   const [credential, setCredential] = useState('');
+  const [newPin, setNewPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingOps, setLoadingOps] = useState(false);
@@ -35,6 +36,7 @@ export default function OperatorAuthModal({
     if (isOpen) {
       setError('');
       setCredential('');
+      setNewPin('');
       setSelectedOp('');
       setLoadingOps(true);
       
@@ -70,6 +72,21 @@ export default function OperatorAuthModal({
       return;
     }
 
+    const matchedOp = operators.find(o => o.id === selectedOp);
+    const opHasNoPin = !!matchedOp && !matchedOp.has_pin;
+
+    if (authMethod === 'PASSWORD' && opHasNoPin) {
+      const trimmedPin = newPin.trim();
+      if (matchedOp?.role === 'Produção' && !trimmedPin) {
+        setError('Cadastre seu PIN numérico de 4 a 6 dígitos no campo abaixo para não ficar mais sem PIN.');
+        return;
+      }
+      if (trimmedPin && !/^\d{4,6}$/.test(trimmedPin)) {
+        setError('O novo PIN deve conter de 4 a 6 dígitos numéricos.');
+        return;
+      }
+    }
+
     setError('');
     setLoading(true);
 
@@ -81,6 +98,7 @@ export default function OperatorAuthModal({
           operatorId: selectedOp,
           authMethod,
           credential,
+          newPin: (authMethod === 'PASSWORD' && opHasNoPin && newPin.trim()) ? newPin.trim() : undefined,
           targetStageId,
           currentStageId,
           tenantId
@@ -93,7 +111,6 @@ export default function OperatorAuthModal({
       }
 
       // Sucesso na liberação secundária
-      const matchedOp = operators.find(o => o.id === selectedOp);
       onSuccess(selectedOp, matchedOp ? matchedOp.name : 'Operador');
     } catch (err: any) {
       setError(err.message);
@@ -155,10 +172,13 @@ export default function OperatorAuthModal({
                   const newId = e.target.value;
                   setSelectedOp(newId);
                   setCredential('');
+                  setNewPin('');
                   setError('');
                   const targetOp = operators.find(op => op.id === newId);
                   if (targetOp && !targetOp.has_pin) {
                     setAuthMethod('PASSWORD');
+                  } else if (targetOp && targetOp.has_pin) {
+                    setAuthMethod('PIN');
                   }
                 }} 
                 required
@@ -210,8 +230,8 @@ export default function OperatorAuthModal({
                   </label>
                 </div>
                 {hasNoPin && (
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', backgroundColor: 'var(--surface-hover)', padding: '0.45rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                    Este operador ainda não cadastrou um PIN de fábrica. Utilize sua senha de login do portal para liberar.
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', backgroundColor: 'var(--surface-hover)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border)', lineHeight: 1.4 }}>
+                    Este operador ainda não possui PIN de fábrica. Valide com sua senha de login e já cadastre seu PIN numérico abaixo para as próximas operações.
                   </div>
                 )}
               </>
@@ -236,6 +256,37 @@ export default function OperatorAuthModal({
               style={{ width: '100%' }}
             />
           </div>
+
+          {/* CADASTRO IMEDIATO DE PIN QUANDO OPERADOR ESTÁ [SEM PIN] */}
+          {(() => {
+            const currentOp = operators.find(op => op.id === selectedOp);
+            const hasNoPin = !!currentOp && !currentOp.has_pin;
+            if (!hasNoPin || authMethod !== 'PASSWORD') return null;
+            const isRequiredPin = currentOp?.role === 'Produção';
+            return (
+              <div className="form-group" style={{ backgroundColor: 'var(--surface-subtle, rgba(59, 130, 246, 0.05))', padding: '0.85rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <label className="form-label" style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', fontWeight: 600, marginBottom: '0.35rem' }}>
+                  <Key size={15} style={{ color: 'var(--primary)' }} />
+                  <span>Cadastrar Novo PIN de Fábrica (4 a 6 dígitos) {isRequiredPin ? '*' : '(opcional)'}</span>
+                </label>
+                <input
+                  type="password"
+                  pattern="\d*"
+                  inputMode="numeric"
+                  maxLength={6}
+                  className="form-input"
+                  value={newPin}
+                  onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))}
+                  required={isRequiredPin}
+                  placeholder="Ex: 1234 (somente números)"
+                  style={{ width: '100%' }}
+                />
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.3rem', lineHeight: 1.35 }}>
+                  Ao liberar com sua senha agora, este PIN ficará salvo automaticamente para todas as próximas movimentações.
+                </span>
+              </div>
+            );
+          })()}
 
           {/* EXIBIÇÃO DE ERRO */}
           {error && (

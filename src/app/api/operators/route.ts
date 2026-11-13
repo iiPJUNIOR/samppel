@@ -194,7 +194,7 @@ export async function PUT(request: NextRequest) {
       .from('profiles')
       .update(updates)
       .eq('id', id)
-      .select('id, full_name, status, force_password_change, role, is_factory_account, allowed_modules, can_delete_any_order')
+      .select('id, full_name, status, force_password_change, role, is_factory_account, pin, allowed_modules, can_delete_any_order')
       .single();
 
     if (error) throw error;
@@ -207,6 +207,7 @@ export async function PUT(request: NextRequest) {
         force_password_change: data.force_password_change,
         role: data.role,
         is_factory_account: data.is_factory_account,
+        has_pin: !!data.pin,
         allowed_modules: data.allowed_modules || [],
         can_delete_any_order: !!data.can_delete_any_order
       } 

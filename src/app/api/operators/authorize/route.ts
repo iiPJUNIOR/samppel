@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { verifyCredential } from '@/lib/crypto';
+import { verifyCredential, hashCredential } from '@/lib/crypto';
 import { supabaseAdmin, checkPinRateLimit, registerPinFailure, clearPinFailures } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { operatorId, authMethod, credential, targetStageId, currentStageId, tenantId } = body;
+    const { operatorId, authMethod, credential, newPin, targetStageId, currentStageId, tenantId } = body;
 
     if (!operatorId || !authMethod || !credential) {
       return NextResponse.json({ error: 'Campos obrigatórios ausentes.' }, { status: 400 });
@@ -59,8 +59,14 @@ export async function POST(request: NextRequest) {
       }
       isValid = verifyCredential(credential, operator.pin);
     } else if (authMethod === 'PASSWORD') {
-      // Para validar a senha do Supabase Auth, tentamos fazer sign-in temporário
-      const testClient = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '');
+      // Para validar a senha do Supabase Auth, tentamos fazer sign-in temporário sem persistir sessão
+      const testClient = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      });
       const { error: signInError } = await testClient.auth.signInWithPassword({
         email: operator.email,
         password: credential
@@ -108,8 +114,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 5. Se o operador autenticou via Senha de Login e enviou novo PIN (ou ainda estava sem PIN na Produção), persiste o PIN agora
+    let pinRegistered = false;
+    if (authMethod === 'PASSWORD') {
+      const trimmedNewPin = typeof newPin === 'string' ? newPin.trim() : '';
+      if (!operator.pin && operator.role === 'Produção' && !trimmedNewPin) {
+        return NextResponse.json({
+          error: 'Informe um novo PIN numérico (4 a 6 dígitos) abaixo da senha para ativar seu PIN de fábrica.'
+        }, { status: 400 });
+      }
+      if (trimmedNewPin) {
+        if (!/^\d{4,6}$/.test(trimmedNewPin)) {
+          return NextResponse.json({ error: 'O novo PIN deve conter de 4 a 6 dígitos numéricos.' }, { status: 400 });
+        }
+        const { error: pinUpdateErr } = await supabaseAdmin
+          .from('profiles')
+          .update({ pin: hashCredential(trimmedNewPin) })
+          .eq('id', operator.id);
+
+        if (pinUpdateErr) {
+          return NextResponse.json({ error: 'Erro ao registrar novo PIN: ' + pinUpdateErr.message }, { status: 500 });
+        }
+        pinRegistered = true;
+      }
+    }
+
     return NextResponse.json({ 
       success: true, 
+      pinRegistered,
       operator: { id: operator.id, name: operator.full_name } 
     });
   } catch (err: any) {

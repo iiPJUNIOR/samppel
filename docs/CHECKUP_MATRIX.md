@@ -17,22 +17,22 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **MOD-01** | Autenticação, Usuários e Perfis | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx`, `OperatorAuthModal.tsx` | 2026-11-09 | OK |
-| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-09 | OK |
-| **MOD-03** | Pedidos: Kanban e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`), `src/services/deadline_service.ts` (`getExpeditionUrgency`), `src/app/globals.css` (`.kanban-board-scroll`, `--warning-card-bg`) | 2026-11-09 | OK |
+| **MOD-01** | Autenticação, Usuários, Perfis e Blindagem de PIN de Fábrica | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx`, `OperatorAuthModal.tsx`, `redefinir-senha/page.tsx`, `operador-perfil/page.tsx`, `api/auth/clear-force-password/route.ts`, `api/operators/*` | 2026-11-13 | OK |
+| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `Skeleton.tsx`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-13 | OK |
+| **MOD-03** | Pedidos: Kanban, Scroll Infinito, Skeleton UI e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`, `StageInfiniteScrollSentinel`), `Skeleton.tsx` (`KanbanBoardSkeleton`, `OrdersTableSkeleton`), `src/services/deadline_service.ts`, `src/app/globals.css` | 2026-11-13 | OK |
 | **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-11-05 | OK |
-| **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-11-05 | OK |
-| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-11-05 | OK |
+| **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-11-12 | OK |
+| **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-11-12 | OK |
 | **MOD-07** | Pedidos: Conferência Física na Expedição | `ConferencyModal.tsx`, `pedidos/page.tsx` | 2026-11-05 | OK |
 | **MOD-08** | Saldos e Créditos de Clientes | `src/app/pedidos/saldos/page.tsx`, `api/admin/saldos`, `orders.ts` | 2026-11-05 | OK |
-| **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts`, `orders.ts` | 2026-11-05 | OK |
+| **MOD-09** | Financeiro: Contas e Conciliação | `src/app/financeiro/page.tsx`, `financial.ts` (`getKanbanFinancialSummary`), `orders.ts` | 2026-11-13 | OK |
 | **MOD-10** | Clientes: Gestão e Busca | `src/app/clientes/page.tsx`, `customers.ts` | 2026-11-05 | OK |
 | **MOD-11** | Produtos e Catálogo Técnico | `src/app/produtos/page.tsx`, `products.ts`, `TransformSacoModal.tsx` | 2026-11-05 | OK |
 | **MOD-12** | Fornecedores | `src/app/fornecedores/page.tsx`, `suppliers.ts` | 2026-11-05 | OK |
 | **MOD-13** | Relatórios e Estatísticas | `src/app/relatorios/page.tsx` | 2026-11-05 | OK |
-| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-11-09 | OK |
-| **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, `sync_queue.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-10-30 | OK |
-| **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `InfoHint.tsx`, `metricGuides.ts`, `src/lib/supabasePlatformClient.ts`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql` | 2026-11-05 | OK |
+| **MOD-14** | Configurações, Setores e Logs | `src/app/configuracoes/page.tsx`, `api/config/conta-azul`, `DatabaseStatusBanner.tsx`, `logs/` | 2026-11-13 | OK |
+| **MOD-15** | Integração Conta Azul | `src/services/conta_azul.ts`, `sync_queue.ts`, rotas em `api/sync/`, `.github/workflows/`, `vercel.json` | 2026-11-13 | OK |
+| **MOD-16** | Central de Monitoramento, Telemetria Anti-Estouro e Governança | `src/app/monitoramento/page.tsx`, `InfoHint.tsx`, `metricGuides.ts`, `src/lib/supabasePlatformClient.ts`, `src/app/api/admin/monitoring/route.ts`, `supabase/supabase_monitoring_center.sql`, `supabase/supabase_performance_rls_indexes.sql` | 2026-11-13 | OK |
 
 Legenda de Status:
 * **OK:** Funcionalidade auditada, sem erros de compilação, tipos ou lógica aparente.
@@ -44,15 +44,15 @@ Legenda de Status:
 
 ## 3. Detalhamento e Mapeamento de Dependências por Módulo
 
-### MOD-01: Autenticação, Usuários e Perfis
-* **Responsabilidade:** Login, logout, recuperação de senha, RBAC (Administrador, Vendedor, Comercial, Financeiro, Operador).
-* **Arquivos-Chave:** [page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/page.tsx), [AuthContext.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/context/AuthContext.tsx), [profiles.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/profiles.ts), [operador-perfil](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/operador-perfil/page.tsx).
-* **Onde se conecta:** Supabase Auth (`auth.users`), tabela pública de operadores e perfis.
+### MOD-01: Autenticação, Usuários, Perfis e Blindagem de PIN de Fábrica
+* **Responsabilidade:** Login, logout, recuperação de senha, RBAC (Administrador, Vendedor, Comercial, Financeiro, Operador) e blindagem de cadastro/redefinição de PIN de fábrica em todas as portas de entrada (Convite/Troca Obrigatória, Modal Admin, Perfil do Operador e Terminal da Fábrica).
+* **Arquivos-Chave:** [page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/page.tsx), [AuthContext.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/context/AuthContext.tsx), [profiles.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/profiles.ts), [operador-perfil](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/operador-perfil/page.tsx), [redefinir-senha](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/redefinir-senha/page.tsx), [OperatorAuthModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/OperatorAuthModal.tsx), [authorize/route.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/operators/authorize/route.ts), [clear-force-password/route.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/api/auth/clear-force-password/route.ts).
+* **Onde se conecta:** Supabase Auth (`auth.users`), tabela pública de operadores e perfis (`profiles.pin` com hash).
 * **Módulos que Dependem Dele:** Todos (controla visibilidade no Sidebar e permissões de transição no Kanban).
 * **Critérios de Validação:**
-  * Login com credenciais válidas.
-  * Respeito às regras de transição no Kanban por perfil.
-  * Isolamento de vendedores aos seus próprios pedidos.
+  * Login com credenciais válidas e persistência garantida de `profiles.pin` em `/redefinir-senha` mesmo quando já há sessão ativa no navegador.
+  * Obrigatoriedade de PIN (4 a 6 dígitos) para perfil `Produção` no convite/troca de senha, em `/operador-perfil` e ao autenticar pela primeira vez com Senha de Login em `OperatorAuthModal.tsx`, além de definição/redefinição direta pelo Admin no modal `Configurar Usuário`.
+  * Respeito às regras de transição no Kanban por perfil e isolamento de vendedores aos seus próprios pedidos.
 
 ### MOD-02: Pedidos - Criação, Edição e Itens
 * **Responsabilidade:** Formulário de novos pedidos, cadastro de itens avulsos, tiragem, data de entrega, observações.
@@ -64,14 +64,15 @@ Legenda de Status:
   * Geração do número de PV e OP.
   * Associação íntegra de `customer_id` e `product_id`.
 
-### MOD-03: Pedidos - Kanban e Transição de Etapas
-* **Responsabilidade:** Renderização das colunas do Kanban, movimentação de cards (`moveOrderItemToStage`), ordenação e filtros.
-* **Arquivos-Chave:** [pedidos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/pedidos/page.tsx).
-* **Onde se conecta:** Tabelas `order_items`, `stages`, modais de interceptação.
+### MOD-03: Pedidos - Kanban, Scroll Infinito, Skeleton UI e Transição de Etapas
+* **Responsabilidade:** Renderização das colunas do Kanban, movimentação de cards (`moveOrderItemToStage`), Skeleton UI dedicado (`KanbanBoardSkeleton`, `OrdersTableSkeleton`, `KanbanCardMiniSkeleton`, `OrdersListInlineMoreSkeleton`), paginação automática por Scroll Infinito (`IntersectionObserver`) nas colunas históricas (`Concluído`, `CANCELADOS`) e modo Lista, busca automática sob demanda no servidor para PVs/clientes antigos, ordenação e filtros.
+* **Arquivos-Chave:** [pedidos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/pedidos/page.tsx), [Skeleton.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/ui/Skeleton.tsx), [orders.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/orders.ts), [globals.css](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/globals.css).
+* **Onde se conecta:** Tabelas `order_items`, `orders`, `stages`, modais de interceptação.
 * **Módulos que Dependem Dele:** MOD-04, MOD-05, MOD-06, MOD-07.
 * **Critérios de Validação:**
   * Bypasses funcionam e não causam loops infinitos.
   * Interceptações disparam corretamente ao atingir etapas sensíveis (Produção, Manuseio, Expedição).
+  * Carregamento inicial exibe Skeleton estrutural fiel sem layout shift e carrega 100% das etapas ativas sem corte de 1.000 linhas, paginando `Concluído` e `CANCELADOS` em lotes de 30 itens conforme a rolagem.
 
 ### MOD-04: Pedidos - Alerta de Produção & Abatimento de Saldos
 * **Responsabilidade:** Interceptar cards ao mover de "Pedidos/A produzir" para "Em produção/Estoque" caso o cliente possua crédito ou pendência ativa do mesmo produto.
@@ -217,3 +218,4 @@ Legenda de Status:
 | **2026-11-05** | MOD-03 | APROVADO COM ÊXITO | Separação visual entre pedidos próximos da expedição e pedidos já atrasados (`globals.css` e `pedidos/page.tsx`): Card Amarelo Fixo (`--warning-card-bg`) exclusivo para pedidos faltando de 0 a 10 dias para expedição (`isNearExpedition && !isOverdue`), e Card Vermelho Piscando Suave (`.kanban-card-overdue-pulse`, ciclo tranquilo de `3.2s ease-in-out`) para pedidos liberados cuja Data de Expedição já passou (`isOverdue`), com ponto de restauração prévio `backup_20261105_pre_overdue_red_pulse/`. |
 | **2026-11-05** | MOD-02, MOD-05, MOD-11 | APROVADO COM ÊXITO | Implementação da opção rastreável de "Desfazer Transformação (Saco -> Sacola)" diretamente dentro do card gerado em Pedidos (`DetailViewModal.tsx` e `TransformSacoModal.tsx`): gravação de tag estruturada `[SACO_TO_SACOLA|SACO_ID:...|SACOLA_ID:...|QTY:...]`, banner de rastreabilidade no card, estorno completo de estoque (`+ENTRADA` de volta ao Saco e `-SAIDA` na Sacola registrados no Extrato `stock_transactions` com motivo, responsável e data/hora) e arquivamento auditável do card na etapa `CANCELADOS` com trava anti-duplicidade `[TRANSFORMACAO_DESFEITA]`, além de correção visual do sinal `-` em vermelho para saídas no Extrato de Movimentações (`produtos/page.tsx`), com ponto de restauração prévio `backup_20261105_pre_undo_saco_to_sacola/`. |
 | **2026-11-05** | MOD-02, MOD-03, MOD-05, MOD-11 | APROVADO COM ÊXITO | Implementação do botão e fluxo atômico "Finalizar Entrega Parcial -> Enviar p/ Concluído (+Estoque) + Gerar Novo Card com o que Faltou" (`finalizePartialHandlingAndSplitToCompleted` em `orders.ts`, `HandlingTeamModal.tsx`, `DetailViewModal.tsx` e `pedidos/page.tsx`) permitindo concluir imediatamente a parte entregue do manuseio com entrada positiva automática no estoque (`+ENTRADA` com `[ITEM:<id>] [MANUSEIO-PARCIAL]`) e desmembrar o saldo restante em um novo card `.2` para a mesma equipe, outra equipe de manuseio ou para a etapa `Ir para Manuseio`, além de blindar `splitOrderItem` para dar entrada proporcional no estoque caso uma OP seja dividida diretamente para `Concluído` ou `Estoque`, com ponto de restauração prévio `backup_20261105_pre_partial_manuseio_concluido/`. |
+| **2026-11-13** | MOD-02, MOD-03, MOD-09, MOD-14, MOD-15, MOD-16 | APROVADO COM ÊXITO | Otimização Estrutural Anti-Estouro do Supabase em 3 etapas: (1) Banco de dados (`supabase_performance_rls_indexes.sql`): eliminação dos 42 alertas `auth_rls_initplan` via `(select auth.uid())`, consolidação de 9 políticas permissivas duplicadas, criação de 16 índices de FKs críticas + índice composto `idx_order_items_tenant_stage_updated`, remoção de 2 índices duplicados e ampliação do cooldown de `record_monitoring_snapshot` para 60 min; (2) Kanban/Lista (`/pedidos`, `orders.ts`, `financial.ts`, `Skeleton.tsx`, `globals.css`): eliminação do corte de 1.000 linhas do PostgREST, Scroll Infinito automático (`IntersectionObserver`, lotes de 30) nas colunas `Concluído` e `CANCELADOS` e na Lista, busca automática sob demanda no servidor para PVs/clientes antigos, cache em memória de 8 catálogos estáticos, eliminação do full-scan de 5.438 clientes, resumo financeiro enxuto (`getKanbanFinancialSummary`) e novo Skeleton UI com shimmer Light/Dark; (3) Cron & Health (`conta_azul.ts`, `sync-cron.yml`, `DatabaseStatusBanner.tsx`, `financeiro/page.tsx`): diff prévio em `importOrders` eliminando `UPDATE`/`DELETE+INSERT` redundantes, janela comercial Seg-Sáb 07h-20h BRT no GitHub Actions, cooldown de 15 min no health-check de aba visível e remoção do `getOrders` duplicado em `/financeiro`, com pontos de restauração prévios `RP-11` e `RP-12`. |

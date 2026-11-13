@@ -143,6 +143,9 @@ export default function ConfiguracoesPage() {
   const [profilesList, setProfilesList] = useState<any[]>([]);
   const [factoryAccountId, setFactoryAccountId] = useState<string>('');
   const [savingFactoryAccount, setSavingFactoryAccount] = useState(false);
+  const [adminPinInput, setAdminPinInput] = useState('');
+  const [savingAdminPin, setSavingAdminPin] = useState(false);
+  const [adminPinFeedback, setAdminPinFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // States para Carteiras e Permissões de Vendedores
   const [availableSellersList, setAvailableSellersList] = useState<string[]>([]);
@@ -459,9 +462,15 @@ export default function ConfiguracoesPage() {
       });
       setSellerPermissionsMap(mergedSellerMap);
 
+      const operatorsHasPinMap = new Map<string, boolean>();
+      (operatorsRes.data || []).forEach((o: any) => {
+        if (o?.id) operatorsHasPinMap.set(o.id, !!o.has_pin);
+      });
+
       const mappedProfiles = allProfiles.map((p: any) => ({
         ...p,
-        name: p.full_name || p.name || 'Sem nome'
+        name: p.full_name || p.name || 'Sem nome',
+        has_pin: operatorsHasPinMap.has(p.id) ? operatorsHasPinMap.get(p.id) : !!p.pin
       }));
       setProfilesList(mappedProfiles);
 
@@ -2295,7 +2304,11 @@ export default function ConfiguracoesPage() {
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '0.375rem', justifyContent: 'flex-end', alignItems: 'center' }}>
                         <button 
-                          onClick={() => setSelectedOperatorForPermissions(op)}
+                          onClick={() => {
+                            setAdminPinInput('');
+                            setAdminPinFeedback(null);
+                            setSelectedOperatorForPermissions(op);
+                          }}
                           className="btn btn-secondary"
                           style={{ 
                             padding: '0.25rem 0.55rem', 
@@ -2443,6 +2456,109 @@ export default function ConfiguracoesPage() {
                 Definir como "Terminal de Fábrica" bloqueia esta conta na visualização do Kanban de produção, exigindo PIN de um operador para qualquer movimento.
               </span>
             </div>
+
+            {/* CADASTRO / REDEFINIÇÃO DE PIN DE FÁBRICA PELO ADMIN */}
+            {!activeOp!.is_factory_account && (() => {
+              const opHasPin = activeOp!.has_pin !== undefined ? !!activeOp!.has_pin : !!activeOp!.pin;
+              return (
+                <div style={{ marginBottom: '1.5rem', backgroundColor: 'var(--surface-subtle)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                    <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text)' }}>
+                      <KeyRound size={16} style={{ color: 'var(--primary)' }} />
+                      <span>PIN de Fábrica (4 a 6 dígitos)</span>
+                    </h4>
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        padding: '0.18rem 0.55rem',
+                        borderRadius: '999px',
+                        backgroundColor: opHasPin ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                        color: opHasPin ? '#16a34a' : 'var(--danger)',
+                        border: `1px solid ${opHasPin ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`
+                      }}
+                    >
+                      {opHasPin ? 'PIN Cadastrado' : 'Sem PIN'}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 0.65rem 0', lineHeight: 1.4 }}>
+                    {opHasPin
+                      ? 'Para substituir o PIN atual deste usuário nos terminais da fábrica, digite um novo código numérico abaixo.'
+                      : 'Este usuário ainda está sem PIN de fábrica. Defina um código numérico de 4 a 6 dígitos para liberá-lo imediatamente nos terminais.'}
+                  </p>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      pattern="\d*"
+                      maxLength={6}
+                      value={adminPinInput}
+                      onChange={(e) => {
+                        setAdminPinInput(e.target.value.replace(/\D/g, ''));
+                        if (adminPinFeedback) setAdminPinFeedback(null);
+                      }}
+                      placeholder="Digite 4 a 6 números..."
+                      style={{
+                        flex: '1 1 180px',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'var(--surface)',
+                        color: 'var(--text)',
+                        fontSize: '0.85rem'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={savingAdminPin || !/^\d{4,6}$/.test(adminPinInput)}
+                      onClick={async () => {
+                        const trimmed = adminPinInput.trim();
+                        if (!/^\d{4,6}$/.test(trimmed)) {
+                          setAdminPinFeedback({ type: 'error', message: 'O PIN deve conter de 4 a 6 dígitos numéricos.' });
+                          return;
+                        }
+                        setSavingAdminPin(true);
+                        setAdminPinFeedback(null);
+                        try {
+                          const res = await authenticatedFetch('/api/operators', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: activeOp!.id, pin: trimmed })
+                          });
+                          const json = await res.json();
+                          if (!res.ok) throw new Error(json.error || 'Falha ao salvar PIN.');
+                          setAdminPinInput('');
+                          setSelectedOperatorForPermissions((prev: any) => prev ? { ...prev, has_pin: true } : prev);
+                          setProfilesList(prev => prev.map(p => p.id === activeOp!.id ? { ...p, has_pin: true } : p));
+                          setOperatorsList(prev => prev.map(o => o.id === activeOp!.id ? { ...o, has_pin: true } : o));
+                          setAdminPinFeedback({ type: 'success', message: 'PIN de fábrica gravado com sucesso!' });
+                        } catch (err: any) {
+                          setAdminPinFeedback({ type: 'error', message: err.message || 'Erro ao salvar PIN.' });
+                        } finally {
+                          setSavingAdminPin(false);
+                        }
+                      }}
+                      style={{ padding: '0.5rem 0.95rem', fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+                    >
+                      {savingAdminPin ? 'Salvando...' : (opHasPin ? 'Redefinir PIN' : 'Salvar PIN')}
+                    </button>
+                  </div>
+                  {adminPinFeedback && (
+                    <div
+                      style={{
+                        marginTop: '0.55rem',
+                        fontSize: '0.76rem',
+                        fontWeight: 600,
+                        color: adminPinFeedback.type === 'success' ? '#16a34a' : 'var(--danger)'
+                      }}
+                    >
+                      {adminPinFeedback.message}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* PERMISSÃO ESPECIAL DE EXCLUSÃO DE PEDIDOS (Exclusivo para junior.8350i@gmail.com) */}
             {user?.email?.toLowerCase().trim() === 'junior.8350i@gmail.com' && (

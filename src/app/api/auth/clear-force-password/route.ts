@@ -14,15 +14,39 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { userId } = await request.json();
+    const { userId, pin } = await request.json();
 
     if (!userId) {
       return NextResponse.json({ error: 'userId é obrigatório.' }, { status: 400 });
     }
 
+    const { data: existingProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role, pin')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const updates: Record<string, any> = {
+      force_password_change: false
+    };
+
+    if (pin !== undefined && pin !== null && String(pin).trim() !== '') {
+      const trimmedPin = String(pin).trim();
+      if (!/^\d{4,6}$/.test(trimmedPin)) {
+        return NextResponse.json({ error: 'O PIN deve conter de 4 a 6 dígitos numéricos.' }, { status: 400 });
+      }
+      const { hashCredential } = await import('@/lib/crypto');
+      updates.pin = hashCredential(trimmedPin);
+    } else if (existingProfile?.role === 'Produção' && !existingProfile?.pin) {
+      return NextResponse.json(
+        { error: 'Operadores de Produção precisam cadastrar um PIN numérico de 4 a 6 dígitos.' },
+        { status: 400 }
+      );
+    }
+
     const { error } = await supabaseAdmin
       .from('profiles')
-      .update({ force_password_change: false })
+      .update(updates)
       .eq('id', userId);
 
     if (error) {

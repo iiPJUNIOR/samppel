@@ -14,12 +14,37 @@ export default function RedefinirSenhaPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [pin, setPin] = useState('');
   const [isProducaoRole, setIsProducaoRole] = useState(false);
+  const [needsPinSetup, setNeedsPinSetup] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInvite, setIsInvite] = useState(false);
 
   useEffect(() => {
+    const inspectUserProfileForPin = async (sessionUser: any) => {
+      if (!sessionUser || !supabase) return;
+      if (sessionUser.user_metadata?.role === 'Produção') {
+        setIsProducaoRole(true);
+      }
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('role, pin')
+          .eq('id', sessionUser.id)
+          .maybeSingle();
+        if (prof) {
+          if (prof.role === 'Produção') {
+            setIsProducaoRole(true);
+          }
+          if (!prof.pin) {
+            setNeedsPinSetup(true);
+          }
+        }
+      } catch {
+        // Ignora silenciosamente falha de leitura opcional
+      }
+    };
+
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
       if (searchParams.get('invite') === 'true' || searchParams.get('type') === 'invite') {
@@ -59,9 +84,19 @@ export default function RedefinirSenhaPage() {
     }
 
     if (!supabase) return;
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event) => {
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data?.session?.user) {
+        inspectUserProfileForPin(data.session.user);
+      }
+    }).catch(() => {});
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
         setError(null);
+      }
+      if (session?.user) {
+        inspectUserProfileForPin(session.user);
       }
     });
 
@@ -196,14 +231,27 @@ export default function RedefinirSenhaPage() {
         throw new Error('Não foi possível autenticar o convite. O link pode ter expirado.');
       }
 
-      // 4. Remover exigência de troca de senha no banco Postgres
+      // 4. Remover exigência de troca de senha no banco Postgres e gravar PIN (mesmo quando currentSession já existia)
       const activeUser = targetUserId || (await supabase.auth.getUser()).data.user?.id;
       if (activeUser) {
-        await fetch('/api/auth/clear-force-password', {
+        const clearRes = await fetch('/api/auth/clear-force-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: activeUser })
-        }).catch(err => console.error('Erro ao chamar clear-force-password:', err));
+          body: JSON.stringify({
+            userId: activeUser,
+            pin: pin ? pin.trim() : undefined
+          })
+        });
+        const clearJson = await clearRes.json().catch(() => ({}));
+        if (!clearRes.ok) {
+          throw new Error(clearJson.error || 'Erro ao gravar PIN e finalizar ativação da conta.');
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('samppel_user_profile_cache');
+        } catch {}
       }
 
       setSuccess(true);
@@ -408,7 +456,7 @@ export default function RedefinirSenhaPage() {
               </div>
 
               {/* PIN de Fábrica para Operadores de Produção */}
-              {(isInvite || isProducaoRole) && (
+              {(isInvite || isProducaoRole || needsPinSetup) && (
                 <div>
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.4rem' }}>
                     PIN de Fábrica (4 a 6 dígitos numéricos) {isProducaoRole ? '*' : '(opcional)'}

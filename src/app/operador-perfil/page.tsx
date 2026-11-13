@@ -19,6 +19,7 @@ export default function OperadorPerfilPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [pinSavedInSession, setPinSavedInSession] = useState(false);
 
   // Inicializa o nome quando o usuário carrega
   useEffect(() => {
@@ -35,6 +36,8 @@ export default function OperadorPerfilPage() {
     );
   }
 
+  const missingProducaoPin = user.role === 'Produção' && !user.pin && !pinSavedInSession;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -50,6 +53,9 @@ export default function OperadorPerfilPage() {
         setError('Como solicitado pelo seu administrador, você deve obrigatoriamente definir uma Nova Senha e um Novo PIN.');
         return;
       }
+    } else if (missingProducaoPin && !newPin) {
+      setError('Para ativar suas movimentações nos terminais da fábrica, informe um Novo PIN de Fábrica (4 a 6 dígitos).');
+      return;
     }
 
     if (newPin && !/^\d{4,6}$/.test(newPin)) {
@@ -96,8 +102,17 @@ export default function OperadorPerfilPage() {
         await fetch('/api/auth/clear-force-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id })
+          body: JSON.stringify({ userId: user.id, pin: newPin || undefined })
         }).catch(err => console.error('Erro ao chamar clear-force-password:', err));
+      }
+
+      if (newPin) {
+        setPinSavedInSession(true);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('samppel_user_profile_cache');
+          } catch {}
+        }
       }
 
       setSuccess('Seus dados foram atualizados com sucesso!');
@@ -151,7 +166,7 @@ export default function OperadorPerfilPage() {
         </div>
       )}
 
-      {user.role === 'Produção' && !user.force_password_change && !user.pin && !success && (
+      {missingProducaoPin && !user.force_password_change && !success && (
         <div style={{
           backgroundColor: 'hsla(38, 92.1%, 50%, 0.1)',
           color: 'var(--warning)',
