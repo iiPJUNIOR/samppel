@@ -174,20 +174,29 @@ export function SiblingMoveModal(props: any) {
                   </button>
                   <button
                     type="button"
-                    className="btn btn-secondary"
+                    className="btn btn-primary"
                     onClick={() => handleConfirmSiblingMoveAll(false)}
-                    style={{ padding: '0.55rem 0.95rem', fontSize: '0.8rem', fontWeight: 600 }}
+                    style={{ padding: '0.55rem 1.1rem', fontSize: '0.8rem', fontWeight: 700 }}
                   >
                     Mover Apenas Este Item
                   </button>
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn-secondary"
                     onClick={() => handleConfirmSiblingMoveAll(true)}
                     disabled={siblingMoveSelectedIds.length === 0}
-                    style={{ padding: '0.55rem 1.1rem', fontSize: '0.8rem', fontWeight: 700 }}
+                    title={siblingMoveSelectedIds.length === 0 ? 'Marque pelo menos outro item acima para mover juntos' : undefined}
+                    style={{
+                      padding: '0.55rem 0.95rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      opacity: siblingMoveSelectedIds.length === 0 ? 0.45 : 1,
+                      cursor: siblingMoveSelectedIds.length === 0 ? 'not-allowed' : 'pointer'
+                    }}
                   >
-                    Mover Selecionados ({siblingMoveSelectedIds.length + 1})
+                    {siblingMoveSelectedIds.length > 0
+                      ? `Mover Selecionados (${siblingMoveSelectedIds.length + 1})`
+                      : 'Mover Selecionados'}
                   </button>
                 </div>
 

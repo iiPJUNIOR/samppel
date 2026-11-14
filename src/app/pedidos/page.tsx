@@ -1039,6 +1039,7 @@ export default function PedidosPage() {
     setSiblingMoveItem(null);
     setSiblingMoveTargetStageId('');
     setSiblingMoveList([]);
+    setSiblingMoveSelectedIds([]);
 
     siblingMoveBypass.current = true;
     insufficientStockMoveBypass.current = true; // Bypass stock check inside moveOrderItemToStage since we already checked it
@@ -1052,6 +1053,7 @@ export default function PedidosPage() {
     setSiblingMoveItem(null);
     setSiblingMoveTargetStageId('');
     setSiblingMoveList([]);
+    setSiblingMoveSelectedIds([]);
     resetAllBypasses();
   };
 
@@ -2817,7 +2819,7 @@ export default function PedidosPage() {
         setSiblingMoveItem(item);
         setSiblingMoveTargetStageId(targetStageId);
         setSiblingMoveList(siblingItems);
-        setSiblingMoveSelectedIds(siblingItems.map(s => s.id));
+        setSiblingMoveSelectedIds([]);
         setIsSiblingMoveModalOpen(true);
         return;
       }
