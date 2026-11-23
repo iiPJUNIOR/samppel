@@ -1169,3 +1169,56 @@ input[type="number"] {
     background: var(--skeleton-base);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   FOLHA DE IMPRESSÃO LIMPA POR ETAPA (PORTAL A4 SEM CLIPPING)
+   ═══════════════════════════════════════════════════════════════ */
+#samppel-print-sheet-portal {
+  display: none;
+}
+
+@media print {
+  html,
+  body {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  body.samppel-print-active > *:not(#samppel-print-sheet-portal) {
+    display: none !important;
+  }
+
+  body.samppel-print-active > #samppel-print-sheet-portal {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .samppel-print-table thead {
+    display: table-header-group;
+  }
+
+  .samppel-print-table tfoot {
+    display: table-row-group;
+  }
+
+  .samppel-print-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

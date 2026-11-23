@@ -29,6 +29,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   changeActiveRole: (role: UserRole) => void;
   isLoading: boolean;
+  authEpoch: number;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -65,9 +66,11 @@ function saveCachedProfile(profile: UserProfile | null) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(() => getCachedProfile());
   const [isLoading, setIsLoading] = useState(true);
+  const [authEpoch, setAuthEpoch] = useState(0);
 
   const isLoadingRef = useRef(true);
   const isFetchingProfileRef = useRef(false);
+  const hasConfirmedSessionRef = useRef(false);
 
   // Monitora o estado de autenticacao real do Supabase
   useEffect(() => {
@@ -89,17 +92,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Registra listener para mudanças de autenticação (dispara INITIAL_SESSION automaticamente)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        // Evita reconsultar perfil no banco a cada renovação automática de token em segundo plano
+        const hadConfirmedSession = hasConfirmedSessionRef.current;
+        hasConfirmedSessionRef.current = true;
+
+        // Evita reconsultar perfil no banco a cada renovação automática de token em segundo plano,
+        // mas sinaliza authEpoch se a sessão acabou de ser confirmada ou recuperada após falha/timeout.
         if (event === 'TOKEN_REFRESHED') {
           const cached = getCachedProfile();
           if (cached && cached.id === session.user.id) {
+            if (!hadConfirmedSession) {
+              setAuthEpoch(e => e + 1);
+            }
             setIsLoading(false);
             isLoadingRef.current = false;
             return;
           }
         }
         await fetchProfile(session.user.id);
+        if (!hadConfirmedSession) {
+          setAuthEpoch(e => e + 1);
+        }
       } else {
+        hasConfirmedSessionRef.current = false;
         saveCachedProfile(null);
         setUser(null);
         setIsLoading(false);
@@ -248,6 +262,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         saveCachedProfile(userProfile);
         setUser(userProfile);
+        hasConfirmedSessionRef.current = true;
+        setAuthEpoch(e => e + 1);
         return { data: { user: data.user, profile: userProfile }, error: null };
       }
     }
@@ -282,6 +298,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Realiza logout do Supabase
   const logout = async () => {
+    hasConfirmedSessionRef.current = false;
     saveCachedProfile(null);
     if (supabase) {
       await supabase.auth.signOut();
@@ -293,7 +310,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, signIn, signUp, logout, changeActiveRole, isLoading }}>
+    <AuthContext.Provider value={{ user, signIn, signUp, logout, changeActiveRole, isLoading, authEpoch }}>
       {children}
     </AuthContext.Provider>
   );

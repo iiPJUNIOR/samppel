@@ -1,6 +1,6 @@
 # Inventário e Mapa Geral de Modais do Sistema Samppel
 
-Este documento é a referência oficial e centralizada de **todos os 56 modais** do Portal Samppel (divididos entre **34 modais em componentes dedicados** e **22 modais inline nas páginas**).
+Este documento é a referência oficial e centralizada de **todos os 57 modais** do Portal Samppel (divididos entre **35 modais em componentes dedicados** e **22 modais inline nas páginas**).
 
 Use este mapa sempre que precisar localizar rapidamente onde um modal é renderizado, qual estado (`useState`) controla sua abertura, qual sua responsabilidade operacional e como está configurada sua rolagem vertical.
 
@@ -21,9 +21,9 @@ Todo modal do sistema deve respeitar as seguintes diretrizes visuais e de usabil
 
 | Categoria | Arquivos | Total de Modais | Status de Rolagem Vertical |
 | :--- | :--- | :---: | :---: |
-| **Componentes de Modais Dedicados** | `src/components/modals/*.tsx` + `src/components/OperatorAuthModal.tsx` | **34** | Padronizados (`maxHeight` + `overflowY: 'auto'` + `.modal-scroll`) |
+| **Componentes de Modais Dedicados** | `src/components/modals/*.tsx` + `src/components/OperatorAuthModal.tsx` | **35** | Padronizados (`maxHeight` + `overflowY: 'auto'` + `.modal-scroll`) |
 | **Modais Inline nas Páginas** | `src/app/**/page.tsx` + `src/app/monitoramento/InfoHint.tsx` | **22** | Padronizados (`maxHeight` + `overflowY: 'auto'` + `.modal-scroll`) |
-| **TOTAL NO SISTEMA** | **41 arquivos** | **56** | **100% Mapeados e Padronizados** |
+| **TOTAL NO SISTEMA** | **42 arquivos** | **57** | **100% Mapeados e Padronizados** |
 
 ---
 
@@ -67,6 +67,7 @@ Todos os modais abaixo (exceto `OperatorAuthModal`, que também é usado em `pro
 | **32** | [SyncModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/modals/SyncModal.tsx) | `isSyncModalOpen` | Sincronização Conta Azul | Exibe progresso em tempo real e resultado da importação de vendas por período ou número do PV. | MOD-15 | Padronizado (`90vh` + `overflowY: 'auto'`) |
 | **33** | [OperatorAuthModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/OperatorAuthModal.tsx) | `isOpAuthOpen` | Validação na Fábrica | Solicita seleção do operador e PIN numérico de 4–6 dígitos nos terminais compartilhados da fábrica. | MOD-01 / MOD-03 | Padronizado (`90vh` + `overflowY: 'auto'`) |
 | **56** | [TransformSacoModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/modals/TransformSacoModal.tsx) | `isTransformSacoModalOpen` (em `produtos/page.tsx`) | Transformar Saco em Sacola + Manuseio | Intercepta saída de produto Saco, vincula inteligentemente à Sacola correspondente, transfere o estoque (`SAIDA` Saco -> `ENTRADA` Sacola) e gera card na etapa `Ir para Manuseio`. | MOD-05 / MOD-11 | Padronizado (`90vh` + `overflowY: 'auto'` + `.modal-scroll`) |
+| **57** | [StagePrintModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/modals/StagePrintModal.tsx) | `printStageModalState` (em `pedidos/page.tsx`) | Imprimir Pedidos da Etapa / Revisão para Impressão (Folha A4) | Permite selecionar filtros completos (atrasados, pesquisa direta de tamanho sem dropdown, cliente, vendedora, liberação, frete, máquina, equipe, período e ordenação) e visualizar a folha A4 em formato lista antes de imprimir. | MOD-03 | Padronizado (`92vh` + `overflowY: 'auto'` + `.modal-scroll`) |
 
 ---
 

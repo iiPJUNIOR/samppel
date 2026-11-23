@@ -32,6 +32,7 @@ import { LocationCrudModal } from '@/components/modals/LocationCrudModal';
 import { ShortageModal } from '@/components/modals/ShortageModal';
 import { ExpeditionModal } from '@/components/modals/ExpeditionModal';
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal';
+import { StagePrintModal } from '@/components/modals/StagePrintModal';
 import {
   getOrders,
   getCustomers,
@@ -140,7 +141,8 @@ import {
   MapPin,
   Trash2,
   Layers,
-  Cpu
+  Cpu,
+  Printer
 } from 'lucide-react';
 
 // Auxiliar para mapear o nome da etapa (do banco de dados) para um status válido do order_items
@@ -581,7 +583,7 @@ const initShortagesMapFromCache = (): Map<string, OrderItemShortage[]> => {
 };
 
 export default function PedidosPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading, authEpoch } = useAuth();
   const isAdmin =
     !user ||
     user?.role === 'Administrador' ||
@@ -821,6 +823,13 @@ export default function PedidosPage() {
 
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
+
+  // Estado do Modal de Impressão de Lista por Etapa do Kanban
+  const [printStageModalState, setPrintStageModalState] = useState<{
+    stage: { id: string; name: string; color?: string; isVirtual?: boolean };
+    isVirtual: boolean;
+    kanbanFilteredItems: any[];
+  } | null>(null);
 
   const getContaAzulStatusStyle = (status: string) => {
     const norm = (status || '').toLowerCase().trim();
@@ -1831,6 +1840,20 @@ export default function PedidosPage() {
   const fetchAllData = async () => {
     setLoading(true);
     try {
+      if (supabase && typeof window !== 'undefined') {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          let activeSession = sessionData?.session;
+          if (!activeSession?.access_token) {
+            const { data: refreshed } = await supabase.auth.refreshSession().catch(() => ({ data: { session: null } }));
+            activeSession = refreshed?.session || null;
+          }
+          if (!activeSession?.access_token) {
+            return [];
+          }
+        } catch { }
+      }
+
       const tenantId = user?.tenant_id || 'd3b07384-d113-4ec8-a5c6-e91bc4ff99e0';
       const cacheKey = `${tenantId}:${user?.id || 'anon'}:${user?.role || ''}`;
       const needsStaticCatalogs = catalogsLoadedKeyRef.current !== cacheKey || stagesRef.current.length === 0;
@@ -1860,10 +1883,12 @@ export default function PedidosPage() {
           getFactoryLocations(tenantId)
         ]);
 
-        if (stagesRes.status === 'fulfilled') {
+        if (stagesRes.status === 'fulfilled' && !stagesRes.value.error) {
           resolvedStages = stagesRes.value.data || [];
           stagesRef.current = resolvedStages;
           setStages(resolvedStages);
+        } else if (stagesRes.status === 'fulfilled' && stagesRes.value.error) {
+          console.error('Erro ao carregar etapas do Kanban:', stagesRes.value.error);
         }
         if (machResult.status === 'fulfilled') {
           resolvedMachines = machResult.value.data || [];
@@ -1883,7 +1908,9 @@ export default function PedidosPage() {
         if (shippingTypesResult.status === 'fulfilled') setShippingTypes(shippingTypesResult.value.data || []);
         if (locationsResult.status === 'fulfilled') setFactoryLocations(locationsResult.value.data || []);
 
-        catalogsLoadedKeyRef.current = cacheKey;
+        if (resolvedStages.length > 0) {
+          catalogsLoadedKeyRef.current = cacheKey;
+        }
         fetchUserPermissions();
       }
 
@@ -2276,6 +2303,7 @@ export default function PedidosPage() {
   };
 
   useEffect(() => {
+    if (authLoading) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
       const onVisible = () => {
         if (document.visibilityState === 'visible') {
@@ -2287,7 +2315,7 @@ export default function PedidosPage() {
       return () => document.removeEventListener('visibilitychange', onVisible);
     }
     fetchAllData();
-  }, [user?.id, user?.role, user?.tenant_id]);
+  }, [authLoading, authEpoch, user?.id, user?.role, user?.tenant_id]);
 
   // Atualizar estoque do produto selecionado no formulário
   useEffect(() => {
@@ -6217,10 +6245,45 @@ export default function PedidosPage() {
                           {stage.name}
                         </span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
                         <span className={`badge ${isVirtual ? 'badge-danger' : 'badge-secondary'}`} style={{ fontSize: '0.65rem', padding: '1px 5px', fontWeight: 600 }}>
                           {headerBadgeCount}
                         </span>
+                        <button
+                          type="button"
+                          title={`Imprimir pedidos da etapa ${stage.name}`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPrintStageModalState({
+                              stage: { id: stage.id, name: stage.name, color: stage.color, isVirtual },
+                              isVirtual,
+                              kanbanFilteredItems: stageItems
+                            });
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                            padding: '2px 3px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            borderRadius: '4px',
+                            transition: 'color 0.15s ease, background-color 0.15s ease',
+                            lineHeight: 1
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = 'var(--primary)';
+                            e.currentTarget.style.backgroundColor = 'rgba(var(--primary-rgb), 0.1)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = 'var(--text-muted)';
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          <Printer size={12} />
+                        </button>
                         {/* Sort toggle button */}
                         {!isVirtual && (
                           <button
@@ -7915,6 +7978,90 @@ export default function PedidosPage() {
         targetStageId={pendingKanbanMove?.targetStageId}
         currentStageId={pendingKanbanMove?.item?.stage_id || stages[0]?.id}
       />
+
+      {printStageModalState && (() => {
+        const targetStage = printStageModalState.stage;
+        const targetIsVirtual = printStageModalState.isVirtual;
+        const origIdx = stages.findIndex(s => s.id === targetStage.id);
+        const allStageItemsForPrint = orderItems.filter((item) => {
+          if (isItemBoundToFirstItem(item)) return false;
+          const parentOrder = item.order || {};
+          const caStatusLower = (parentOrder.conta_azul_status || '').toLowerCase();
+          if (
+            caStatusLower === 'em andamento' ||
+            caStatusLower.includes('andamento') ||
+            caStatusLower.includes('recusad') ||
+            caStatusLower.includes('rejeitad')
+          ) {
+            return false;
+          }
+          if (isVendedor && user && !canUserViewOrderSeller(parentOrder.seller_name)) return false;
+          if (user?.role === 'Estoque') {
+            const st = stages.find(s => s.id === item.stage_id);
+            if (st?.name !== 'Estoque') return false;
+          }
+          if (user?.role === 'Expedição') {
+            const st = stages.find(s => s.id === item.stage_id);
+            if (!st || !['Em revisão', 'Expedição', 'Concluído', 'Atrasado'].includes(st.name)) return false;
+          }
+          if (targetIsVirtual) return checkIsDelayed(item, stages);
+          return item.stage_id === targetStage.id || (!item.stage_id && origIdx === 0);
+        });
+
+        const hasKanbanBarFilters = Boolean(
+          filterSearchOrder ||
+          filterCustomer ||
+          filterSeller ||
+          filterContaAzulStatus ||
+          filterPedidosRelease ||
+          filterShipping
+        );
+
+        const isHistTarget = !targetIsVirtual && isHistoricalTerminalStage(targetStage);
+        const histInfo = isHistTarget ? historicalPagination[targetStage.id] : null;
+
+        return (
+          <StagePrintModal
+            isOpen={true}
+            onClose={() => setPrintStageModalState(null)}
+            stage={targetStage}
+            allStageItems={allStageItemsForPrint}
+            kanbanFilteredItems={printStageModalState.kanbanFilteredItems}
+            hasActiveKanbanFilters={hasKanbanBarFilters}
+            kanbanActiveFilterValues={{
+              searchOrder: filterSearchOrder,
+              customer: filterCustomer,
+              seller: filterSeller,
+              contaAzulStatus: filterContaAzulStatus,
+              release: filterPedidosRelease,
+              shipping: filterShipping
+            }}
+            stages={stages}
+            orderItems={orderItems}
+            productionMachines={productionMachines}
+            handlingTeams={handlingTeams}
+            itemHandlingTeamsMap={itemHandlingTeamsMap}
+            hasOverdueInstallments={hasOverdueInstallments}
+            checkIsDelayed={checkIsDelayed}
+            calculateExpeditionDate={calculateExpeditionDate}
+            getExpeditionUrgency={getExpeditionUrgency}
+            getItemRealMeasure={getItemRealMeasure}
+            matchDimensions={matchDimensions}
+            extractOrderDetails={extractOrderDetails}
+            combineOrderNotes={combineOrderNotes}
+            getFreightBadgeStyle={getFreightBadgeStyle}
+            checkMatchShipping={checkMatchShipping}
+            capitalizeText={capitalizeText}
+            isItemBoundToFirstItem={isItemBoundToFirstItem}
+            isManualOrder={isManualOrder}
+            orderDeadlineConfigMap={orderDeadlineConfigMap}
+            orderRangeChoiceMap={orderRangeChoiceMap}
+            isBusinessDays={isBusinessDays}
+            user={user}
+            historicalStageInfo={histInfo ? { hasMore: histInfo.hasMore, totalCount: histInfo.totalCount } : null}
+          />
+        );
+      })()}
 
       {toastNotification && (
         <div
