@@ -824,9 +824,9 @@ export default function PedidosPage() {
   // Sort direction per kanban column: 'asc' | 'desc'
   const [columnSortDirs, setColumnSortDirs] = useState<Record<string, 'asc' | 'desc'>>({});
 
-  // Estado do Modal de Impressão de Lista por Etapa do Kanban
+  // Estado do Modal de Impressão de Lista por Etapa do Kanban (ou Global Todas as Etapas)
   const [printStageModalState, setPrintStageModalState] = useState<{
-    stage: { id: string; name: string; color?: string; isVirtual?: boolean };
+    stage: { id: string; name: string; color?: string; isVirtual?: boolean; isGlobal?: boolean };
     isVirtual: boolean;
     kanbanFilteredItems: any[];
   } | null>(null);
@@ -5755,6 +5755,41 @@ export default function PedidosPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Botão Impressão Global (Todas as Etapas) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrintStageModalState({
+                      stage: {
+                        id: '__ALL__',
+                        name: 'Todas as Etapas',
+                        color: '#2563eb',
+                        isVirtual: false,
+                        isGlobal: true
+                      },
+                      isVirtual: false,
+                      kanbanFilteredItems: filteredOrderItems
+                    });
+                  }}
+                  className="btn btn-secondary"
+                  style={{
+                    height: '32px',
+                    display: 'inline-flex',
+                    gap: '0.4rem',
+                    alignItems: 'center',
+                    padding: '0.35rem 0.85rem',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    borderRadius: 'var(--radius-md)'
+                  }}
+                  title="Imprimir lista geral de pedidos de todas as etapas com filtros"
+                >
+                  <Printer size={15} />
+                  <span>Imprimir</span>
+                </button>
               </div>
 
               {/* Direita: Segmented Control Modo de Exibição & Collapse */}
@@ -8004,6 +8039,7 @@ export default function PedidosPage() {
             const st = stages.find(s => s.id === item.stage_id);
             if (!st || !['Em revisão', 'Expedição', 'Concluído', 'Atrasado'].includes(st.name)) return false;
           }
+          if (targetStage.isGlobal) return true;
           if (targetIsVirtual) return checkIsDelayed(item, stages);
           return item.stage_id === targetStage.id || (!item.stage_id && origIdx === 0);
         });
@@ -8014,10 +8050,11 @@ export default function PedidosPage() {
           filterSeller ||
           filterContaAzulStatus ||
           filterPedidosRelease ||
+          filterStage ||
           filterShipping
         );
 
-        const isHistTarget = !targetIsVirtual && isHistoricalTerminalStage(targetStage);
+        const isHistTarget = !targetStage.isGlobal && !targetIsVirtual && isHistoricalTerminalStage(targetStage);
         const histInfo = isHistTarget ? historicalPagination[targetStage.id] : null;
 
         return (
@@ -8034,7 +8071,8 @@ export default function PedidosPage() {
               seller: filterSeller,
               contaAzulStatus: filterContaAzulStatus,
               release: filterPedidosRelease,
-              shipping: filterShipping
+              shipping: filterShipping,
+              stage: filterStage
             }}
             stages={stages}
             orderItems={orderItems}

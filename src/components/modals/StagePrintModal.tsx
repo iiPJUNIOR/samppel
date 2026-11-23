@@ -22,7 +22,7 @@ import {
 interface StagePrintModalProps {
   isOpen: boolean;
   onClose: () => void;
-  stage: { id: string; name: string; color?: string; isVirtual?: boolean } | null;
+  stage: { id: string; name: string; color?: string; isVirtual?: boolean; isGlobal?: boolean } | null;
   allStageItems: any[];
   kanbanFilteredItems: any[];
   hasActiveKanbanFilters: boolean;
@@ -33,6 +33,7 @@ interface StagePrintModalProps {
     contaAzulStatus?: string;
     release?: string;
     shipping?: string;
+    stage?: string;
   };
   stages: any[];
   orderItems: any[];
@@ -108,6 +109,7 @@ export function StagePrintModal({
   const [mounted, setMounted] = useState(false);
 
   // Filtros completos
+  const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
   const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>('all');
   const [onlyOverdueInstallments, setOnlyOverdueInstallments] = useState(false);
   const [sizeSearch, setSizeSearch] = useState('');
@@ -145,6 +147,7 @@ export function StagePrintModal({
   useEffect(() => {
     if (!isOpen || !stage) return;
     setStep('filters');
+    setSelectedStageIds([]);
     setUrgencyFilter(stage.isVirtual ? 'overdue' : 'all');
     setOnlyOverdueInstallments(false);
     setSizeSearch('');
@@ -249,11 +252,18 @@ export function StagePrintModal({
       const pvStr = String(item.friendly_id || parentOrder.pv_number || '').toUpperCase();
       const isOpEstoque = !pvStr.startsWith('PV-') && (Boolean(parentOrder.op_number || item.op_number) || pvStr.startsWith('OP-') || pvStr.startsWith('ESTOQUE'));
       const manual = isManualOrder(parentOrder);
+      const resolvedStageObj = stages.find((s: any) => s.id === item.stage_id) || stages[0] || null;
+      const resolvedStageId = resolvedStageObj?.id || item.stage_id || '';
+      const resolvedStageName = resolvedStageObj?.name || item.status || 'Pedidos';
+      const resolvedStageColor = resolvedStageObj?.color || '#3b82f6';
 
       return {
         item,
         parentOrder,
         orderId,
+        resolvedStageId,
+        stageName: resolvedStageName,
+        stageColor: resolvedStageColor,
         expDate: expRes?.expeditionDate ? new Date(expRes.expeditionDate.getTime()) : null,
         daysRemaining: expUrgency?.daysRemaining ?? null,
         isOverdue,
@@ -344,6 +354,11 @@ export function StagePrintModal({
 
     const list = enrichedItems.filter((row: any) => {
       const { item, parentOrder } = row;
+
+      // 0. Etapas selecionadas (quando aberto pelo botao global de Todas as Etapas)
+      if (stage?.isGlobal && selectedStageIds.length > 0 && !selectedStageIds.includes(row.resolvedStageId)) {
+        return false;
+      }
 
       // 1. Urgencia / Prazo
       if (urgencyFilter === 'overdue' && !row.isOverdue) return false;
@@ -523,6 +538,8 @@ export function StagePrintModal({
     });
   }, [
     enrichedItems,
+    stage?.isGlobal,
+    selectedStageIds,
     urgencyFilter,
     onlyOverdueInstallments,
     sizeSearch,
@@ -562,6 +579,12 @@ export function StagePrintModal({
 
   const activeFiltersSummary = useMemo(() => {
     const parts: string[] = [];
+    if (stage?.isGlobal && selectedStageIds.length > 0) {
+      const stNames = selectedStageIds
+        .map((id) => stages.find((s: any) => s.id === id)?.name)
+        .filter(Boolean);
+      if (stNames.length > 0) parts.push(`Etapas: ${stNames.join(', ')}`);
+    }
     if (urgencyFilter === 'overdue') parts.push('Somente Atrasados');
     else if (urgencyFilter === 'near') parts.push('Próx. Entrega (<= 10 dias)');
     else if (urgencyFilter === 'ontime') parts.push('Somente No Prazo');
@@ -616,6 +639,9 @@ export function StagePrintModal({
     }
     return parts;
   }, [
+    stage?.isGlobal,
+    selectedStageIds,
+    stages,
     urgencyFilter,
     onlyOverdueInstallments,
     sizeSearch,
@@ -638,6 +664,7 @@ export function StagePrintModal({
   ]);
 
   const clearAllFilters = () => {
+    setSelectedStageIds([]);
     setUrgencyFilter('all');
     setOnlyOverdueInstallments(false);
     setSizeSearch('');
@@ -667,6 +694,10 @@ export function StagePrintModal({
       setReleaseFilter(kanbanActiveFilterValues.release);
     }
     if (kanbanActiveFilterValues.shipping) setShippingFilter(kanbanActiveFilterValues.shipping);
+    if (stage?.isGlobal && kanbanActiveFilterValues.stage) {
+      const matched = stages.find((s: any) => s.name?.toLowerCase() === kanbanActiveFilterValues.stage?.toLowerCase());
+      if (matched) setSelectedStageIds([matched.id]);
+    }
   };
 
   const handleTriggerPrint = () => {
@@ -712,7 +743,7 @@ export function StagePrintModal({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '15px', fontWeight: 900, letterSpacing: '-0.02em', color: '#0f172a' }}>
-                SAMPPEL — LISTA DE PEDIDOS DA ETAPA
+                {stage.isGlobal ? 'SAMPPEL — LISTA GERAL DE PEDIDOS (TODAS AS ETAPAS)' : 'SAMPPEL — LISTA DE PEDIDOS DA ETAPA'}
               </span>
               <span
                 style={{
@@ -864,6 +895,24 @@ export function StagePrintModal({
                     )}
                   </td>
                   <td style={{ padding: '5px 6px', verticalAlign: 'top', borderRight: showOpsAndMachine || showFreightAndSeller ? '1px solid #e2e8f0' : 'none' }}>
+                    {stage.isGlobal && (
+                      <div
+                        style={{
+                          fontSize: '8px',
+                          fontWeight: 800,
+                          color: '#0f172a',
+                          backgroundColor: '#f1f5f9',
+                          border: '1px solid #94a3b8',
+                          borderRadius: '2px',
+                          padding: '1px 4px',
+                          display: 'inline-block',
+                          marginBottom: '2px',
+                          textTransform: 'uppercase'
+                        }}
+                      >
+                        {row.stageName}
+                      </div>
+                    )}
                     <div style={{ fontWeight: row.isOverdue ? 800 : 700, color: row.isOverdue ? '#b91c1c' : '#0f172a' }}>
                       {expDateStr}
                     </div>
@@ -1133,6 +1182,104 @@ export function StagePrintModal({
                   <span>
                     Esta coluna histórica carrega em lotes de 30 itens ({allStageItems.length} carregados de {historicalStageInfo.totalCount ?? allStageItems.length}). Para incluir pedidos ainda mais antigos, role a coluna no Kanban antes de imprimir.
                   </span>
+                </div>
+              )}
+
+              {/* BLOCO 0: Filtro Multi-Etapas (exibido apenas na impressao geral do topo) */}
+              {stage.isGlobal && (
+                <div
+                  style={{
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '10px',
+                    padding: '0.85rem 1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.55rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.74rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+                      0. Etapas Incluídas na Impressão
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedStageIds([])}
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          border: selectedStageIds.length === 0 ? '1px solid var(--primary)' : '1px solid var(--border)',
+                          backgroundColor: selectedStageIds.length === 0 ? 'rgba(var(--primary-rgb), 0.14)' : 'var(--surface)',
+                          color: selectedStageIds.length === 0 ? 'var(--primary)' : 'var(--text-muted)',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Todas as Etapas ({enrichedItems.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const activeIds = stages
+                            .filter((s: any) => {
+                              const n = (s.name || '').trim().toLowerCase();
+                              return !n.includes('conclu') && !n.includes('cancel');
+                            })
+                            .map((s: any) => s.id);
+                          setSelectedStageIds(activeIds);
+                        }}
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border)',
+                          backgroundColor: 'var(--surface)',
+                          color: 'var(--text)',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Somente Etapas Ativas
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    {stages.map((s: any) => {
+                      const countInStage = enrichedItems.filter((r: any) => r.resolvedStageId === s.id).length;
+                      if (countInStage === 0) return null;
+                      const isChecked = selectedStageIds.includes(s.id);
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedStageIds((prev) =>
+                              prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+                            );
+                          }}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            fontSize: '0.74rem',
+                            padding: '0.3rem 0.62rem',
+                            borderRadius: '7px',
+                            border: isChecked ? `1.5px solid ${s.color || 'var(--primary)'}` : '1px solid var(--border)',
+                            backgroundColor: isChecked ? `${s.color || '#2563eb'}18` : 'var(--surface)',
+                            color: 'var(--text)',
+                            fontWeight: isChecked ? 700 : 500,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: s.color || '#3b82f6', flexShrink: 0 }} />
+                          <span>{s.name} ({countInStage})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
