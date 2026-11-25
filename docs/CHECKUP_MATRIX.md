@@ -18,8 +18,8 @@ Este documento é o registro vivo de saúde, dependências e integridade lógica
 | ID | Módulo / Funcionalidade | Arquivos Principais | Última Alteração | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **MOD-01** | Autenticação, Usuários, Perfis e Blindagem de PIN de Fábrica | `src/app/page.tsx`, `AuthContext.tsx`, `profiles.ts`, `AppGuard.tsx`, `Sidebar.tsx`, `OperatorAuthModal.tsx`, `redefinir-senha/page.tsx`, `operador-perfil/page.tsx`, `api/auth/clear-force-password/route.ts`, `api/operators/*` | 2026-11-23 | OK |
-| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `Skeleton.tsx`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-14 | OK |
-| **MOD-03** | Pedidos: Kanban, Scroll Infinito, Skeleton UI e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`, `StageInfiniteScrollSentinel`), `SiblingMoveModal.tsx`, `StagePrintModal.tsx`, `Skeleton.tsx` (`KanbanBoardSkeleton`, `OrdersTableSkeleton`), `src/services/deadline_service.ts`, `src/app/globals.css` | 2026-11-23 | OK |
+| **MOD-02** | Pedidos: Criação, Edição e Itens | `src/app/pedidos/page.tsx`, `orders.ts`, `DetailModal.tsx`, `Skeleton.tsx`, `src/components/modals/*`, `docs/MODALS_INVENTORY.md` | 2026-11-23 | OK |
+| **MOD-03** | Pedidos: Kanban, Scroll Infinito, Skeleton UI e Transição de Etapas | `src/app/pedidos/page.tsx` (`moveOrderItemToStage`, `StageInfiniteScrollSentinel`), `SiblingMoveModal.tsx`, `StagePrintModal.tsx`, `Skeleton.tsx` (`KanbanBoardSkeleton`, `OrdersTableSkeleton`), `src/services/deadline_service.ts`, `src/app/globals.css` | 2026-11-25 | OK |
 | **MOD-04** | Pedidos: Alerta de Produção & Abatimento | `ProductionAlertModal.tsx`, `pedidos/page.tsx` | 2026-11-05 | OK |
 | **MOD-05** | Pedidos: Equipes de Manuseio | `HandlingTeamModal.tsx`, `orders.ts` | 2026-11-12 | OK |
 | **MOD-06** | Pedidos: Expedição, Sobras/Faltas e Frete | `ExpeditionTransitionModal.tsx`, `AdjustmentModal.tsx`, `orders.ts` | 2026-11-12 | OK |
@@ -56,13 +56,14 @@ Legenda de Status:
 
 ### MOD-02: Pedidos - Criação, Edição e Itens
 * **Responsabilidade:** Formulário de novos pedidos, cadastro de itens avulsos, tiragem, data de entrega, observações.
-* **Arquivos-Chave:** [pedidos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/pedidos/page.tsx), [orders.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/orders.ts).
+* **Arquivos-Chave:** [pedidos/page.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/app/pedidos/page.tsx), [DetailModal.tsx](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/components/modals/DetailModal.tsx), [orders.ts](file:///c:/Users/Paulo%20Junior/IDE%20Google/samppel/src/services/supabase_modules/orders.ts).
 * **Onde se conecta:** Tabelas `orders`, `order_items`, `customers`, `products`.
 * **Módulos que Dependem Dele:** MOD-03 (Kanban), MOD-09 (Financeiro), MOD-13 (Relatórios).
 * **Critérios de Validação:**
   * Inserção com `tenant_id` correto.
   * Geração do número de PV e OP.
   * Associação íntegra de `customer_id` e `product_id`.
+  * Trava anti-duplo-clique (`isSavingOrderRef` + `isSavingOrder`) bloqueando envios paralelos enquanto o pedido/itens estão sendo salvos.
 
 ### MOD-03: Pedidos - Kanban, Scroll Infinito, Skeleton UI e Transição de Etapas
 * **Responsabilidade:** Renderização das colunas do Kanban, movimentação de cards (`moveOrderItemToStage`), Skeleton UI dedicado (`KanbanBoardSkeleton`, `OrdersTableSkeleton`, `KanbanCardMiniSkeleton`, `OrdersListInlineMoreSkeleton`), paginação automática por Scroll Infinito (`IntersectionObserver`) nas colunas históricas (`Concluído`, `CANCELADOS`) e modo Lista, busca automática sob demanda no servidor para PVs/clientes antigos, ordenação e filtros.
@@ -223,3 +224,5 @@ Legenda de Status:
 | **2026-11-23** | MOD-03 | APROVADO COM ÊXITO | Implementação do botão de Impressão no cabeçalho de todas as etapas do Kanban e do modal `StagePrintModal.tsx` com filtros completos em tempo real (atrasados/prazo, barra de pesquisa direta por tamanho/medida sem dropdown, busca geral PV/OP/produto/clichê, cliente, vendedora, liberação financeira, status Conta Azul, frete, localização física, setor, máquina, equipe de manuseio, tipo/vínculo, faixa de data de expedição, ordenação, seleção individual e opções de colunas) + tela de Revisão para Impressão em formato de lista A4 (Retrato/Paisagem) e portal `@media print` dedicado em `globals.css`, com ponto de restauração prévio `RP-15` (`backup_20261123_pre_kanban_stage_print_modal/`). |
 | **2026-11-23** | MOD-01, MOD-03 | APROVADO COM ÊXITO | Blindagem de sincronização de sessão Supabase entre `AuthContext.tsx` (`authEpoch` e detecção de sessão confirmada) e `pedidos/page.tsx` (aguarda `authLoading`, valida/renova sessão JWT antes de consultar o banco e só fixa cache `catalogsLoadedKeyRef` quando `stages` carregar com sucesso, evitando retorno vazio silencioso por RLS `[]`) + limpeza do cache corrompido de `.next/dev` (2,36 GB), com ponto de restauração prévio `RP-16` (`backup_20261123_pre_local_auth_sync_fix/`). |
 | **2026-11-23** | MOD-03 | APROVADO COM ÊXITO | Adição do botão global `Imprimir` na barra superior de Pedidos (`pedidos/page.tsx`) para impressão multi-etapas (`Todas as Etapas` ou seleção combinada de etapas no `StagePrintModal.tsx` com identificação da etapa em cada linha da folha A4), com ponto de restauração prévio `RP-17` (`backup_20261123_pre_kanban_topbar_global_print/`). |
+| **2026-11-23** | MOD-02 | APROVADO COM ÊXITO | Implementação da trava síncrona e visual anti-duplo-clique (`isSavingOrderRef` + `isSavingOrder`) em `pedidos/page.tsx` (`handleSubmit`) e `DetailModal.tsx` (desabilitação dos botões de salvar e fechar + spinner durante o envio) para evitar criação múltipla de pedidos manuais e OPs por cliques repetidos, com ponto de restauração prévio `RP-18` (`backup_20261123_pre_order_submit_double_click_lock/`). |
+| **2026-11-25** | MOD-03 | APROVADO COM ÊXITO | Correção do loop de reabertura repetida do `SiblingMoveModal` ao mover múltiplos itens em conjunto (`pedidos/page.tsx`): uso de `isBatchSiblingMoveRef` em `handleConfirmSiblingMoveAll` e `handleConfirmInsufficientStockMove` para evitar que `resetAllBypasses()` no `finally` do 1º item apague `siblingMoveBypass` e demais bypasses antes de mover os itens irmãos selecionados, com ponto de restauração prévio `RP-19` (`backup_20261125_pre_sibling_move_batch_bypass_fix/`). |

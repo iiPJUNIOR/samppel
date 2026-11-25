@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { 
   X, Search, AlertTriangle, Users, Plus, Trash2, ChevronDown, 
   Info, Package, Truck, MapPin, FileText, Calendar, DollarSign, 
-  CreditCard, Check, AlertCircle, Save, CheckCircle2, RefreshCw
+  CreditCard, Check, AlertCircle, Save, CheckCircle2, RefreshCw, Loader2
 } from 'lucide-react';
 import { searchCustomers } from '@/services/supabase';
 import { syncAllCustomersFromContaAzul } from '@/services/customer_sync';
@@ -57,6 +57,7 @@ export function DetailModal(props: any) {
     isManualOrder,
     isModalOpen,
     isReadOnlyForForm,
+    isSavingOrder = false,
     modalType,
     productionMachines,
     productionSectors,
@@ -371,8 +372,18 @@ export function DetailModal(props: any) {
                 </div>
               </div>
               <button
-                onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--text-muted)', lineHeight: 1 }}
+                type="button"
+                disabled={isSavingOrder}
+                onClick={() => { if (!isSavingOrder) setIsModalOpen(false); }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: isSavingOrder ? 'not-allowed' : 'pointer',
+                  fontSize: '1.5rem',
+                  color: 'var(--text-muted)',
+                  lineHeight: 1,
+                  opacity: isSavingOrder ? 0.5 : 1
+                }}
               >
                 &times;
               </button>
@@ -1392,12 +1403,34 @@ export function DetailModal(props: any) {
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="btn btn-secondary">
+                  <button
+                    type="button"
+                    disabled={isSavingOrder}
+                    onClick={() => { if (!isSavingOrder) setIsModalOpen(false); }}
+                    className="btn btn-secondary"
+                    style={{ opacity: isSavingOrder ? 0.55 : 1, cursor: isSavingOrder ? 'not-allowed' : 'pointer' }}
+                  >
                     Fechar
                   </button>
                   {(!isReadOnlyForForm('customer') || !isReadOnlyForForm('status') || !isReadOnlyForForm('machine_id')) && (
-                    <button type="submit" className="btn btn-primary">
-                      {modalType === 'create-op' ? 'Gerar OP' : modalType === 'create' ? 'Salvar Pedido' : 'Salvar Alterações'}
+                    <button
+                      type="submit"
+                      disabled={isSavingOrder}
+                      className="btn btn-primary"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        opacity: isSavingOrder ? 0.75 : 1,
+                        cursor: isSavingOrder ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {isSavingOrder && <Loader2 size={15} className="spinner" />}
+                      <span>
+                        {isSavingOrder
+                          ? (modalType === 'create-op' ? 'Gerando OP...' : modalType === 'create' ? 'Salvando Pedido...' : 'Salvando...')
+                          : (modalType === 'create-op' ? 'Gerar OP' : modalType === 'create' ? 'Salvar Pedido' : 'Salvar Alterações')}
+                      </span>
                     </button>
                   )}
                 </div>

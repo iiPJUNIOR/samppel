@@ -853,6 +853,8 @@ export default function PedidosPage() {
 
   // Estados do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const isSavingOrderRef = useRef(false);
   const [modalType, setModalType] = useState<'create' | 'edit' | 'create-op'>('create');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [syncingSingleOrder, setSyncingSingleOrder] = useState(false);
@@ -1000,11 +1002,19 @@ export default function PedidosPage() {
     setIsInsufficientStockModalOpen(false);
     setInsufficientStockData(null);
 
-    insufficientStockMoveBypass.current = true;
-    siblingMoveBypass.current = true;
+    const savedOpId = currentOperator.current?.id;
+    const savedOpName = currentOperator.current?.name;
 
-    for (const itm of itemsToMove) {
-      await moveOrderItemToStage(itm, siblingMoveTargetStageId);
+    isBatchSiblingMoveRef.current = true;
+    try {
+      for (const itm of itemsToMove) {
+        insufficientStockMoveBypass.current = true;
+        siblingMoveBypass.current = true;
+        await moveOrderItemToStage(itm, siblingMoveTargetStageId, savedOpId, savedOpName);
+      }
+    } finally {
+      isBatchSiblingMoveRef.current = false;
+      resetAllBypasses();
     }
     setSiblingMoveItem(null);
     setSiblingMoveTargetStageId('');
@@ -1028,6 +1038,7 @@ export default function PedidosPage() {
   const [siblingMoveList, setSiblingMoveList] = useState<any[]>([]);
   const [siblingMoveSelectedIds, setSiblingMoveSelectedIds] = useState<string[]>([]);
   const siblingMoveBypass = useRef(false);
+  const isBatchSiblingMoveRef = useRef(false);
 
   const handleConfirmSiblingMoveAll = async (moveSiblings: boolean) => {
     if (!siblingMoveItem || !siblingMoveTargetStageId) return;
@@ -1050,10 +1061,19 @@ export default function PedidosPage() {
     setSiblingMoveList([]);
     setSiblingMoveSelectedIds([]);
 
-    siblingMoveBypass.current = true;
-    insufficientStockMoveBypass.current = true; // Bypass stock check inside moveOrderItemToStage since we already checked it
-    for (const itm of itemsToMove) {
-      await moveOrderItemToStage(itm, targetStageId);
+    const savedOpId = currentOperator.current?.id;
+    const savedOpName = currentOperator.current?.name;
+
+    isBatchSiblingMoveRef.current = true;
+    try {
+      for (const itm of itemsToMove) {
+        siblingMoveBypass.current = true;
+        insufficientStockMoveBypass.current = true; // Bypass stock check inside moveOrderItemToStage since we already checked it
+        await moveOrderItemToStage(itm, targetStageId, savedOpId, savedOpName);
+      }
+    } finally {
+      isBatchSiblingMoveRef.current = false;
+      resetAllBypasses();
     }
   };
 
@@ -3020,7 +3040,9 @@ export default function PedidosPage() {
     } finally {
       setSelectedHandlingTeamId('');
       setLoading(false);
-      resetAllBypasses();
+      if (!isBatchSiblingMoveRef.current) {
+        resetAllBypasses();
+      }
     }
   };
 
@@ -4805,7 +4827,12 @@ export default function PedidosPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if ((modalType === 'create' || modalType === 'create-op')) {
+    if (isSavingOrderRef.current) return;
+    isSavingOrderRef.current = true;
+    setIsSavingOrder(true);
+
+    try {
+      if ((modalType === 'create' || modalType === 'create-op')) {
       const isMulti = typeof formItems !== 'undefined' && formItems && formItems.length > 0;
       const productNameOrArt = (isMulti && formItems[0].artName) ? formItems[0].artName.trim() : formArtName.trim();
       if (!productNameOrArt) {
@@ -5000,6 +5027,13 @@ export default function PedidosPage() {
           fetchAllData();
         }
       }
+    }
+    } catch (err: any) {
+      console.error('Erro inesperado ao salvar pedido:', err);
+      alert('Erro inesperado ao salvar pedido: ' + (err?.message || 'tente novamente.'));
+    } finally {
+      isSavingOrderRef.current = false;
+      setIsSavingOrder(false);
     }
   };
 
@@ -7928,7 +7962,7 @@ export default function PedidosPage() {
       {isAdjustmentModalOpen && <AdjustmentModal {...{ adjustmentAction, adjustmentItem, adjustmentNotes, handleAdjustmentSubmit, loading, producedQuantity, resetAllBypasses, setAdjustmentAction, setAdjustmentNotes, setIsAdjustmentModalOpen, setProducedQuantity }} />}
 
       {/* MODAL DE CRIAÇÃO E EDIÇÃO DE PEDIDOS */}
-      {isModalOpen && <DetailModal {...{ formItems, setFormItems, CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCliche, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCliche, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
+      {isModalOpen && <DetailModal {...{ formItems, setFormItems, CheckCircle2, canUserDeleteOrder, customers, factoryLocations, formArtName, formCliche, formCustomer, formEmbalagem, formFirstPaymentDate, formFormaPag, formFreight, formFreteInfo, formHandlingAllocations, formInitialDestination, formInstallmentsPaid, formInstallmentsTotal, formInternalNotes, formMachineId, formMeasure, formMeioPag, formNotes, formOpNumber, formOverShortQuantity, formPhysicalLocation, formPrazo, formPrintRun, formProductionStartDate, formPvNumber, formSector, formSelectedProductStock, formSeller, formShippingType, formStageId, getItemRealMeasure, handleOpenLocationCrudModal, handleRequestDeleteManualOrder, handleSubmit, handlingTeams, hideMonetaryValues, isAdmin, isManualOrder, isModalOpen, isReadOnlyForForm, isSavingOrder, modalType, productionMachines, productionSectors, products, selectedItem, selectedOrder, setFormArtName, setFormCliche, setFormCustomer, setFormEmbalagem, setFormFirstPaymentDate, setFormFormaPag, setFormFreight, setFormFreteInfo, setFormHandlingAllocations, setFormHandlingTeamId, setFormInitialDestination, setFormInstallmentsPaid, setFormInstallmentsTotal, setFormInternalNotes, setFormMachineId, setFormMeasure, setFormMeioPag, setFormNotes, setFormOpNumber, setFormOverShortQuantity, setFormPhysicalLocation, setFormPrazo, setFormPrintRun, setFormProduct, setFormProductionStartDate, setFormPvNumber, setFormSector, setFormSelectedProductStock, setFormSeller, setFormShippingType, setFormStageId, setFormStatus, setIsMachineCrudModalOpen, setIsModalOpen, setIsSectorCrudModalOpen, stages, user }} />}
 
       {/* ========================================
           MODAL DE AUTORIZAÇÃO DE RETROCESSO
